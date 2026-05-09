@@ -37,8 +37,8 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 
 ## Trust And Explainability
 
-- [ ] Confidence labels on every cleanup action: Safe, Medium, Risky, Manual review.
-- [ ] "Why this suggestion?" panel explaining evidence, retained copy, and staged target.
+- [x] Confidence labels on every cleanup action: Safe, Medium, Risky, Manual review.
+- [x] "Why this suggestion?" panel explaining evidence, retained copy, and staged target.
 - [ ] Audio/video metadata summaries when metadata extraction exists: duration, bitrate, average episode length.
 
 ## Notes

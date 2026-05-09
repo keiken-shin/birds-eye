@@ -58,9 +58,11 @@ import "./styles.css";
 type StagedAction = {
   id: string;
   label: string;
-  confidence: "Safe" | "Medium" | "Manual review";
+  confidence: "Safe" | "Medium" | "Risky" | "Manual review";
   bytes: number;
   reason: string;
+  suggestedAction: string;
+  evidence: string[];
 };
 
 type MoveSuggestion = {
@@ -698,11 +700,18 @@ function App() {
               <ScrollableRows compact>
                 {stagedActions.map((action) => (
                   <div className="staged-row" key={action.id}>
-                    <div>
+                    <div className="staged-main">
                       <strong>{action.label}</strong>
                       <span>{action.reason}</span>
+                      <div className="why-panel">
+                        <small>Why this suggestion?</small>
+                        {action.evidence.map((item) => (
+                          <span key={item}>{item}</span>
+                        ))}
+                        <strong>{action.suggestedAction}</strong>
+                      </div>
                     </div>
-                    <small>{action.confidence}</small>
+                    <small className={`confidence-pill ${confidenceClass(action.confidence)}`}>{action.confidence}</small>
                     <strong>{formatBytes(action.bytes)}</strong>
                   </div>
                 ))}
@@ -793,6 +802,14 @@ function App() {
           reason: confidenceScore >= 1
             ? `Group ${candidate.id ?? formatBytes(candidate.size)} has matching full-file hashes. This is staged only.`
             : `Group ${candidate.id ?? formatBytes(candidate.size)} needs manual review before cleanup.`,
+          suggestedAction: confidenceScore >= 1
+            ? "Review copies, keep one, then commit duplicate cleanup when recycle-bin support is enabled."
+            : "Inspect matching candidates before choosing which copy should stay.",
+          evidence: [
+            `${formatCount(candidate.files)} files share the same ${formatBytes(candidate.size)} size.`,
+            confidenceScore >= 1 ? "Full-file hashes match across this group." : "This group has not reached exact-hash confidence.",
+            `${formatBytes(candidate.reclaimableBytes)} is potentially reclaimable after keeping one copy.`,
+          ],
         },
       ];
     });
@@ -810,6 +827,12 @@ function App() {
           confidence: "Manual review",
           bytes: suggestion.bytes,
           reason: `${formatCount(suggestion.folderCount)} folders contain ${categories[suggestion.category].label.toLowerCase()}. Suggested destination: ${suggestion.destination}.`,
+          suggestedAction: `Stage a move preview into ${suggestion.destination}; no files move until commit exists.`,
+          evidence: [
+            `${formatBytes(suggestion.bytes)} of ${categories[suggestion.category].label.toLowerCase()} are scattered across the scan.`,
+            `${formatCount(suggestion.folderCount)} folders contain this media type.`,
+            "Date-based grouping is still pending EXIF or timestamp extraction.",
+          ],
         },
       ];
     });
@@ -952,6 +975,13 @@ function mediaKindFromCategory(category: CategoryKey) {
   if (category === "installers") return "installer";
   if (category === "models") return "model";
   return category === "other" ? "other" : category;
+}
+
+function confidenceClass(confidence: StagedAction["confidence"]) {
+  if (confidence === "Safe") return "safe";
+  if (confidence === "Medium") return "medium";
+  if (confidence === "Risky") return "risky";
+  return "manual";
 }
 
 function DuplicateOverlapGraph({ overlaps }: { overlaps: DuplicateOverlap[] }) {

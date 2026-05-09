@@ -856,12 +856,13 @@ h2 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 120px 120px;
   gap: 12px;
-  align-items: center;
-  min-height: 54px;
+  align-items: start;
+  min-height: 72px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 10px 0;
 }
 
-.staged-row div {
+.staged-main {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -883,6 +884,66 @@ h2 {
 .staged-row > strong,
 .staged-row small {
   text-align: right;
+}
+
+.why-panel {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid rgba(71, 215, 198, 0.48);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.why-panel small {
+  color: #dce6f5;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.why-panel span,
+.why-panel strong {
+  color: #96a1b6;
+  font-size: 12px;
+  white-space: normal;
+}
+
+.why-panel strong {
+  color: #ffffff;
+}
+
+.confidence-pill {
+  justify-self: end;
+  min-width: 92px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 5px 8px;
+  text-align: center;
+}
+
+.confidence-pill.safe {
+  background: rgba(74, 222, 128, 0.14);
+  color: #86efac;
+}
+
+.confidence-pill.medium {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fde68a;
+}
+
+.confidence-pill.risky {
+  background: rgba(251, 113, 133, 0.16);
+  color: #fda4af;
+}
+
+.confidence-pill.manual {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
 }
 
 @media (max-width: 1080px) {
