@@ -33,19 +33,11 @@ button {
 }
 
 .app-shell {
-  display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
   min-height: 100vh;
   background:
     radial-gradient(circle at 15% 20%, rgba(0, 212, 255, 0.16), transparent 28rem),
     radial-gradient(circle at 78% 2%, rgba(236, 72, 153, 0.12), transparent 24rem),
     #090b10;
-}
-
-.sidebar {
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(9, 11, 16, 0.82);
-  padding: 24px 18px;
 }
 
 .brand {
@@ -65,32 +57,8 @@ button {
   box-shadow: 0 0 26px rgba(14, 211, 255, 0.24);
 }
 
-.sidebar nav {
-  display: grid;
-  gap: 6px;
-  margin-top: 32px;
-}
-
-.sidebar button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 42px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: #96a1b6;
-  cursor: pointer;
-  padding: 0 12px;
-  text-align: left;
-  text-decoration: none;
-}
-
-.sidebar button.active,
-.sidebar button:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #ffffff;
+.inline-brand {
+  margin-bottom: 14px;
 }
 
 .workspace {
@@ -734,16 +702,6 @@ h2 {
   .analysis-layout,
   .detail-grid {
     grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 980px) {
-  .app-shell {
-    grid-template-columns: 1fr;
-  }
-
-  .sidebar {
-    display: none;
   }
 }
 

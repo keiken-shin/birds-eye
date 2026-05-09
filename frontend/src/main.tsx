@@ -1,20 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  Activity,
   ChevronLeft,
   CopyCheck,
   Database,
   Eye,
   ExternalLink,
   FolderOpen,
-  FolderSearch,
   Pause,
   Play,
-  Radar,
   RotateCw,
   Search,
-  Settings,
   Square,
   Trash2,
   Undo2,
@@ -65,8 +61,6 @@ type StagedAction = {
   reason: string;
 };
 
-type AppView = "dashboard" | "scan" | "treemap" | "data" | "settings";
-
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -86,7 +80,6 @@ function App() {
   const [selectedDuplicateGroup, setSelectedDuplicateGroup] = useState<number | null>(null);
   const [savedIndexes, setSavedIndexes] = useState<NativeIndexEntry[]>([]);
   const [stagedActions, setStagedActions] = useState<StagedAction[]>([]);
-  const [activeView, setActiveView] = useState<AppView>("dashboard");
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
 
@@ -354,23 +347,13 @@ function App() {
 
   return (
     <main className="app-shell">
-      <aside className="sidebar" aria-label="Primary navigation">
-        <div className="brand">
-          <img src={logoUrl} alt="" />
-          <span>Birds Eye</span>
-        </div>
-        <nav>
-          <NavButton active={activeView === "dashboard"} icon={<Activity size={18} />} label="Dashboard" onClick={() => setActiveView("dashboard")} />
-          <NavButton active={activeView === "scan"} icon={<Radar size={18} />} label="Scan Manager" onClick={() => setActiveView("scan")} />
-          <NavButton active={activeView === "treemap"} icon={<FolderSearch size={18} />} label="Treemap" onClick={() => setActiveView("treemap")} />
-          <NavButton active={activeView === "data"} icon={<Database size={18} />} label="Index" onClick={() => setActiveView("data")} />
-          <NavButton active={activeView === "settings"} icon={<Settings size={18} />} label="Settings" onClick={() => setActiveView("settings")} />
-        </nav>
-      </aside>
-
       <section className="workspace">
         <header className="topbar" id="dashboard">
           <div>
+            <div className="brand inline-brand">
+              <img src={logoUrl} alt="" />
+              <span>Birds Eye</span>
+            </div>
             <p className="eyebrow">Offline storage intelligence</p>
             <h1>Understand where your disk space went.</h1>
           </div>
@@ -408,7 +391,6 @@ function App() {
           </div>
         </header>
 
-        {(activeView === "dashboard" || activeView === "scan") && (
         <section className="scan-strip" id="scan" aria-label="Scan progress">
           <div>
             <span>{scan.rootName}</span>
@@ -419,9 +401,7 @@ function App() {
           </div>
           <small>{runtimeMessage} - {scan.currentPath}</small>
         </section>
-        )}
 
-        {(activeView === "dashboard" || activeView === "scan") && (
         <section className="metric-grid" aria-label="Scan metrics">
           {metrics.map((metric) => (
             <motion.article
@@ -436,9 +416,7 @@ function App() {
             </motion.article>
           ))}
         </section>
-        )}
 
-        {(activeView === "dashboard" || activeView === "treemap") && (
         <section className="filter-bar" aria-label="Category filters">
           <button className={filter === "all" ? "active" : ""} type="button" onClick={() => setFilter("all")}>
             All
@@ -455,9 +433,7 @@ function App() {
             </button>
           ))}
         </section>
-        )}
 
-        {(activeView === "dashboard" || activeView === "treemap") && (
         <section className="analysis-layout" id="treemap">
           <div className="treemap-panel">
             <div className="panel-header">
@@ -476,7 +452,6 @@ function App() {
             <Treemap folders={filteredFolders} onSelect={(folder) => setFocusedFolder(folder.path)} />
           </div>
 
-          {activeView === "dashboard" && (
           <aside className="recommendations">
             <h2>Cleanup Intelligence</h2>
             <Recommendation text={makeDuplicateHint(scan)} />
@@ -484,11 +459,8 @@ function App() {
             <Recommendation text={makeCategoryHint(scan, "archives", "archive payloads")} />
             <Recommendation text={makeCategoryHint(scan, "videos", "video library")} />
           </aside>
-          )}
         </section>
-        )}
 
-        {activeView === "scan" && (
         <section className="folder-table">
           <div className="panel-header">
             <h2>Scan Manager</h2>
@@ -515,10 +487,7 @@ function App() {
             )}
           </div>
         </section>
-        )}
 
-        {activeView === "data" && (
-        <>
         <section className="folder-table" id="data">
           <div className="panel-header">
             <h2>Largest Folders</h2>
@@ -747,17 +716,14 @@ function App() {
             </>
           )}
         </section>
-        </>
-        )}
 
-        {activeView === "settings" && (
-        <section className="folder-table" id="settings">
+        <section className="folder-table" id="index-library">
           <div className="panel-header">
-            <h2>Saved Indexes</h2>
-            <span><Database size={14} /> {nativeRuntime ? `${formatCount(savedIndexes.length)} local` : "Native only"}</span>
+            <h2>Index Library</h2>
+            <span><Database size={14} /> {nativeRuntime ? `${formatCount(savedIndexes.length)} local indexes` : "Desktop app only"}</span>
           </div>
           {!nativeRuntime ? (
-            <div className="empty-state compact">Saved indexes are available in the desktop app.</div>
+            <div className="empty-state compact">Local indexes are available in the desktop app.</div>
           ) : savedIndexes.length === 0 ? (
             <div className="empty-state compact">Scanned folders will appear here for revisiting, rescanning, or removing their local index.</div>
           ) : (
@@ -782,7 +748,6 @@ function App() {
             </ScrollableRows>
           )}
         </section>
-        )}
       </section>
     </main>
   );
@@ -859,7 +824,6 @@ function App() {
     }));
     setCurrentIndexPath(entry.index_path);
     setRuntimeMessage("Saved index loaded");
-    window.location.hash = "dashboard";
   }
 
   async function rescanSavedIndex(entry: NativeIndexEntry) {
@@ -875,7 +839,6 @@ function App() {
       startedAt: performance.now(),
       currentPath: entry.root_path,
     });
-    window.location.hash = "scan";
   }
 
   async function removeSavedIndex(entry: NativeIndexEntry) {
@@ -961,15 +924,6 @@ function mediaKindFromCategory(category: CategoryKey) {
   if (category === "installers") return "installer";
   if (category === "models") return "model";
   return category === "other" ? "other" : category;
-}
-
-function NavButton({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
-  return (
-    <button className={active ? "active" : ""} type="button" onClick={onClick}>
-      {icon}
-      <span>{label}</span>
-    </button>
-  );
 }
 
 function IconButton({
