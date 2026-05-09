@@ -1,7 +1,8 @@
 use birds_eye::native::api::{
+    index_metadata,
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
     search_files as search_index_files, DuplicateFileSummaryDto, DuplicateGroupFilesRequest,
-    FileSearchResultDto, IndexOverviewDto, IndexQueryRequest, ScanToIndexRequest,
+    FileSearchResultDto, IndexMetadataDto, IndexOverviewDto, IndexQueryRequest, ScanToIndexRequest,
     ScanToIndexResponse, SearchFilesRequest,
 };
 use birds_eye::native::{
@@ -39,6 +40,45 @@ fn duplicate_group_files(
     request: DuplicateGroupFilesRequest,
 ) -> Result<Vec<DuplicateFileSummaryDto>, String> {
     query_duplicate_group_files(request)
+}
+
+#[tauri::command]
+fn list_indexes(app: tauri::AppHandle) -> Result<Vec<IndexMetadataDto>, String> {
+    let index_dir = index_dir(&app)?;
+    let mut entries = Vec::new();
+    if !index_dir.exists() {
+        return Ok(entries);
+    }
+
+    for entry in fs::read_dir(index_dir).map_err(|error| format!("failed to read index directory: {error}"))? {
+        let entry = entry.map_err(|error| format!("failed to read index entry: {error}"))?;
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) == Some("sqlite") {
+            if let Ok(metadata) = index_metadata(path) {
+                entries.push(metadata);
+            }
+        }
+    }
+
+    entries.sort_by(|a, b| b.last_scanned_at.cmp(&a.last_scanned_at));
+    Ok(entries)
+}
+
+#[tauri::command]
+fn delete_index(app: tauri::AppHandle, index_path: PathBuf) -> Result<(), String> {
+    let index_dir = index_dir(&app)?;
+    let canonical_dir = index_dir
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve index directory: {error}"))?;
+    let canonical_index = index_path
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve index path: {error}"))?;
+
+    if !canonical_index.starts_with(canonical_dir) {
+        return Err("refusing to delete an index outside the app index directory".to_owned());
+    }
+
+    fs::remove_file(canonical_index).map_err(|error| format!("failed to delete index: {error}"))
 }
 
 #[tauri::command]
@@ -123,6 +163,8 @@ fn main() {
             query_index,
             search_files,
             duplicate_group_files,
+            list_indexes,
+            delete_index,
             start_scan_job,
             start_scan_job_for_root,
             cancel_scan_job,
@@ -134,11 +176,7 @@ fn main() {
 }
 
 fn default_index_path(app: &tauri::AppHandle, root: &Path) -> Result<PathBuf, String> {
-    let index_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("failed to resolve app data dir: {error}"))?
-        .join("indexes");
+    let index_dir = index_dir(app)?;
     fs::create_dir_all(&index_dir)
         .map_err(|error| format!("failed to create index directory: {error}"))?;
 
@@ -146,4 +184,12 @@ fn default_index_path(app: &tauri::AppHandle, root: &Path) -> Result<PathBuf, St
     root.hash(&mut hasher);
     let root_hash = hasher.finish();
     Ok(index_dir.join(format!("{root_hash:016x}.sqlite")))
+}
+
+fn index_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("failed to resolve app data dir: {error}"))?
+        .join("indexes"))
 }

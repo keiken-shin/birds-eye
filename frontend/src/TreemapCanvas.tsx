@@ -160,6 +160,10 @@ function drawTreemap(context: CanvasRenderingContext2D, rects: Rect[], width: nu
       context.fillStyle = "rgba(255, 255, 255, 0.72)";
       context.font = "12px Inter, Segoe UI, sans-serif";
       context.fillText(formatBytes(rect.folder.displayBytes), x + 8, y + h - 8);
+    } else if (w > 44 && h > 24) {
+      context.fillStyle = "rgba(255, 255, 255, 0.88)";
+      context.font = "700 10px Inter, Segoe UI, sans-serif";
+      context.fillText(trimToWidth(context, lastSegment(rect.folder.path), w - 8), x + 4, y + h - 7);
     }
   }
 }

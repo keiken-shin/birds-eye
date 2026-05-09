@@ -33,13 +33,16 @@ import {
 import {
   cancelNativeScan,
   chooseNativeFolder,
+  deleteNativeIndex,
   isNativeRuntime,
+  listNativeIndexes,
   nativeJobEvents,
   queryNativeIndex,
   queryNativeDuplicateFiles,
   searchNativeIndex,
   startNativeScan,
   type NativeDuplicateFile,
+  type NativeIndexEntry,
   type NativeIndexOverview,
   type NativeSearchResult,
 } from "./nativeClient";
@@ -59,6 +62,7 @@ function App() {
   const [focusedFolder, setFocusedFolder] = useState<string | null>(null);
   const [duplicateFiles, setDuplicateFiles] = useState<NativeDuplicateFile[]>([]);
   const [selectedDuplicateGroup, setSelectedDuplicateGroup] = useState<number | null>(null);
+  const [savedIndexes, setSavedIndexes] = useState<NativeIndexEntry[]>([]);
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
 
@@ -66,11 +70,14 @@ function App() {
     void isNativeRuntime().then((native) => {
       setNativeRuntime(native);
       setRuntimeMessage(native ? "Native index mode" : "Browser preview");
+      if (native) {
+        void refreshSavedIndexes();
+      }
     });
   }, []);
 
-  const topFolders = useMemo(() => {
-    return [...scan.folders].sort((a, b) => b.bytes - a.bytes).slice(0, 9);
+  const sortedFolders = useMemo(() => {
+    return [...scan.folders].sort((a, b) => b.bytes - a.bytes);
   }, [scan.folders]);
 
   const filteredFolders = useMemo(() => {
@@ -204,10 +211,11 @@ function App() {
 
       if (latest?.status === "Completed" || latest?.status === "Cancelled" || latest?.status === "Failed") {
         if (latest.status === "Completed" && nativeJobRef.current) {
-          const overview = await queryNativeIndex(nativeJobRef.current.indexPath, 48);
+          const overview = await queryNativeIndex(nativeJobRef.current.indexPath, 1000);
           setScan((current) => mergeNativeOverview(current, overview));
           setCurrentIndexPath(nativeJobRef.current.indexPath);
           setRuntimeMessage("Native index ready");
+          void refreshSavedIndexes();
         }
         nativeJobRef.current = null;
         return;
@@ -312,7 +320,7 @@ function App() {
       </aside>
 
       <section className="workspace">
-        <header className="topbar">
+        <header className="topbar" id="dashboard">
           <div>
             <p className="eyebrow">Offline storage intelligence</p>
             <h1>Understand where your disk space went.</h1>
@@ -351,7 +359,7 @@ function App() {
           </div>
         </header>
 
-        <section className="scan-strip" aria-label="Scan progress">
+        <section className="scan-strip" id="scan" aria-label="Scan progress">
           <div>
             <span>{scan.rootName}</span>
             <strong>{scan.status === "idle" ? "Ready" : scan.status}</strong>
@@ -394,7 +402,7 @@ function App() {
           ))}
         </section>
 
-        <section className="analysis-layout">
+        <section className="analysis-layout" id="treemap">
           <div className="treemap-panel">
             <div className="panel-header">
               <h2>Space Distribution</h2>
@@ -421,21 +429,23 @@ function App() {
           </aside>
         </section>
 
-        <section className="folder-table">
+        <section className="folder-table" id="data">
           <div className="panel-header">
             <h2>Largest Folders</h2>
-            <span><Search size={14} /> {formatCount(topFolders.length)} visible</span>
+            <span><Search size={14} /> {formatCount(sortedFolders.length)} folders</span>
           </div>
-          {topFolders.length === 0 ? (
+          {sortedFolders.length === 0 ? (
             <div className="empty-state">Choose a folder to generate the first storage intelligence snapshot.</div>
           ) : (
-            topFolders.map((folder) => (
-              <div className="folder-row" key={folder.path}>
-                <span>{folder.path}</span>
-                <strong>{formatBytes(folder.bytes)}</strong>
-                <small>{formatCount(folder.files)} files</small>
-              </div>
-            ))
+            <ScrollableRows>
+              {sortedFolders.map((folder) => (
+                <div className="folder-row" key={folder.path}>
+                  <span>{folder.path}</span>
+                  <strong>{formatBytes(folder.bytes)}</strong>
+                  <small>{formatCount(folder.files)} files</small>
+                </div>
+              ))}
+            </ScrollableRows>
           )}
         </section>
 
@@ -458,13 +468,15 @@ function App() {
           ) : searchResults.length === 0 ? (
             <div className="empty-state compact">No indexed files match this search.</div>
           ) : (
-            searchResults.map((file) => (
-              <div className="folder-row file-row" key={file.path}>
-                <span>{file.path}</span>
-                <strong>{formatBytes(file.size)}</strong>
-                <small>{file.extension ?? "(none)"}</small>
-              </div>
-            ))
+            <ScrollableRows compact>
+              {searchResults.map((file) => (
+                <div className="folder-row file-row" key={file.path}>
+                  <span>{file.path}</span>
+                  <strong>{formatBytes(file.size)}</strong>
+                  <small>{file.extension ?? "(none)"}</small>
+                </div>
+              ))}
+            </ScrollableRows>
           )}
         </section>
 
@@ -477,13 +489,15 @@ function App() {
             {scan.largestFiles.length === 0 ? (
               <div className="empty-state compact">Largest files appear during the next scan.</div>
             ) : (
-              scan.largestFiles.slice(0, 10).map((file) => (
-                <div className="folder-row file-row" key={file.path}>
-                  <span>{file.path}</span>
-                  <strong>{formatBytes(file.bytes)}</strong>
-                  <small>{file.extension}</small>
-                </div>
-              ))
+              <ScrollableRows compact>
+                {scan.largestFiles.map((file) => (
+                  <div className="folder-row file-row" key={file.path}>
+                    <span>{file.path}</span>
+                    <strong>{formatBytes(file.bytes)}</strong>
+                    <small>{file.extension}</small>
+                  </div>
+                ))}
+              </ScrollableRows>
             )}
           </div>
 
@@ -495,13 +509,15 @@ function App() {
             {scan.extensions.length === 0 ? (
               <div className="empty-state compact">Extension totals appear during the next scan.</div>
             ) : (
-              scan.extensions.slice(0, 10).map((extension) => (
-                <div className="folder-row extension-row" key={extension.extension}>
-                  <span>.{extension.extension}</span>
-                  <strong>{formatBytes(extension.bytes)}</strong>
-                  <small>{formatCount(extension.files)} files</small>
-                </div>
-              ))
+              <ScrollableRows compact>
+                {scan.extensions.map((extension) => (
+                  <div className="folder-row extension-row" key={extension.extension}>
+                    <span>.{extension.extension}</span>
+                    <strong>{formatBytes(extension.bytes)}</strong>
+                    <small>{formatCount(extension.files)} files</small>
+                  </div>
+                ))}
+              </ScrollableRows>
             )}
           </div>
         </section>
@@ -509,25 +525,28 @@ function App() {
         <section className="folder-table">
           <div className="panel-header">
             <h2>Duplicate Candidates</h2>
-            <span><CopyCheck size={14} /> Stage 1 size groups</span>
+            <span><CopyCheck size={14} /> Size + partial + full hash</span>
           </div>
+          <p className="section-note">Duplicate groups start by identical file size, then matching candidates are refined with partial hashes and full-file hashes. A 100% confidence group means matching full hashes.</p>
           {scan.duplicateCandidates.length === 0 ? (
             <div className="empty-state compact">Files with identical sizes will appear here as duplicate candidates.</div>
           ) : (
-            scan.duplicateCandidates.slice(0, 12).map((candidate) => (
-              <button
-                className={`duplicate-row ${selectedDuplicateGroup === candidate.id ? "active" : ""}`}
-                key={candidate.id ?? candidate.size}
-                type="button"
-                onClick={() => void selectDuplicateCandidate(candidate)}
-              >
-                <div>
-                  <strong>{formatBytes(candidate.reclaimableBytes)} reclaimable</strong>
-                  <span>{formatCount(candidate.files)} files at {formatBytes(candidate.size)} each</span>
-                </div>
-                <small>{candidate.samples.join(" | ")}</small>
-              </button>
-            ))
+            <ScrollableRows compact>
+              {scan.duplicateCandidates.map((candidate) => (
+                <button
+                  className={`duplicate-row ${selectedDuplicateGroup === candidate.id ? "active" : ""}`}
+                  key={candidate.id ?? candidate.size}
+                  type="button"
+                  onClick={() => void selectDuplicateCandidate(candidate)}
+                >
+                  <div>
+                    <strong>{formatBytes(candidate.reclaimableBytes)} reclaimable</strong>
+                    <span>{formatCount(candidate.files)} files at {formatBytes(candidate.size)} each</span>
+                  </div>
+                  <small>{candidate.samples.join(" | ")}</small>
+                </button>
+              ))}
+            </ScrollableRows>
           )}
           {duplicateFiles.length > 0 && (
             <div className="duplicate-file-list">
@@ -539,6 +558,32 @@ function App() {
                 </div>
               ))}
             </div>
+          )}
+        </section>
+
+        <section className="folder-table" id="settings">
+          <div className="panel-header">
+            <h2>Saved Indexes</h2>
+            <span><Database size={14} /> {nativeRuntime ? `${formatCount(savedIndexes.length)} local` : "Native only"}</span>
+          </div>
+          {!nativeRuntime ? (
+            <div className="empty-state compact">Saved indexes are available in the desktop app.</div>
+          ) : savedIndexes.length === 0 ? (
+            <div className="empty-state compact">Scanned folders will appear here for revisiting, rescanning, or removing their local index.</div>
+          ) : (
+            <ScrollableRows compact>
+              {savedIndexes.map((entry) => (
+                <div className="index-row" key={entry.index_path}>
+                  <div>
+                    <strong>{entry.root_path ?? "Unknown root"}</strong>
+                    <span>{entry.last_status ?? "unknown"} - {formatBytes(entry.bytes_scanned)} - {formatCount(entry.files_scanned)} files</span>
+                  </div>
+                  <button type="button" onClick={() => void openSavedIndex(entry)}>View</button>
+                  <button type="button" onClick={() => void rescanSavedIndex(entry)}>Rescan</button>
+                  <button className="danger-text" type="button" onClick={() => void removeSavedIndex(entry)}>Delete</button>
+                </div>
+              ))}
+            </ScrollableRows>
           )}
         </section>
       </section>
@@ -558,6 +603,56 @@ function App() {
     } catch (error) {
       setRuntimeMessage(error instanceof Error ? error.message : "Duplicate details failed");
     }
+  }
+
+  async function refreshSavedIndexes() {
+    try {
+      setSavedIndexes(await listNativeIndexes());
+    } catch (error) {
+      setRuntimeMessage(error instanceof Error ? error.message : "Failed to list indexes");
+    }
+  }
+
+  async function openSavedIndex(entry: NativeIndexEntry) {
+    const overview = await queryNativeIndex(entry.index_path, 1000);
+    setScan((current) => ({
+      ...mergeNativeOverview(current.status === "idle" ? initialScanState : current, overview),
+      status: "complete",
+      rootName: entry.root_path ? lastSegment(entry.root_path) : "Saved index",
+      processedFiles: entry.files_scanned,
+      totalFiles: entry.files_scanned,
+      processedBytes: entry.bytes_scanned,
+      totalBytes: entry.bytes_scanned,
+      currentPath: entry.root_path ?? entry.index_path,
+    }));
+    setCurrentIndexPath(entry.index_path);
+    setRuntimeMessage("Saved index loaded");
+    window.location.hash = "dashboard";
+  }
+
+  async function rescanSavedIndex(entry: NativeIndexEntry) {
+    if (!entry.root_path) return;
+    const { jobId, indexPath } = await startNativeScan(entry.root_path);
+    nativeJobRef.current = { jobId, eventOffset: 0, indexPath };
+    setCurrentIndexPath(null);
+    setRuntimeMessage("Native rescan starting");
+    setScan({
+      ...initialScanState,
+      status: "scanning",
+      rootName: lastSegment(entry.root_path) || entry.root_path,
+      startedAt: performance.now(),
+      currentPath: entry.root_path,
+    });
+    void pollNativeJob(jobId);
+    window.location.hash = "scan";
+  }
+
+  async function removeSavedIndex(entry: NativeIndexEntry) {
+    await deleteNativeIndex(entry.index_path);
+    if (currentIndexPath === entry.index_path) {
+      clearScan();
+    }
+    await refreshSavedIndexes();
   }
 }
 
@@ -642,6 +737,10 @@ function Treemap({ folders, onSelect }: { folders: Array<FolderStats & { display
   }
 
   return <TreemapCanvas folders={folders} onSelect={onSelect} />;
+}
+
+function ScrollableRows({ children, compact = false }: { children: React.ReactNode; compact?: boolean }) {
+  return <div className={`scroll-rows ${compact ? "compact" : ""}`}>{children}</div>;
 }
 
 function Recommendation({ text }: { text: string }) {

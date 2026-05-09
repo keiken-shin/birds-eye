@@ -1,5 +1,6 @@
 use crate::index::IndexWriter;
 use crate::scanner::{ScanEvent, ScanOptions, Scanner};
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -106,6 +107,17 @@ pub struct IndexOverviewDto {
     pub duplicate_groups: Vec<DuplicateGroupSummaryDto>,
     pub media: Vec<MediaSummaryDto>,
     pub folder_media: Vec<FolderMediaSummaryDto>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct IndexMetadataDto {
+    pub index_path: PathBuf,
+    pub root_path: Option<String>,
+    pub last_status: Option<String>,
+    pub last_scanned_at: Option<i64>,
+    pub files_scanned: i64,
+    pub folders_scanned: i64,
+    pub bytes_scanned: i64,
 }
 
 pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse, String> {
@@ -227,7 +239,9 @@ pub fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultD
     Ok(results)
 }
 
-pub fn duplicate_group_files(request: DuplicateGroupFilesRequest) -> Result<Vec<DuplicateFileSummaryDto>, String> {
+pub fn duplicate_group_files(
+    request: DuplicateGroupFilesRequest,
+) -> Result<Vec<DuplicateFileSummaryDto>, String> {
     let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
     let results = writer
         .duplicate_group_files(request.group_id, request.limit)
@@ -241,6 +255,42 @@ pub fn duplicate_group_files(request: DuplicateGroupFilesRequest) -> Result<Vec<
         .collect::<Vec<_>>();
 
     Ok(results)
+}
+
+pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
+    let writer = IndexWriter::open(index_path.clone()).map_err(|error| format!("{error:?}"))?;
+    let metadata = writer
+        .connection()
+        .query_row(
+            "SELECT root_path, status, COALESCE(finished_at, started_at), files_scanned, folders_scanned, bytes_scanned
+             FROM scan_sessions
+             ORDER BY started_at DESC
+             LIMIT 1",
+            [],
+            |row| {
+                Ok(IndexMetadataDto {
+                    index_path: index_path.clone(),
+                    root_path: row.get(0)?,
+                    last_status: row.get(1)?,
+                    last_scanned_at: row.get(2)?,
+                    files_scanned: row.get(3)?,
+                    folders_scanned: row.get(4)?,
+                    bytes_scanned: row.get(5)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| format!("{error:?}"))?;
+
+    Ok(metadata.unwrap_or(IndexMetadataDto {
+        index_path,
+        root_path: None,
+        last_status: None,
+        last_scanned_at: None,
+        files_scanned: 0,
+        folders_scanned: 0,
+        bytes_scanned: 0,
+    }))
 }
 
 #[cfg(test)]
@@ -272,7 +322,13 @@ mod tests {
         assert_eq!(response.files_scanned, 2);
         assert_eq!(overview.files.len(), 2);
         assert_eq!(overview.duplicate_groups.len(), 1);
-        assert_eq!(overview.media.first().map(|summary| summary.media_kind.as_str()), Some("other"));
+        assert_eq!(
+            overview
+                .media
+                .first()
+                .map(|summary| summary.media_kind.as_str()),
+            Some("other")
+        );
         cleanup(&root);
     }
 
@@ -297,8 +353,14 @@ mod tests {
         })
         .expect("search command failed");
 
-        assert_eq!(results.first().map(|file| file.name.as_str()), Some("report.pdf"));
-        assert_eq!(results.first().map(|file| file.media_kind.as_str()), Some("document"));
+        assert_eq!(
+            results.first().map(|file| file.name.as_str()),
+            Some("report.pdf")
+        );
+        assert_eq!(
+            results.first().map(|file| file.media_kind.as_str()),
+            Some("document")
+        );
         cleanup(&root);
     }
 
@@ -320,7 +382,11 @@ mod tests {
             limit: 5,
         })
         .expect("query command failed");
-        let group_id = overview.duplicate_groups.first().expect("duplicate group").id;
+        let group_id = overview
+            .duplicate_groups
+            .first()
+            .expect("duplicate group")
+            .id;
 
         let files = duplicate_group_files(DuplicateGroupFilesRequest {
             index_path,

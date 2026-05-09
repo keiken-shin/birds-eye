@@ -15,6 +15,14 @@ body {
   min-height: 100vh;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+:target {
+  scroll-margin-top: 18px;
+}
+
 button,
 a {
   font: inherit;
@@ -417,6 +425,31 @@ h2 {
   margin-top: 18px;
 }
 
+.section-note {
+  margin: -4px 0 12px;
+  color: #96a1b6;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.scroll-rows {
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 6px;
+  scrollbar-color: rgba(255, 255, 255, 0.24) rgba(255, 255, 255, 0.06);
+  scrollbar-width: thin;
+}
+
+.scroll-rows.compact {
+  max-height: 360px;
+}
+
+.scroll-rows .folder-row:first-child,
+.scroll-rows .duplicate-row:first-child,
+.scroll-rows .index-row:first-child {
+  border-top: 0;
+}
+
 .search-panel {
   display: grid;
   gap: 12px;
@@ -526,6 +559,56 @@ h2 {
   border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
 
+.index-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 58px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.index-row div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.index-row strong,
+.index-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.index-row strong {
+  color: #ffffff;
+}
+
+.index-row span {
+  color: #96a1b6;
+  font-size: 13px;
+}
+
+.index-row button {
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dce6f5;
+  cursor: pointer;
+  padding: 0 10px;
+}
+
+.index-row button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.index-row .danger-text {
+  color: #fb7185;
+}
+
 @media (max-width: 1080px) {
   .scan-strip,
   .metric-grid,
@@ -570,6 +653,11 @@ h2 {
   }
 
   .duplicate-row {
+    grid-template-columns: 1fr;
+    padding: 10px 0;
+  }
+
+  .index-row {
     grid-template-columns: 1fr;
     padding: 10px 0;
   }

@@ -39,6 +39,16 @@ export type NativeSearchResult = {
   modified_at: number | null;
 };
 
+export type NativeIndexEntry = {
+  index_path: string;
+  root_path: string | null;
+  last_status: string | null;
+  last_scanned_at: number | null;
+  files_scanned: number;
+  folders_scanned: number;
+  bytes_scanned: number;
+};
+
 export type NativeDuplicateFile = {
   path: string;
   size: number;
@@ -106,4 +116,12 @@ export async function queryNativeDuplicateFiles(indexPath: string, groupId: numb
       limit,
     },
   });
+}
+
+export async function listNativeIndexes() {
+  return invoke<NativeIndexEntry[]>("list_indexes");
+}
+
+export async function deleteNativeIndex(indexPath: string) {
+  await invoke("delete_index", { indexPath });
 }
