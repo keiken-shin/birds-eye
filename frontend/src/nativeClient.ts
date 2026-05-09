@@ -43,15 +43,11 @@ export async function chooseNativeFolder() {
 }
 
 export async function startNativeScan(root: string) {
-  const indexPath = `${root}/.birds-eye.sqlite`;
-  const response = await invoke<{ job_id: number }>("start_scan_job", {
-    request: {
-      root,
-      index_path: indexPath,
-    },
+  const response = await invoke<{ job_id: number; index_path: string }>("start_scan_job_for_root", {
+    root,
   });
 
-  return { jobId: response.job_id, indexPath };
+  return { jobId: response.job_id, indexPath: response.index_path };
 }
 
 export async function cancelNativeScan(jobId: number) {

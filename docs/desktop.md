@@ -17,5 +17,4 @@ Current desktop behavior:
 - Queries the SQLite index through `query_index`.
 - Browser preview still falls back to the File API worker.
 
-The current index file is created as `.birds-eye.sqlite` inside the selected folder. This is simple for development; production should move indexes into app data storage and map scan roots to index records.
-
+Index files are created under the app data directory in an `indexes/` folder, keyed by the selected root path.
