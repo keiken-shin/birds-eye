@@ -1,0 +1,369 @@
+import React, { useMemo, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import {
+  Activity,
+  Database,
+  FolderOpen,
+  FolderSearch,
+  HardDrive,
+  Pause,
+  Play,
+  Radar,
+  Search,
+  Settings,
+  Square,
+  Trash2,
+} from "lucide-react";
+import { motion } from "framer-motion";
+import {
+  categories,
+  formatBytes,
+  formatCount,
+  initialScanState,
+  lastSegment,
+  type CategoryKey,
+  type FolderStats,
+  type ScanState,
+  type ScanWorkerCommand,
+  type ScanWorkerMessage,
+} from "./domain";
+import "./styles.css";
+
+function App() {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const [scan, setScan] = useState<ScanState>(initialScanState);
+  const [filter, setFilter] = useState<CategoryKey | "all">("all");
+
+  const topFolders = useMemo(() => {
+    return [...scan.folders].sort((a, b) => b.bytes - a.bytes).slice(0, 9);
+  }, [scan.folders]);
+
+  const filteredFolders = useMemo(() => {
+    const folders = filter === "all"
+      ? scan.folders.map((folder) => ({ ...folder, displayBytes: folder.bytes }))
+      : scan.folders
+          .filter((folder) => folder.categories[filter] > 0)
+          .map((folder) => ({ ...folder, displayBytes: folder.categories[filter] }));
+
+    return folders.sort((a, b) => b.displayBytes - a.displayBytes).slice(0, 48);
+  }, [filter, scan.folders]);
+
+  const metrics = [
+    { label: "Indexed", value: formatCount(scan.processedFiles), detail: `${formatCount(scan.totalFiles)} selected` },
+    { label: "Scanned", value: formatBytes(scan.processedBytes), detail: `${formatBytes(scan.totalBytes)} discovered` },
+    { label: "Throughput", value: `${Math.round(scan.processedFiles / Math.max(scan.elapsedMs / 1000, 1))}/s`, detail: scan.status },
+    { label: "Folders", value: formatCount(scan.folders.length), detail: scan.rootName },
+  ];
+
+  function openFolderPicker() {
+    const input = fileInputRef.current;
+    if (!input) return;
+    input.setAttribute("webkitdirectory", "");
+    input.setAttribute("directory", "");
+    input.click();
+  }
+
+  function handleFiles(fileList: FileList | null) {
+    const files = Array.from(fileList ?? []);
+    if (files.length === 0) return;
+
+    stopWorker();
+    setFilter("all");
+    setScan({
+      ...initialScanState,
+      status: "scanning",
+      rootName: "Preparing scan...",
+      totalFiles: files.length,
+      totalBytes: files.reduce((sum, file) => sum + file.size, 0),
+      startedAt: performance.now(),
+    });
+
+    const worker = new Worker(new URL("./scanWorker.ts", import.meta.url), { type: "module" });
+    workerRef.current = worker;
+    worker.onmessage = (event: MessageEvent<ScanWorkerMessage>) => {
+      const message = event.data;
+      setScan({ ...message.payload });
+
+      if (message.type === "finished" || message.type === "cancelled") {
+        worker.terminate();
+        if (workerRef.current === worker) {
+          workerRef.current = null;
+        }
+      }
+    };
+
+    postWorker(worker, { type: "start", files });
+  }
+
+  function pauseScan() {
+    postWorker(workerRef.current, { type: "pause" });
+    setScan((current) => ({ ...current, status: "paused" }));
+  }
+
+  function resumeScan() {
+    postWorker(workerRef.current, { type: "resume" });
+    setScan((current) => ({ ...current, status: "scanning" }));
+  }
+
+  function cancelScan() {
+    postWorker(workerRef.current, { type: "cancel" });
+  }
+
+  function clearScan() {
+    stopWorker();
+    setFilter("all");
+    setScan(initialScanState);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
+  function stopWorker() {
+    workerRef.current?.terminate();
+    workerRef.current = null;
+  }
+
+  return (
+    <main className="app-shell">
+      <aside className="sidebar" aria-label="Primary navigation">
+        <div className="brand">
+          <HardDrive size={26} />
+          <span>Birds Eye</span>
+        </div>
+        <nav>
+          <a className="active" href="#dashboard"><Activity size={18} />Dashboard</a>
+          <a href="#scan"><Radar size={18} />Scan Manager</a>
+          <a href="#treemap"><FolderSearch size={18} />Treemap</a>
+          <a href="#data"><Database size={18} />Index</a>
+          <a href="#settings"><Settings size={18} />Settings</a>
+        </nav>
+      </aside>
+
+      <section className="workspace">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">Offline storage intelligence</p>
+            <h1>Understand where your disk space went.</h1>
+          </div>
+          <div className="action-row">
+            <input
+              ref={fileInputRef}
+              className="hidden-input"
+              type="file"
+              multiple
+              onChange={(event) => handleFiles(event.currentTarget.files)}
+            />
+            <button className="primary-action" type="button" onClick={openFolderPicker}>
+              <FolderOpen size={18} /> Choose Folder
+            </button>
+            {scan.status === "scanning" && (
+              <button className="ghost-action" type="button" onClick={pauseScan} title="Pause scan">
+                <Pause size={18} />
+              </button>
+            )}
+            {scan.status === "paused" && (
+              <button className="ghost-action" type="button" onClick={resumeScan} title="Resume scan">
+                <Play size={18} />
+              </button>
+            )}
+            {(scan.status === "scanning" || scan.status === "paused") && (
+              <button className="ghost-action danger" type="button" onClick={cancelScan} title="Cancel scan">
+                <Square size={16} />
+              </button>
+            )}
+            {scan.status !== "idle" && (
+              <button className="ghost-action" type="button" onClick={clearScan} title="Clear results">
+                <Trash2 size={18} />
+              </button>
+            )}
+          </div>
+        </header>
+
+        <section className="scan-strip" aria-label="Scan progress">
+          <div>
+            <span>{scan.rootName}</span>
+            <strong>{scan.status === "idle" ? "Ready" : scan.status}</strong>
+          </div>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${getProgress(scan)}%` }} />
+          </div>
+          <small>{scan.currentPath}</small>
+        </section>
+
+        <section className="metric-grid" aria-label="Scan metrics">
+          {metrics.map((metric) => (
+            <motion.article
+              className="metric-card"
+              key={metric.label}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <span>{metric.label}</span>
+              <strong>{metric.value}</strong>
+              <small>{metric.detail}</small>
+            </motion.article>
+          ))}
+        </section>
+
+        <section className="filter-bar" aria-label="Category filters">
+          <button className={filter === "all" ? "active" : ""} type="button" onClick={() => setFilter("all")}>
+            All
+          </button>
+          {(Object.keys(categories) as CategoryKey[]).map((key) => (
+            <button
+              className={filter === key ? "active" : ""}
+              key={key}
+              type="button"
+              onClick={() => setFilter(key)}
+            >
+              <span style={{ background: categories[key].color }} />
+              {categories[key].label}
+            </button>
+          ))}
+        </section>
+
+        <section className="analysis-layout">
+          <div className="treemap-panel">
+            <div className="panel-header">
+              <h2>Space Distribution</h2>
+              <span>{filteredFolders.length > 0 ? "Largest folders by selected category" : "Select a folder to begin"}</span>
+            </div>
+            <Treemap folders={filteredFolders} />
+          </div>
+
+          <aside className="recommendations">
+            <h2>Cleanup Intelligence</h2>
+            <Recommendation text={makeDuplicateHint(scan)} />
+            <Recommendation text={makeCategoryHint(scan, "installers", "installer cache")} />
+            <Recommendation text={makeCategoryHint(scan, "archives", "archive payloads")} />
+            <Recommendation text={makeCategoryHint(scan, "videos", "video library")} />
+          </aside>
+        </section>
+
+        <section className="folder-table">
+          <div className="panel-header">
+            <h2>Largest Folders</h2>
+            <span><Search size={14} /> {formatCount(topFolders.length)} visible</span>
+          </div>
+          {topFolders.length === 0 ? (
+            <div className="empty-state">Choose a folder to generate the first storage intelligence snapshot.</div>
+          ) : (
+            topFolders.map((folder) => (
+              <div className="folder-row" key={folder.path}>
+                <span>{folder.path}</span>
+                <strong>{formatBytes(folder.bytes)}</strong>
+                <small>{formatCount(folder.files)} files</small>
+              </div>
+            ))
+          )}
+        </section>
+
+        <section className="detail-grid">
+          <div className="folder-table">
+            <div className="panel-header">
+              <h2>Largest Files</h2>
+              <span>{formatCount(scan.largestFiles.length)} tracked</span>
+            </div>
+            {scan.largestFiles.length === 0 ? (
+              <div className="empty-state compact">Largest files appear during the next scan.</div>
+            ) : (
+              scan.largestFiles.slice(0, 10).map((file) => (
+                <div className="folder-row file-row" key={file.path}>
+                  <span>{file.path}</span>
+                  <strong>{formatBytes(file.bytes)}</strong>
+                  <small>{file.extension}</small>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="folder-table">
+            <div className="panel-header">
+              <h2>Extensions</h2>
+              <span>{formatCount(scan.extensions.length)} groups</span>
+            </div>
+            {scan.extensions.length === 0 ? (
+              <div className="empty-state compact">Extension totals appear during the next scan.</div>
+            ) : (
+              scan.extensions.slice(0, 10).map((extension) => (
+                <div className="folder-row extension-row" key={extension.extension}>
+                  <span>.{extension.extension}</span>
+                  <strong>{formatBytes(extension.bytes)}</strong>
+                  <small>{formatCount(extension.files)} files</small>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      </section>
+    </main>
+  );
+}
+
+function Treemap({ folders }: { folders: Array<FolderStats & { displayBytes: number }> }) {
+  const total = folders.reduce((sum, folder) => sum + folder.displayBytes, 0);
+
+  if (folders.length === 0 || total === 0) {
+    return <div className="treemap-empty">No indexed folders yet</div>;
+  }
+
+  return (
+    <div className="treemap-grid">
+      {folders.map((folder, index) => {
+        const share = folder.displayBytes / total;
+        const dominant = getDominantCategory(folder);
+        const area = Math.max(8, Math.min(54, share * 100));
+
+        return (
+          <motion.div
+            className="treemap-cell"
+            key={folder.path}
+            layout
+            title={`${folder.path} - ${formatBytes(folder.displayBytes)}`}
+            style={{
+              background: `linear-gradient(135deg, ${categories[dominant].color}, rgba(255,255,255,0.08))`,
+              gridColumn: `span ${Math.max(1, Math.round(area / 8))}`,
+              gridRow: `span ${Math.max(1, Math.round(area / 10))}`,
+            }}
+          >
+            <span>{index + 1}</span>
+            <strong>{lastSegment(folder.path)}</strong>
+            <small>{formatBytes(folder.displayBytes)}</small>
+          </motion.div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Recommendation({ text }: { text: string }) {
+  return <button type="button">{text}</button>;
+}
+
+function postWorker(worker: Worker | null, message: ScanWorkerCommand) {
+  worker?.postMessage(message);
+}
+
+function getDominantCategory(folder: FolderStats): CategoryKey {
+  return (Object.keys(folder.categories) as CategoryKey[]).reduce((best, key) => {
+    return folder.categories[key] > folder.categories[best] ? key : best;
+  }, "other");
+}
+
+function getProgress(scan: ScanState) {
+  if (scan.totalFiles === 0) return 0;
+  return Math.min(100, (scan.processedFiles / scan.totalFiles) * 100);
+}
+
+function makeDuplicateHint(scan: ScanState) {
+  const possible = scan.folders.filter((folder) => folder.bytes > 1024 * 1024 * 1024).length;
+  return possible > 0 ? `${possible} large folders ready for duplicate analysis` : "Duplicate scan ready after indexing";
+}
+
+function makeCategoryHint(scan: ScanState, category: CategoryKey, label: string) {
+  const bytes = scan.categories[category].bytes;
+  return bytes > 0 ? `${formatBytes(bytes)} ${label} detected` : `${categories[category].label} analysis pending`;
+}
+
+createRoot(document.getElementById("root")!).render(<App />);
