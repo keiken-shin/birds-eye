@@ -474,6 +474,7 @@ function App() {
               </div>
             )}
             <Treemap folders={filteredFolders} onSelect={(folder) => setFocusedFolder(folder.path)} />
+            <SunburstHierarchy folders={scan.folders} />
           </div>
 
           <aside className="recommendations">
@@ -984,6 +985,106 @@ function confidenceClass(confidence: StagedAction["confidence"]) {
   return "manual";
 }
 
+type SunburstSlice = {
+  path: string;
+  bytes: number;
+  depth: number;
+  innerRadius: number;
+  outerRadius: number;
+  startAngle: number;
+  endAngle: number;
+  color: string;
+};
+
+function buildSunburstSlices(folders: FolderStats[]): SunburstSlice[] {
+  const visibleFolders = folders.filter((folder) => folder.bytes > 0);
+  if (visibleFolders.length === 0) return [];
+
+  const roots = visibleFolders.filter((folder) => !visibleFolders.some((candidate) => parentPath(folder.path) === candidate.path));
+  const rootBytes = roots.reduce((sum, folder) => sum + folder.bytes, 0);
+  if (rootBytes <= 0) return [];
+
+  const maxDepth = Math.max(...visibleFolders.map((folder) => folder.path.split(/[\\/]/).filter(Boolean).length), 1);
+  const ringWidth = 78 / Math.min(maxDepth, 5);
+  const slices: SunburstSlice[] = [];
+
+  let cursor = -90;
+  for (const root of roots.sort((a, b) => b.bytes - a.bytes)) {
+    const sweep = (root.bytes / rootBytes) * 360;
+    appendSunburstBranch(root, visibleFolders, cursor, cursor + sweep, 0, ringWidth, slices);
+    cursor += sweep;
+  }
+
+  return slices;
+}
+
+function appendSunburstBranch(
+  folder: FolderStats,
+  folders: FolderStats[],
+  startAngle: number,
+  endAngle: number,
+  depth: number,
+  ringWidth: number,
+  slices: SunburstSlice[],
+) {
+  const boundedDepth = Math.min(depth, 4);
+  const innerRadius = 28 + boundedDepth * ringWidth;
+  const outerRadius = innerRadius + ringWidth - 2;
+  slices.push({
+    path: folder.path,
+    bytes: folder.bytes,
+    depth,
+    innerRadius,
+    outerRadius,
+    startAngle,
+    endAngle,
+    color: categories[getDominantFolderCategory(folder)].color,
+  });
+
+  if (depth >= 4) return;
+
+  const children = folders.filter((candidate) => parentPath(candidate.path) === folder.path && candidate.bytes > 0).sort((a, b) => b.bytes - a.bytes);
+  const childBytes = children.reduce((sum, child) => sum + child.bytes, 0);
+  if (childBytes <= 0) return;
+
+  let cursor = startAngle;
+  for (const child of children) {
+    const sweep = ((endAngle - startAngle) * child.bytes) / childBytes;
+    appendSunburstBranch(child, folders, cursor, cursor + sweep, depth + 1, ringWidth, slices);
+    cursor += sweep;
+  }
+}
+
+function getDominantFolderCategory(folder: FolderStats): CategoryKey {
+  return (Object.keys(folder.categories) as CategoryKey[]).reduce((best, key) => {
+    return folder.categories[key] > folder.categories[best] ? key : best;
+  }, "other");
+}
+
+function describeArc(cx: number, cy: number, innerRadius: number, outerRadius: number, startAngle: number, endAngle: number) {
+  const startOuter = polarPoint(cx, cy, outerRadius, endAngle);
+  const endOuter = polarPoint(cx, cy, outerRadius, startAngle);
+  const startInner = polarPoint(cx, cy, innerRadius, startAngle);
+  const endInner = polarPoint(cx, cy, innerRadius, endAngle);
+  const largeArcFlag = endAngle - startAngle <= 180 ? 0 : 1;
+
+  return [
+    "M", startOuter.x, startOuter.y,
+    "A", outerRadius, outerRadius, 0, largeArcFlag, 0, endOuter.x, endOuter.y,
+    "L", startInner.x, startInner.y,
+    "A", innerRadius, innerRadius, 0, largeArcFlag, 1, endInner.x, endInner.y,
+    "Z",
+  ].join(" ");
+}
+
+function polarPoint(cx: number, cy: number, radius: number, angle: number) {
+  const radians = ((angle - 90) * Math.PI) / 180;
+  return {
+    x: cx + radius * Math.cos(radians),
+    y: cy + radius * Math.sin(radians),
+  };
+}
+
 function DuplicateOverlapGraph({ overlaps }: { overlaps: DuplicateOverlap[] }) {
   const topOverlaps = overlaps.slice(0, 8);
   if (topOverlaps.length === 0) {
@@ -1114,6 +1215,36 @@ function ActionHeatmap({ scan }: { scan: ScanState }) {
           })}
         </div>
       ))}
+    </div>
+  );
+}
+
+function SunburstHierarchy({ folders }: { folders: FolderStats[] }) {
+  const slices = useMemo(() => buildSunburstSlices(folders), [folders]);
+  if (slices.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="sunburst-panel" aria-label="Depth-based folder hierarchy">
+      <div className="panel-header compact">
+        <h2>Hierarchy Rings</h2>
+        <span>Depth by folder size</span>
+      </div>
+      <svg viewBox="0 0 220 220" role="img" aria-label="Folder hierarchy sunburst chart">
+        {slices.map((slice) => (
+          <path
+            d={describeArc(110, 110, slice.innerRadius, slice.outerRadius, slice.startAngle, slice.endAngle)}
+            fill={slice.color}
+            key={`${slice.path}-${slice.depth}-${slice.startAngle}`}
+          >
+            <title>{slice.path}: {formatBytes(slice.bytes)}</title>
+          </path>
+        ))}
+        <circle cx="110" cy="110" r="25" />
+        <text x="110" y="107">Root</text>
+        <text x="110" y="122">{formatCount(folders.length)}</text>
+      </svg>
     </div>
   );
 }

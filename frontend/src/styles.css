@@ -321,6 +321,10 @@ h2 {
   margin-bottom: 16px;
 }
 
+.panel-header.compact {
+  margin-bottom: 8px;
+}
+
 .panel-header span {
   display: inline-flex;
   align-items: center;
@@ -410,6 +414,49 @@ h2 {
   color: #96a1b6;
   text-align: center;
   padding: 24px;
+}
+
+.sunburst-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.sunburst-panel svg {
+  display: block;
+  width: min(100%, 360px);
+  min-height: 260px;
+  margin: 0 auto;
+}
+
+.sunburst-panel path {
+  opacity: 0.9;
+  stroke: rgba(9, 11, 16, 0.82);
+  stroke-width: 1.2;
+}
+
+.sunburst-panel path:hover {
+  opacity: 1;
+  stroke: rgba(255, 255, 255, 0.78);
+}
+
+.sunburst-panel circle {
+  fill: rgba(9, 11, 16, 0.92);
+  stroke: rgba(255, 255, 255, 0.18);
+}
+
+.sunburst-panel text {
+  fill: #f4f7fb;
+  font-size: 9px;
+  font-weight: 800;
+  text-anchor: middle;
+}
+
+.sunburst-panel text + text {
+  fill: #96a1b6;
+  font-size: 7px;
 }
 
 .empty-state.compact {
