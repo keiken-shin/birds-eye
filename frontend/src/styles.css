@@ -397,15 +397,56 @@ h2 {
   gap: 10px;
 }
 
-.recommendations button {
-  min-height: 48px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+.action-heatmap {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.heatmap-header,
+.heatmap-row {
+  display: grid;
+  grid-template-columns: minmax(108px, 1.2fr) repeat(4, minmax(74px, 0.8fr));
+  gap: 6px;
+  min-width: 430px;
+  align-items: center;
+}
+
+.heatmap-header {
+  color: #96a1b6;
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.heatmap-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heatmap-cell {
+  min-height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, calc(0.08 + var(--heat) * 0.16));
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.18);
-  color: #dce6f5;
-  cursor: pointer;
-  text-align: left;
-  padding: 0 12px;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(0, 212, 255, calc(0.08 + var(--heat) * 0.42)),
+      rgba(244, 114, 182, calc(0.05 + var(--heat) * 0.34))
+    ),
+    rgba(0, 0, 0, 0.18);
+  color: #f4f7fb;
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+  padding: 0 6px;
 }
 
 .folder-table {

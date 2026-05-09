@@ -454,11 +454,8 @@ function App() {
           </div>
 
           <aside className="recommendations">
-            <h2>Cleanup Intelligence</h2>
-            <Recommendation text={makeDuplicateHint(scan)} />
-            <Recommendation text={makeCategoryHint(scan, "installers", "installer cache")} />
-            <Recommendation text={makeCategoryHint(scan, "archives", "archive payloads")} />
-            <Recommendation text={makeCategoryHint(scan, "videos", "video library")} />
+            <h2>Action Heatmap</h2>
+            <ActionHeatmap scan={scan} />
           </aside>
         </section>
 
@@ -1007,6 +1004,69 @@ function DuplicateOverlapGraph({ overlaps }: { overlaps: DuplicateOverlap[] }) {
   );
 }
 
+function ActionHeatmap({ scan }: { scan: ScanState }) {
+  const duplicateBytesByFolder = new Map<string, number>();
+  for (const overlap of scan.duplicateOverlaps) {
+    const half = overlap.reclaimableBytes / 2;
+    duplicateBytesByFolder.set(overlap.folderA, (duplicateBytesByFolder.get(overlap.folderA) ?? 0) + half);
+    duplicateBytesByFolder.set(overlap.folderB, (duplicateBytesByFolder.get(overlap.folderB) ?? 0) + half);
+  }
+
+  const rows = scan.folders
+    .map((folder) => {
+      const cells = [
+        { key: "duplicates", label: "Duplicates", bytes: duplicateBytesByFolder.get(folder.path) ?? 0 },
+        { key: "installers", label: "Installers", bytes: folder.categories.installers },
+        { key: "archives", label: "Archives", bytes: folder.categories.archives },
+        { key: "misc", label: "Misc", bytes: folder.categories.other },
+      ];
+      return {
+        folder,
+        cells,
+        score: Math.max(...cells.map((cell) => cell.bytes)),
+      };
+    })
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8);
+
+  const maxBytes = Math.max(...rows.flatMap((row) => row.cells.map((cell) => cell.bytes)), 1);
+
+  if (rows.length === 0) {
+    return <div className="empty-state compact">Scan results will turn into cleanup priorities here.</div>;
+  }
+
+  return (
+    <div className="action-heatmap" aria-label="Cleanup action heatmap">
+      <div className="heatmap-header">
+        <span>Folder</span>
+        <span>Duplicates</span>
+        <span>Installers</span>
+        <span>Archives</span>
+        <span>Misc</span>
+      </div>
+      {rows.map((row) => (
+        <div className="heatmap-row" key={row.folder.path}>
+          <strong title={row.folder.path}>{lastSegment(row.folder.path)}</strong>
+          {row.cells.map((cell) => {
+            const intensity = cell.bytes / maxBytes;
+            return (
+              <span
+                className="heatmap-cell"
+                key={cell.key}
+                style={{ "--heat": intensity.toFixed(3) } as React.CSSProperties}
+                title={`${cell.label}: ${formatBytes(cell.bytes)} in ${row.folder.path}`}
+              >
+                {cell.bytes > 0 ? formatBytes(cell.bytes) : "-"}
+              </span>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function IconButton({
   children,
   className = "",
@@ -1037,10 +1097,6 @@ function ScrollableRows({ children, compact = false }: { children: React.ReactNo
   return <div className={`scroll-rows ${compact ? "compact" : ""}`}>{children}</div>;
 }
 
-function Recommendation({ text }: { text: string }) {
-  return <button type="button">{text}</button>;
-}
-
 function postWorker(worker: Worker | null, message: ScanWorkerCommand) {
   worker?.postMessage(message);
 }
@@ -1048,11 +1104,6 @@ function postWorker(worker: Worker | null, message: ScanWorkerCommand) {
 function getProgress(scan: ScanState) {
   if (scan.totalFiles === 0) return 0;
   return Math.min(100, (scan.processedFiles / scan.totalFiles) * 100);
-}
-
-function makeDuplicateHint(scan: ScanState) {
-  const reclaimable = scan.duplicateCandidates.reduce((sum, candidate) => sum + candidate.reclaimableBytes, 0);
-  return reclaimable > 0 ? `${formatBytes(reclaimable)} possible duplicates found` : "Duplicate scan ready after indexing";
 }
 
 function formatDate(epochSeconds: number) {
@@ -1080,11 +1131,6 @@ function isDescendantPath(path: string, parent: string) {
   const normalizedParent = normalizePath(parent);
   if (normalizedPath === normalizedParent) return false;
   return normalizedPath.startsWith(`${normalizedParent}\\`) || normalizedPath.startsWith(`${normalizedParent}/`);
-}
-
-function makeCategoryHint(scan: ScanState, category: CategoryKey, label: string) {
-  const bytes = scan.categories[category].bytes;
-  return bytes > 0 ? `${formatBytes(bytes)} ${label} detected` : `${categories[category].label} analysis pending`;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

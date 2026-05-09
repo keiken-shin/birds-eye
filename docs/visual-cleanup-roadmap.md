@@ -18,7 +18,7 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 ## P1
 
 - [x] Duplicate overlap graph: folders as bubbles, shared duplicate edges weighted by reclaimable bytes or duplicate count.
-- [ ] Action heatmap replacing text-only cleanup cards.
+- [x] Action heatmap replacing text-only cleanup cards.
 - [ ] Smart suggested moves panel for scattered media, grouped by dates and destination folders.
 
 ## P2
