@@ -2,6 +2,8 @@ use crate::index::schema::ALL_MIGRATIONS;
 use crate::scanner::{FileRecord, FolderRecord, ScanEvent, ScanStats};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -93,6 +95,7 @@ impl IndexWriter {
                 self.mark_missing_files_deleted()?;
                 self.recompute_folder_rollups()?;
                 self.rebuild_extension_stats()?;
+                self.update_partial_hashes_for_duplicate_candidates()?;
                 self.rebuild_duplicate_size_groups()?;
                 self.capture_timeline(&report.root, &report.stats)
             }
@@ -283,38 +286,89 @@ impl IndexWriter {
 
         let groups = {
             let mut statement = tx.prepare(
-                "SELECT size, COUNT(*) AS file_count, size * (COUNT(*) - 1) AS reclaimable_bytes
+                "SELECT size,
+                        partial_hash,
+                        CASE WHEN partial_hash IS NULL THEN 0.35 ELSE 0.65 END AS confidence,
+                        COUNT(*) AS file_count,
+                        size * (COUNT(*) - 1) AS reclaimable_bytes
                  FROM files
                  WHERE deleted_at IS NULL AND size > 0
-                 GROUP BY size
+                 GROUP BY size, partial_hash
                  HAVING COUNT(*) > 1
                  ORDER BY reclaimable_bytes DESC",
             )?;
             let rows = statement.query_map([], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, f64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
                 ))
             })?;
 
             rows.collect::<Result<Vec<_>, _>>()?
         };
 
-        for (size, _file_count, reclaimable_bytes) in groups {
+        for (size, partial_hash, confidence, _file_count, reclaimable_bytes) in groups {
             tx.execute(
-                "INSERT INTO duplicate_groups (size, confidence, reclaimable_bytes, created_at)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![size, 0.35_f64, reclaimable_bytes, now_millis()],
+                "INSERT INTO duplicate_groups (size, partial_hash, confidence, reclaimable_bytes, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![size, partial_hash, confidence, reclaimable_bytes, now_millis()],
             )?;
             let group_id = tx.last_insert_rowid();
-            tx.execute(
-                "INSERT INTO duplicate_group_files (group_id, file_id)
-                 SELECT ?1, id FROM files WHERE deleted_at IS NULL AND size = ?2",
-                params![group_id, size],
-            )?;
+            if let Some(partial_hash) = partial_hash {
+                tx.execute(
+                    "INSERT INTO duplicate_group_files (group_id, file_id)
+                     SELECT ?1, id FROM files WHERE deleted_at IS NULL AND size = ?2 AND partial_hash = ?3",
+                    params![group_id, size, partial_hash],
+                )?;
+            } else {
+                tx.execute(
+                    "INSERT INTO duplicate_group_files (group_id, file_id)
+                     SELECT ?1, id FROM files WHERE deleted_at IS NULL AND size = ?2 AND partial_hash IS NULL",
+                    params![group_id, size],
+                )?;
+            }
         }
 
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn update_partial_hashes_for_duplicate_candidates(&mut self) -> Result<(), IndexError> {
+        let candidates = {
+            let mut statement = self.connection.prepare(
+                "SELECT id, path, size
+                 FROM files
+                 WHERE deleted_at IS NULL
+                   AND size IN (
+                     SELECT size FROM files
+                     WHERE deleted_at IS NULL AND size > 0
+                     GROUP BY size
+                     HAVING COUNT(*) > 1
+                   )",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        let tx = self.connection.transaction()?;
+        for (id, path, size) in candidates {
+            let partial_hash = partial_file_hash(Path::new(&path), size as u64);
+            if let Some(partial_hash) = partial_hash {
+                tx.execute(
+                    "UPDATE files SET partial_hash = ?1, hash_algorithm = ?2 WHERE id = ?3",
+                    params![partial_hash, "fnv1a-partial-v1", id],
+                )?;
+            }
+        }
         tx.commit()?;
         Ok(())
     }
@@ -536,6 +590,33 @@ fn classify_media_kind(extension: Option<&str>) -> &'static str {
     }
 }
 
+fn partial_file_hash(path: &Path, size: u64) -> Option<String> {
+    const BLOCK_SIZE: usize = 64 * 1024;
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut file = File::open(path).ok()?;
+    let mut hash = FNV_OFFSET;
+    let mut buffer = vec![0_u8; BLOCK_SIZE.min(size as usize)];
+
+    let first_read = file.read(&mut buffer).ok()?;
+    for byte in &buffer[..first_read] {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+
+    if size > BLOCK_SIZE as u64 {
+        file.seek(SeekFrom::End(-(BLOCK_SIZE as i64))).ok()?;
+        let last_read = file.read(&mut buffer).ok()?;
+        for byte in &buffer[..last_read] {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+    }
+
+    Some(format!("{hash:016x}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -602,7 +683,7 @@ mod tests {
         let root = test_root("duplicates");
         fs::create_dir_all(&root).expect("failed to create folder");
         write_file(&root.join("one.bin"), &[1; 32]);
-        write_file(&root.join("two.bin"), &[2; 32]);
+        write_file(&root.join("two.bin"), &[1; 32]);
         write_file(&root.join("unique.bin"), &[3; 64]);
 
         let scanner = Scanner::new(ScanOptions {
@@ -635,6 +716,30 @@ mod tests {
         assert_eq!(duplicate_group_count, 1);
         assert_eq!(duplicate_file_count, 2);
         assert_eq!(reclaimable_bytes, 32);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn partial_hashing_filters_same_size_different_content() {
+        let root = test_root("partial-hash");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("one.bin"), &[1; 32]);
+        write_file(&root.join("two.bin"), &[2; 32]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut writer);
+
+        let duplicate_group_count: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .expect("failed to count duplicate groups");
+        let hashed_files: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM files WHERE partial_hash IS NOT NULL", [], |row| row.get(0))
+            .expect("failed to count hashed files");
+
+        assert_eq!(duplicate_group_count, 0);
+        assert_eq!(hashed_files, 2);
         cleanup(&root);
     }
 
@@ -715,7 +820,7 @@ mod tests {
         assert_eq!(folders.first().map(|folder| folder.total_bytes), Some(160));
         assert_eq!(files.first().map(|file| file.size), Some(128));
         assert_eq!(extensions.first().map(|extension| extension.extension.as_str()), Some("mp4"));
-        assert_eq!(duplicates.first().map(|group| group.file_count), Some(2));
+        assert!(duplicates.is_empty());
         cleanup(&root);
     }
 

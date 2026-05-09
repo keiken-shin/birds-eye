@@ -17,9 +17,14 @@ Current flow:
 5. `FolderIndexed` updates direct folder totals.
 6. `Finished` marks files under the scan root as deleted when they were not seen in the current run, recomputes folder rollups, rebuilds extension statistics, rebuilds Stage 1 duplicate groups by file size, and writes a `timeline_history` snapshot.
 
-Duplicate confidence is currently `0.35` for size-only matches. Later stages should raise confidence only after partial hashing and full hashing.
+Duplicate confidence is currently:
 
-This is the durable Phase 2 foundation. Next indexing work should improve batching and partial/full hash duplicate refinement.
+- `0.35` for size-only matches when partial hashing could not be computed.
+- `0.65` for same-size files with matching partial hashes.
+
+Later stages should raise confidence only after full hashing.
+
+This is the durable Phase 2 foundation. Next indexing work should improve batching and full-hash duplicate refinement.
 
 Read API currently exposed by `IndexWriter`:
 
