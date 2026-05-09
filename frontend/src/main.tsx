@@ -7,6 +7,7 @@ import {
   Eye,
   ExternalLink,
   FolderOpen,
+  MoveRight,
   Pause,
   Play,
   RotateCw,
@@ -60,6 +61,13 @@ type StagedAction = {
   confidence: "Safe" | "Medium" | "Manual review";
   bytes: number;
   reason: string;
+};
+
+type MoveSuggestion = {
+  category: CategoryKey;
+  folderCount: number;
+  bytes: number;
+  destination: string;
 };
 
 function App() {
@@ -456,34 +464,8 @@ function App() {
           <aside className="recommendations">
             <h2>Action Heatmap</h2>
             <ActionHeatmap scan={scan} />
+            <SmartSuggestedMoves scan={scan} onStage={stageSuggestedMove} />
           </aside>
-        </section>
-
-        <section className="folder-table">
-          <div className="panel-header">
-            <h2>Scan Manager</h2>
-            <span>{scan.status}</span>
-          </div>
-          <div className="scan-manager-grid">
-            <button className="primary-action icon-primary" type="button" onClick={openFolderPicker} title="Choose folder" aria-label="Choose folder">
-              <FolderOpen size={18} />
-            </button>
-            {scan.status === "scanning" && (
-              <button className="ghost-action" type="button" onClick={pauseScan} title="Pause scan" aria-label="Pause scan">
-                <Pause size={18} />
-              </button>
-            )}
-            {scan.status === "paused" && (
-              <button className="ghost-action" type="button" onClick={resumeScan} title="Resume scan" aria-label="Resume scan">
-                <Play size={18} />
-              </button>
-            )}
-            {(scan.status === "scanning" || scan.status === "paused") && (
-              <button className="ghost-action danger" type="button" onClick={cancelScan} title="Cancel scan" aria-label="Cancel scan">
-                <Square size={16} />
-              </button>
-            )}
-          </div>
         </section>
 
         <section className="folder-table" id="data">
@@ -801,6 +783,23 @@ function App() {
     });
   }
 
+  function stageSuggestedMove(suggestion: MoveSuggestion) {
+    setStagedActions((current) => {
+      const id = `move-${suggestion.category}-${suggestion.destination}`;
+      if (current.some((action) => action.id === id)) return current;
+      return [
+        ...current,
+        {
+          id,
+          label: `Review ${categories[suggestion.category].label} move plan`,
+          confidence: "Manual review",
+          bytes: suggestion.bytes,
+          reason: `${formatCount(suggestion.folderCount)} folders contain ${categories[suggestion.category].label.toLowerCase()}. Suggested destination: ${suggestion.destination}.`,
+        },
+      ];
+    });
+  }
+
   async function refreshSavedIndexes() {
     try {
       setSavedIndexes(await listNativeIndexes());
@@ -1061,6 +1060,49 @@ function ActionHeatmap({ scan }: { scan: ScanState }) {
               </span>
             );
           })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SmartSuggestedMoves({ scan, onStage }: { scan: ScanState; onStage: (suggestion: MoveSuggestion) => void }) {
+  const moveCategories: CategoryKey[] = ["photos", "videos", "music", "documents"];
+  const suggestions = moveCategories
+    .map((category) => {
+      const folders = scan.folders
+        .filter((folder) => folder.categories[category] > 0)
+        .sort((a, b) => b.categories[category] - a.categories[category]);
+      const bytes = folders.reduce((sum, folder) => sum + folder.categories[category], 0);
+      return {
+        category,
+        folderCount: folders.length,
+        bytes,
+        destination: `${categories[category].label}/Review/`,
+      };
+    })
+    .filter((suggestion) => suggestion.folderCount > 1 && suggestion.bytes > 0)
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, 3);
+
+  if (suggestions.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="suggested-moves" aria-label="Smart suggested moves">
+      <h3>Suggested Moves</h3>
+      {suggestions.map((suggestion) => (
+        <div className="suggested-move" key={suggestion.category}>
+          <span style={{ background: categories[suggestion.category].color }} />
+          <div>
+            <strong>{categories[suggestion.category].label}</strong>
+            <small>{formatBytes(suggestion.bytes)} across {formatCount(suggestion.folderCount)} folders</small>
+            <small>{suggestion.destination}</small>
+          </div>
+          <IconButton title={`Stage ${categories[suggestion.category].label} move review`} onClick={() => onStage(suggestion)}>
+            <MoveRight size={16} />
+          </IconButton>
         </div>
       ))}
     </div>

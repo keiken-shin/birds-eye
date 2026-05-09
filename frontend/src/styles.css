@@ -449,6 +449,58 @@ h2 {
   padding: 0 6px;
 }
 
+.suggested-moves {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.suggested-moves h3 {
+  margin: 0;
+  color: #dce6f5;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.suggested-move {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) 34px;
+  gap: 10px;
+  align-items: center;
+  min-height: 54px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 8px;
+}
+
+.suggested-move > span {
+  width: 8px;
+  height: 100%;
+  min-height: 32px;
+  border-radius: 999px;
+}
+
+.suggested-move div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.suggested-move strong,
+.suggested-move small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggested-move small {
+  color: #96a1b6;
+}
+
 .folder-table {
   margin-top: 18px;
 }
