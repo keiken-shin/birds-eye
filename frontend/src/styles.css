@@ -71,19 +71,24 @@ button {
   margin-top: 32px;
 }
 
-.sidebar a {
+.sidebar button {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   min-height: 42px;
+  border: 0;
   border-radius: 8px;
+  background: transparent;
   color: #96a1b6;
+  cursor: pointer;
   padding: 0 12px;
+  text-align: left;
   text-decoration: none;
 }
 
-.sidebar a.active,
-.sidebar a:hover {
+.sidebar button.active,
+.sidebar button:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #ffffff;
 }
@@ -132,6 +137,13 @@ h2 {
   justify-content: flex-end;
 }
 
+.scan-manager-grid {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .hidden-input {
   display: none;
 }
@@ -153,6 +165,13 @@ h2 {
   color: #061014;
   font-weight: 800;
   padding: 0 18px;
+}
+
+.primary-action.icon-primary {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  padding: 0;
 }
 
 .ghost-action {
@@ -489,6 +508,7 @@ h2 {
 }
 
 .search-filters input[type="text"],
+.search-filters input[type="number"],
 .search-filters select {
   min-height: 38px;
   min-width: 0;
@@ -498,6 +518,16 @@ h2 {
   color: #dce6f5;
   font: inherit;
   padding: 0 10px;
+}
+
+.search-filters input[type="number"] {
+  appearance: textfield;
+}
+
+.search-filters input[type="number"]::-webkit-outer-spin-button,
+.search-filters input[type="number"]::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
 }
 
 .search-filters label {
@@ -544,19 +574,20 @@ h2 {
   grid-template-columns: minmax(0, 1fr) 110px 90px auto;
 }
 
-.action-row-grid button,
-.duplicate-actions button {
+.icon-cta {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
   min-height: 32px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.06);
   color: #dce6f5;
   cursor: pointer;
-  padding: 0 10px;
+  padding: 0;
 }
 
-.action-row-grid button:hover,
-.duplicate-actions button:hover {
+.icon-cta:hover {
   background: rgba(255, 255, 255, 0.12);
 }
 
@@ -643,20 +674,6 @@ h2 {
   font-size: 13px;
 }
 
-.index-row button {
-  min-height: 34px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #dce6f5;
-  cursor: pointer;
-  padding: 0 10px;
-}
-
-.index-row button:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
 .index-row .danger-text {
   color: #fb7185;
 }
@@ -676,17 +693,6 @@ h2 {
 
 .stage-summary span {
   color: #96a1b6;
-}
-
-.stage-summary button,
-.staged-row button {
-  min-height: 34px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #dce6f5;
-  cursor: pointer;
-  padding: 0 10px;
 }
 
 .staged-row {

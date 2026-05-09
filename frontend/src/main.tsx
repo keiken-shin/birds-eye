@@ -5,15 +5,20 @@ import {
   ChevronLeft,
   CopyCheck,
   Database,
+  Eye,
+  ExternalLink,
   FolderOpen,
   FolderSearch,
   Pause,
   Play,
   Radar,
+  RotateCw,
   Search,
   Settings,
   Square,
   Trash2,
+  Undo2,
+  X,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import {
@@ -46,7 +51,7 @@ import {
   type NativeIndexEntry,
   type NativeIndexOverview,
   type NativeJobEvent,
-type NativeSearchResult,
+  type NativeSearchResult,
 } from "./nativeClient";
 import { TreemapCanvas } from "./TreemapCanvas";
 import logoUrl from "./assets/birds-eye-logo.svg";
@@ -59,6 +64,8 @@ type StagedAction = {
   bytes: number;
   reason: string;
 };
+
+type AppView = "dashboard" | "scan" | "treemap" | "data" | "settings";
 
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -79,6 +86,7 @@ function App() {
   const [selectedDuplicateGroup, setSelectedDuplicateGroup] = useState<number | null>(null);
   const [savedIndexes, setSavedIndexes] = useState<NativeIndexEntry[]>([]);
   const [stagedActions, setStagedActions] = useState<StagedAction[]>([]);
+  const [activeView, setActiveView] = useState<AppView>("dashboard");
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
 
@@ -352,11 +360,11 @@ function App() {
           <span>Birds Eye</span>
         </div>
         <nav>
-          <a className="active" href="#dashboard"><Activity size={18} />Dashboard</a>
-          <a href="#scan"><Radar size={18} />Scan Manager</a>
-          <a href="#treemap"><FolderSearch size={18} />Treemap</a>
-          <a href="#data"><Database size={18} />Index</a>
-          <a href="#settings"><Settings size={18} />Settings</a>
+          <NavButton active={activeView === "dashboard"} icon={<Activity size={18} />} label="Dashboard" onClick={() => setActiveView("dashboard")} />
+          <NavButton active={activeView === "scan"} icon={<Radar size={18} />} label="Scan Manager" onClick={() => setActiveView("scan")} />
+          <NavButton active={activeView === "treemap"} icon={<FolderSearch size={18} />} label="Treemap" onClick={() => setActiveView("treemap")} />
+          <NavButton active={activeView === "data"} icon={<Database size={18} />} label="Index" onClick={() => setActiveView("data")} />
+          <NavButton active={activeView === "settings"} icon={<Settings size={18} />} label="Settings" onClick={() => setActiveView("settings")} />
         </nav>
       </aside>
 
@@ -374,32 +382,33 @@ function App() {
               multiple
               onChange={(event) => handleFiles(event.currentTarget.files)}
             />
-            <button className="primary-action" type="button" onClick={openFolderPicker}>
-              <FolderOpen size={18} /> Choose Folder
+            <button className="primary-action icon-primary" type="button" onClick={openFolderPicker} title="Choose folder" aria-label="Choose folder">
+              <FolderOpen size={18} />
             </button>
             {scan.status === "scanning" && (
-              <button className="ghost-action" type="button" onClick={pauseScan} title="Pause scan">
+              <button className="ghost-action" type="button" onClick={pauseScan} title="Pause scan" aria-label="Pause scan">
                 <Pause size={18} />
               </button>
             )}
             {scan.status === "paused" && (
-              <button className="ghost-action" type="button" onClick={resumeScan} title="Resume scan">
+              <button className="ghost-action" type="button" onClick={resumeScan} title="Resume scan" aria-label="Resume scan">
                 <Play size={18} />
               </button>
             )}
             {(scan.status === "scanning" || scan.status === "paused") && (
-              <button className="ghost-action danger" type="button" onClick={cancelScan} title="Cancel scan">
+              <button className="ghost-action danger" type="button" onClick={cancelScan} title="Cancel scan" aria-label="Cancel scan">
                 <Square size={16} />
               </button>
             )}
             {scan.status !== "idle" && (
-              <button className="ghost-action" type="button" onClick={clearScan} title="Clear results">
+              <button className="ghost-action" type="button" onClick={clearScan} title="Clear results" aria-label="Clear results">
                 <Trash2 size={18} />
               </button>
             )}
           </div>
         </header>
 
+        {(activeView === "dashboard" || activeView === "scan") && (
         <section className="scan-strip" id="scan" aria-label="Scan progress">
           <div>
             <span>{scan.rootName}</span>
@@ -410,7 +419,9 @@ function App() {
           </div>
           <small>{runtimeMessage} - {scan.currentPath}</small>
         </section>
+        )}
 
+        {(activeView === "dashboard" || activeView === "scan") && (
         <section className="metric-grid" aria-label="Scan metrics">
           {metrics.map((metric) => (
             <motion.article
@@ -425,7 +436,9 @@ function App() {
             </motion.article>
           ))}
         </section>
+        )}
 
+        {(activeView === "dashboard" || activeView === "treemap") && (
         <section className="filter-bar" aria-label="Category filters">
           <button className={filter === "all" ? "active" : ""} type="button" onClick={() => setFilter("all")}>
             All
@@ -442,7 +455,9 @@ function App() {
             </button>
           ))}
         </section>
+        )}
 
+        {(activeView === "dashboard" || activeView === "treemap") && (
         <section className="analysis-layout" id="treemap">
           <div className="treemap-panel">
             <div className="panel-header">
@@ -461,6 +476,7 @@ function App() {
             <Treemap folders={filteredFolders} onSelect={(folder) => setFocusedFolder(folder.path)} />
           </div>
 
+          {activeView === "dashboard" && (
           <aside className="recommendations">
             <h2>Cleanup Intelligence</h2>
             <Recommendation text={makeDuplicateHint(scan)} />
@@ -468,8 +484,41 @@ function App() {
             <Recommendation text={makeCategoryHint(scan, "archives", "archive payloads")} />
             <Recommendation text={makeCategoryHint(scan, "videos", "video library")} />
           </aside>
+          )}
         </section>
+        )}
 
+        {activeView === "scan" && (
+        <section className="folder-table">
+          <div className="panel-header">
+            <h2>Scan Manager</h2>
+            <span>{scan.status}</span>
+          </div>
+          <div className="scan-manager-grid">
+            <button className="primary-action icon-primary" type="button" onClick={openFolderPicker} title="Choose folder" aria-label="Choose folder">
+              <FolderOpen size={18} />
+            </button>
+            {scan.status === "scanning" && (
+              <button className="ghost-action" type="button" onClick={pauseScan} title="Pause scan" aria-label="Pause scan">
+                <Pause size={18} />
+              </button>
+            )}
+            {scan.status === "paused" && (
+              <button className="ghost-action" type="button" onClick={resumeScan} title="Resume scan" aria-label="Resume scan">
+                <Play size={18} />
+              </button>
+            )}
+            {(scan.status === "scanning" || scan.status === "paused") && (
+              <button className="ghost-action danger" type="button" onClick={cancelScan} title="Cancel scan" aria-label="Cancel scan">
+                <Square size={16} />
+              </button>
+            )}
+          </div>
+        </section>
+        )}
+
+        {activeView === "data" && (
+        <>
         <section className="folder-table" id="data">
           <div className="panel-header">
             <h2>Largest Folders</h2>
@@ -484,7 +533,9 @@ function App() {
                   <span>{folder.path}</span>
                   <strong>{formatBytes(folder.bytes)}</strong>
                   <small>{formatCount(folder.files)} files</small>
-                  <button type="button" onClick={() => void revealPath(folder.path)}>Open</button>
+                  <IconButton title="Open in Explorer" onClick={() => void revealPath(folder.path)}>
+                    <ExternalLink size={16} />
+                  </IconButton>
                 </div>
               ))}
             </ScrollableRows>
@@ -554,7 +605,9 @@ function App() {
                   <span>{file.path}</span>
                   <strong>{formatBytes(file.size)}</strong>
                   <small>{file.extension ?? "(none)"}</small>
-                  <button type="button" onClick={() => void revealPath(file.path)}>Open</button>
+                  <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
+                    <ExternalLink size={16} />
+                  </IconButton>
                 </div>
               ))}
             </ScrollableRows>
@@ -576,7 +629,9 @@ function App() {
                     <span>{file.path}</span>
                     <strong>{formatBytes(file.bytes)}</strong>
                     <small>{file.extension}</small>
-                    <button type="button" onClick={() => void revealPath(file.path)}>Open</button>
+                    <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
+                      <ExternalLink size={16} />
+                    </IconButton>
                   </div>
                 ))}
               </ScrollableRows>
@@ -634,7 +689,9 @@ function App() {
                   </div>
                   <small>{candidate.samples.join(" | ")}</small>
                   <span className="duplicate-actions">
-                    <button type="button" onClick={(event) => stageDuplicateAction(event, candidate)}>Stage</button>
+                    <IconButton title="Stage exact duplicate review" onClick={(event) => stageDuplicateAction(event, candidate)}>
+                      <CopyCheck size={16} />
+                    </IconButton>
                   </span>
                 </div>
               ))}
@@ -647,7 +704,9 @@ function App() {
                   <span>{file.path}</span>
                   <strong>{formatBytes(file.size)}</strong>
                   <small>{file.modified_at ? formatDate(file.modified_at) : "-"}</small>
-                  <button type="button" onClick={() => void revealPath(file.path)}>Open</button>
+                  <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
+                    <ExternalLink size={16} />
+                  </IconButton>
                 </div>
               ))}
             </div>
@@ -656,18 +715,22 @@ function App() {
 
         <section className="folder-table">
           <div className="panel-header">
-            <h2>Staging Area</h2>
-            <span>{formatCount(stagedActions.length)} pending actions</span>
+            <h2>Review Queue</h2>
+            <span>{formatCount(stagedActions.length)} staged reviews</span>
           </div>
           {stagedActions.length === 0 ? (
-            <div className="empty-state compact">Stage cleanup actions here first. Nothing is deleted or moved until a future commit step is explicitly added.</div>
+            <div className="empty-state compact">No staged reviews. Add duplicate groups here first; no files are changed from this queue.</div>
           ) : (
             <>
               <div className="stage-summary">
                 <strong>{formatBytes(stagedActions.reduce((sum, action) => sum + action.bytes, 0))}</strong>
-                <span>simulated reclaimable space</span>
-                <button type="button" onClick={() => setStagedActions((current) => current.slice(0, -1))}>Undo last</button>
-                <button type="button" onClick={() => setStagedActions([])}>Clear</button>
+                <span>reclaimable if committed later</span>
+                <IconButton title="Undo last staged action" onClick={() => setStagedActions((current) => current.slice(0, -1))}>
+                  <Undo2 size={16} />
+                </IconButton>
+                <IconButton title="Clear staged actions" onClick={() => setStagedActions([])}>
+                  <X size={16} />
+                </IconButton>
               </div>
               <ScrollableRows compact>
                 {stagedActions.map((action) => (
@@ -684,7 +747,10 @@ function App() {
             </>
           )}
         </section>
+        </>
+        )}
 
+        {activeView === "settings" && (
         <section className="folder-table" id="settings">
           <div className="panel-header">
             <h2>Saved Indexes</h2>
@@ -702,14 +768,21 @@ function App() {
                     <strong>{entry.root_path ?? "Unknown root"}</strong>
                     <span>{entry.last_status ?? "unknown"} - {formatBytes(entry.bytes_scanned)} - {formatCount(entry.files_scanned)} files</span>
                   </div>
-                  <button type="button" onClick={() => void openSavedIndex(entry)}>View</button>
-                  <button type="button" onClick={() => void rescanSavedIndex(entry)}>Rescan</button>
-                  <button className="danger-text" type="button" onClick={() => void removeSavedIndex(entry)}>Delete</button>
+                  <IconButton title="View saved index" onClick={() => void openSavedIndex(entry)}>
+                    <Eye size={16} />
+                  </IconButton>
+                  <IconButton title="Rescan folder" onClick={() => void rescanSavedIndex(entry)}>
+                    <RotateCw size={16} />
+                  </IconButton>
+                  <IconButton className="danger-text" title="Delete saved index" onClick={() => void removeSavedIndex(entry)}>
+                    <Trash2 size={16} />
+                  </IconButton>
                 </div>
               ))}
             </ScrollableRows>
           )}
         </section>
+        )}
       </section>
     </main>
   );
@@ -753,12 +826,12 @@ function App() {
         ...current,
         {
           id,
-          label: `Review duplicate group ${candidate.id ?? formatBytes(candidate.size)}`,
+          label: confidenceScore >= 1 ? "Exact duplicate cleanup candidate" : "Duplicate review candidate",
           confidence,
           bytes: candidate.reclaimableBytes,
           reason: confidenceScore >= 1
-            ? "Exact duplicate group: matching full-file hashes. Commit is not implemented yet."
-            : "Candidate group needs review before any delete action can be committed.",
+            ? `Group ${candidate.id ?? formatBytes(candidate.size)} has matching full-file hashes. This is staged only.`
+            : `Group ${candidate.id ?? formatBytes(candidate.size)} needs manual review before cleanup.`,
         },
       ];
     });
@@ -888,6 +961,33 @@ function mediaKindFromCategory(category: CategoryKey) {
   if (category === "installers") return "installer";
   if (category === "models") return "model";
   return category === "other" ? "other" : category;
+}
+
+function NavButton({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button className={active ? "active" : ""} type="button" onClick={onClick}>
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function IconButton({
+  children,
+  className = "",
+  title,
+  onClick,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  title: string;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button className={`icon-cta ${className}`} type="button" title={title} aria-label={title} onClick={onClick}>
+      {children}
+    </button>
+  );
 }
 
 function Treemap({ folders, onSelect }: { folders: Array<FolderStats & { displayBytes: number }>; onSelect: (folder: FolderStats & { displayBytes: number }) => void }) {
