@@ -8,6 +8,12 @@ Run a persisted scan:
 cargo run --bin birds-eye-scan -- <folder> --index birds-eye.sqlite
 ```
 
+Inspect an existing index:
+
+```powershell
+cargo run --bin birds-eye-scan -- query birds-eye.sqlite 10
+```
+
 Current flow:
 
 1. `Scanner` emits `Started`, `FileIndexed`, `FolderIndexed`, `Progress`, `Finished`, and `Cancelled` events.
