@@ -25,6 +25,37 @@ pub struct IndexWriter {
     folder_ids: HashMap<PathBuf, i64>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct FolderSummary {
+    pub path: String,
+    pub total_files: i64,
+    pub total_bytes: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileSummary {
+    pub path: String,
+    pub size: i64,
+    pub extension: Option<String>,
+    pub media_kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtensionSummary {
+    pub extension: String,
+    pub file_count: i64,
+    pub total_bytes: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuplicateGroupSummary {
+    pub id: i64,
+    pub size: i64,
+    pub file_count: i64,
+    pub reclaimable_bytes: i64,
+    pub confidence: f64,
+}
+
 impl IndexWriter {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, IndexError> {
         let connection = Connection::open(path)?;
@@ -72,6 +103,81 @@ impl IndexWriter {
 
     pub fn connection(&self) -> &Connection {
         &self.connection
+    }
+
+    pub fn largest_folders(&self, limit: usize) -> Result<Vec<FolderSummary>, IndexError> {
+        let mut statement = self.connection.prepare(
+            "SELECT path, total_files, total_bytes
+             FROM folders
+             WHERE total_bytes > 0
+             ORDER BY total_bytes DESC
+             LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit as i64], |row| {
+            Ok(FolderSummary {
+                path: row.get(0)?,
+                total_files: row.get(1)?,
+                total_bytes: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn largest_files(&self, limit: usize) -> Result<Vec<FileSummary>, IndexError> {
+        let mut statement = self.connection.prepare(
+            "SELECT path, size, extension, media_kind
+             FROM files
+             WHERE deleted_at IS NULL
+             ORDER BY size DESC
+             LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit as i64], |row| {
+            Ok(FileSummary {
+                path: row.get(0)?,
+                size: row.get(1)?,
+                extension: row.get(2)?,
+                media_kind: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn extension_summaries(&self, limit: usize) -> Result<Vec<ExtensionSummary>, IndexError> {
+        let mut statement = self.connection.prepare(
+            "SELECT extension, file_count, total_bytes
+             FROM extension_stats
+             ORDER BY total_bytes DESC
+             LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit as i64], |row| {
+            Ok(ExtensionSummary {
+                extension: row.get(0)?,
+                file_count: row.get(1)?,
+                total_bytes: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn duplicate_groups(&self, limit: usize) -> Result<Vec<DuplicateGroupSummary>, IndexError> {
+        let mut statement = self.connection.prepare(
+            "SELECT dg.id, dg.size, COUNT(dgf.file_id), dg.reclaimable_bytes, dg.confidence
+             FROM duplicate_groups dg
+             JOIN duplicate_group_files dgf ON dgf.group_id = dg.id
+             GROUP BY dg.id
+             ORDER BY dg.reclaimable_bytes DESC
+             LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit as i64], |row| {
+            Ok(DuplicateGroupSummary {
+                id: row.get(0)?,
+                size: row.get(1)?,
+                file_count: row.get(2)?,
+                reclaimable_bytes: row.get(3)?,
+                confidence: row.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     fn migrate(&self) -> Result<(), IndexError> {
@@ -577,7 +683,39 @@ mod tests {
         assert_eq!(duplicate_groups, 0);
         assert_eq!(extension_file_count, 1);
         assert_eq!(root_total_bytes, 32);
+        assert_eq!(writer.largest_files(10).expect("largest files").len(), 1);
+        assert_eq!(
+            writer
+                .extension_summaries(10)
+                .expect("extension summaries")
+                .first()
+                .map(|summary| summary.file_count),
+            Some(1)
+        );
         assert!(keep_path.exists());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn exposes_index_query_summaries() {
+        let root = test_root("queries");
+        fs::create_dir_all(root.join("nested")).expect("failed to create folder");
+        write_file(&root.join("nested").join("large.mp4"), &[1; 128]);
+        write_file(&root.join("small.txt"), &[2; 16]);
+        write_file(&root.join("copy.txt"), &[3; 16]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut writer);
+
+        let folders = writer.largest_folders(3).expect("largest folders");
+        let files = writer.largest_files(2).expect("largest files");
+        let extensions = writer.extension_summaries(3).expect("extensions");
+        let duplicates = writer.duplicate_groups(3).expect("duplicates");
+
+        assert_eq!(folders.first().map(|folder| folder.total_bytes), Some(160));
+        assert_eq!(files.first().map(|file| file.size), Some(128));
+        assert_eq!(extensions.first().map(|extension| extension.extension.as_str()), Some("mp4"));
+        assert_eq!(duplicates.first().map(|group| group.file_count), Some(2));
         cleanup(&root);
     }
 

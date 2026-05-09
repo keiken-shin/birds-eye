@@ -1,4 +1,6 @@
 pub mod schema;
 pub mod writer;
 
-pub use writer::{IndexError, IndexWriter};
+pub use writer::{
+    DuplicateGroupSummary, ExtensionSummary, FileSummary, FolderSummary, IndexError, IndexWriter,
+};

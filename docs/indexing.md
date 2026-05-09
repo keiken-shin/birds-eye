@@ -20,3 +20,10 @@ Current flow:
 Duplicate confidence is currently `0.35` for size-only matches. Later stages should raise confidence only after partial hashing and full hashing.
 
 This is the durable Phase 2 foundation. Next indexing work should improve batching and partial/full hash duplicate refinement.
+
+Read API currently exposed by `IndexWriter`:
+
+- `largest_folders(limit)`
+- `largest_files(limit)`
+- `extension_summaries(limit)`
+- `duplicate_groups(limit)`
