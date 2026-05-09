@@ -92,6 +92,15 @@ pub struct DuplicateFileSummaryDto {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DuplicateOverlapSummaryDto {
+    pub folder_a: String,
+    pub folder_b: String,
+    pub shared_groups: i64,
+    pub shared_files: i64,
+    pub reclaimable_bytes: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct MediaSummaryDto {
     pub media_kind: String,
     pub file_count: i64,
@@ -111,6 +120,7 @@ pub struct IndexOverviewDto {
     pub files: Vec<FileSummaryDto>,
     pub extensions: Vec<ExtensionSummaryDto>,
     pub duplicate_groups: Vec<DuplicateGroupSummaryDto>,
+    pub duplicate_overlaps: Vec<DuplicateOverlapSummaryDto>,
     pub media: Vec<MediaSummaryDto>,
     pub folder_media: Vec<FolderMediaSummaryDto>,
 }
@@ -201,6 +211,18 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
                 file_count: group.file_count,
                 reclaimable_bytes: group.reclaimable_bytes,
                 confidence: group.confidence,
+            })
+            .collect(),
+        duplicate_overlaps: writer
+            .duplicate_overlaps(request.limit)
+            .map_err(|error| format!("{error:?}"))?
+            .into_iter()
+            .map(|overlap| DuplicateOverlapSummaryDto {
+                folder_a: overlap.folder_a,
+                folder_b: overlap.folder_b,
+                shared_groups: overlap.shared_groups,
+                shared_files: overlap.shared_files,
+                reclaimable_bytes: overlap.reclaimable_bytes,
             })
             .collect(),
         media: writer

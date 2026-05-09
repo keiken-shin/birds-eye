@@ -125,6 +125,7 @@ async function scanFiles(files: File[]) {
       largestFiles: [...largestFiles],
       extensions: Array.from(extensionMap.values()).sort((a, b) => b.bytes - a.bytes).slice(0, 24),
       duplicateCandidates: getDuplicateCandidates(sizeGroups),
+      duplicateOverlaps: [],
       categories: { ...categoryTotals },
     };
   }

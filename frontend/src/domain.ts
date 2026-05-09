@@ -48,6 +48,14 @@ export type DuplicateCandidate = {
   confidenceScore?: number;
 };
 
+export type DuplicateOverlap = {
+  folderA: string;
+  folderB: string;
+  sharedGroups: number;
+  sharedFiles: number;
+  reclaimableBytes: number;
+};
+
 export type ScanStatus = "idle" | "scanning" | "paused" | "complete" | "cancelled";
 
 export type ScanState = {
@@ -64,6 +72,7 @@ export type ScanState = {
   largestFiles: FileStats[];
   extensions: ExtensionStats[];
   duplicateCandidates: DuplicateCandidate[];
+  duplicateOverlaps: DuplicateOverlap[];
   categories: Record<CategoryKey, { files: number; bytes: number }>;
 };
 
@@ -156,6 +165,7 @@ export const initialScanState: ScanState = {
   largestFiles: [],
   extensions: [],
   duplicateCandidates: [],
+  duplicateOverlaps: [],
   categories: emptyCategories(),
 };
 

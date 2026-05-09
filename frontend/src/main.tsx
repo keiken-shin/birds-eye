@@ -26,6 +26,7 @@ import {
   initialScanState,
   lastSegment,
   type CategoryKey,
+  type DuplicateOverlap,
   type FolderStats,
   type ScanState,
   type ScanWorkerCommand,
@@ -634,6 +635,7 @@ function App() {
             <span><CopyCheck size={14} /> Size + partial + full hash</span>
           </div>
           <p className="section-note">Duplicate groups start by identical file size, then matching candidates are refined with partial hashes and full-file hashes. A 100% confidence group means matching full hashes.</p>
+          <DuplicateOverlapGraph overlaps={scan.duplicateOverlaps} />
           {scan.duplicateCandidates.length === 0 ? (
             <div className="empty-state compact">Files with identical sizes will appear here as duplicate candidates.</div>
           ) : (
@@ -887,6 +889,13 @@ function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): Sc
     confidence: "size-match" as const,
     confidenceScore: group.confidence,
   }));
+  const duplicateOverlaps = overview.duplicate_overlaps.map((overlap) => ({
+    folderA: overlap.folder_a,
+    folderB: overlap.folder_b,
+    sharedGroups: overlap.shared_groups,
+    sharedFiles: overlap.shared_files,
+    reclaimableBytes: overlap.reclaimable_bytes,
+  }));
   const categoryTotals = emptyCategories();
   for (const media of overview.media) {
     const category = categoryFromMediaKind(media.media_kind);
@@ -900,6 +909,7 @@ function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): Sc
     largestFiles,
     extensions,
     duplicateCandidates,
+    duplicateOverlaps,
     categories: categoryTotals,
   };
 }
@@ -924,6 +934,77 @@ function mediaKindFromCategory(category: CategoryKey) {
   if (category === "installers") return "installer";
   if (category === "models") return "model";
   return category === "other" ? "other" : category;
+}
+
+function DuplicateOverlapGraph({ overlaps }: { overlaps: DuplicateOverlap[] }) {
+  const topOverlaps = overlaps.slice(0, 8);
+  if (topOverlaps.length === 0) {
+    return null;
+  }
+
+  const folderWeights = new Map<string, number>();
+  for (const overlap of topOverlaps) {
+    folderWeights.set(overlap.folderA, (folderWeights.get(overlap.folderA) ?? 0) + overlap.reclaimableBytes);
+    folderWeights.set(overlap.folderB, (folderWeights.get(overlap.folderB) ?? 0) + overlap.reclaimableBytes);
+  }
+
+  const folders = [...folderWeights.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([path, bytes], index, list) => {
+      const angle = list.length === 1 ? 0 : (Math.PI * 2 * index) / list.length - Math.PI / 2;
+      return {
+        path,
+        bytes,
+        x: 50 + Math.cos(angle) * 32,
+        y: 50 + Math.sin(angle) * 32,
+      };
+    });
+  const folderByPath = new Map(folders.map((folder) => [folder.path, folder]));
+  const maxBytes = Math.max(...topOverlaps.map((overlap) => overlap.reclaimableBytes), 1);
+
+  return (
+    <div className="overlap-graph" aria-label="Duplicate overlap graph">
+      <div className="overlap-canvas">
+        <svg viewBox="0 0 100 100" role="img" aria-label="Folders connected by shared duplicate files">
+          {topOverlaps.map((overlap) => {
+            const source = folderByPath.get(overlap.folderA);
+            const target = folderByPath.get(overlap.folderB);
+            if (!source || !target) return null;
+            const width = 1.5 + (overlap.reclaimableBytes / maxBytes) * 7;
+            return (
+              <line
+                key={`${overlap.folderA}-${overlap.folderB}`}
+                x1={source.x}
+                y1={source.y}
+                x2={target.x}
+                y2={target.y}
+                strokeWidth={width}
+              />
+            );
+          })}
+          {folders.map((folder) => {
+            const radius = 7 + Math.min(11, Math.sqrt(folder.bytes / Math.max(maxBytes, 1)) * 9);
+            return (
+              <g key={folder.path}>
+                <circle cx={folder.x} cy={folder.y} r={radius} />
+                <text x={folder.x} y={folder.y + radius + 5}>{lastSegment(folder.path)}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <div className="overlap-list">
+        {topOverlaps.slice(0, 4).map((overlap) => (
+          <div className="overlap-pair" key={`${overlap.folderA}-${overlap.folderB}`}>
+            <strong>{formatBytes(overlap.reclaimableBytes)}</strong>
+            <span>{lastSegment(overlap.folderA)} <span aria-hidden="true">/</span> {lastSegment(overlap.folderB)}</span>
+            <small>{formatCount(overlap.sharedGroups)} groups, {formatCount(overlap.sharedFiles)} files</small>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function IconButton({

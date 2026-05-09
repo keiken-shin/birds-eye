@@ -27,6 +27,13 @@ export type NativeIndexOverview = {
     reclaimable_bytes: number;
     confidence: number;
   }>;
+  duplicate_overlaps: Array<{
+    folder_a: string;
+    folder_b: string;
+    shared_groups: number;
+    shared_files: number;
+    reclaimable_bytes: number;
+  }>;
   media: Array<{ media_kind: string; file_count: number; total_bytes: number }>;
   folder_media: Array<{ folder_path: string; media_kind: string; total_bytes: number }>;
 };

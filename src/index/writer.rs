@@ -85,6 +85,15 @@ pub struct DuplicateFileSummary {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct DuplicateOverlapSummary {
+    pub folder_a: String,
+    pub folder_b: String,
+    pub shared_groups: i64,
+    pub shared_files: i64,
+    pub reclaimable_bytes: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct MediaSummary {
     pub media_kind: String,
     pub file_count: i64,
@@ -313,6 +322,46 @@ impl IndexWriter {
                 path: row.get(0)?,
                 size: row.get(1)?,
                 modified_at: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn duplicate_overlaps(&self, limit: usize) -> Result<Vec<DuplicateOverlapSummary>, IndexError> {
+        let mut statement = self.connection.prepare(
+            "WITH group_folders AS (
+               SELECT dgf.group_id, files.folder_id, folders.path AS folder_path, COUNT(*) AS file_count
+               FROM duplicate_group_files dgf
+               JOIN files ON files.id = dgf.file_id
+               JOIN folders ON folders.id = files.folder_id
+               WHERE files.deleted_at IS NULL
+               GROUP BY dgf.group_id, files.folder_id
+             )
+             SELECT
+               a.folder_path,
+               b.folder_path,
+               COUNT(*) AS shared_groups,
+               SUM(a.file_count + b.file_count) AS shared_files,
+               SUM(
+                 CASE
+                   WHEN a.file_count < b.file_count THEN a.file_count
+                   ELSE b.file_count
+                 END * dg.size
+               ) AS reclaimable_bytes
+             FROM group_folders a
+             JOIN group_folders b ON b.group_id = a.group_id AND b.folder_id > a.folder_id
+             JOIN duplicate_groups dg ON dg.id = a.group_id
+             GROUP BY a.folder_path, b.folder_path
+             ORDER BY reclaimable_bytes DESC, shared_groups DESC
+             LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit as i64], |row| {
+            Ok(DuplicateOverlapSummary {
+                folder_a: row.get(0)?,
+                folder_b: row.get(1)?,
+                shared_groups: row.get(2)?,
+                shared_files: row.get(3)?,
+                reclaimable_bytes: row.get(4)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
