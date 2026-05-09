@@ -5,6 +5,9 @@ edition = "2021"
 description = "Native disk space intelligence platform scanner core"
 license = "MIT"
 
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+
 [lib]
 name = "birds_eye"
 path = "src/lib.rs"
@@ -12,4 +15,3 @@ path = "src/lib.rs"
 [[bin]]
 name = "birds-eye-scan"
 path = "src/main.rs"
-
