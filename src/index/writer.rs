@@ -40,6 +40,7 @@ pub struct FileSummary {
     pub size: i64,
     pub extension: Option<String>,
     pub media_kind: String,
+    pub modified_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -178,7 +179,7 @@ impl IndexWriter {
 
     pub fn largest_files(&self, limit: usize) -> Result<Vec<FileSummary>, IndexError> {
         let mut statement = self.connection.prepare(
-            "SELECT path, size, extension, media_kind
+            "SELECT path, size, extension, media_kind, modified_at
              FROM files
              WHERE deleted_at IS NULL
              ORDER BY size DESC
@@ -190,6 +191,7 @@ impl IndexWriter {
                 size: row.get(1)?,
                 extension: row.get(2)?,
                 media_kind: row.get(3)?,
+                modified_at: row.get(4)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)

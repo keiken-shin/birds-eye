@@ -624,6 +624,8 @@ function App() {
           </div>
         </section>
 
+        <TimelineScatter files={scan.largestFiles} />
+
         <section className="folder-table">
           <div className="panel-header">
             <h2>Duplicate Candidates</h2>
@@ -915,7 +917,7 @@ function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): Sc
     extension: file.extension ?? "(none)",
     bytes: file.size,
     category: categoryFromMediaKind(file.media_kind),
-    modified: 0,
+    modified: file.modified_at ? file.modified_at * 1000 : 0,
   }));
   const extensions = overview.extensions.map((extension) => ({
     extension: extension.extension,
@@ -1246,6 +1248,58 @@ function SunburstHierarchy({ folders }: { folders: FolderStats[] }) {
         <text x="110" y="122">{formatCount(folders.length)}</text>
       </svg>
     </div>
+  );
+}
+
+function TimelineScatter({ files }: { files: ScanState["largestFiles"] }) {
+  const points = files
+    .filter((file) => (file.category === "photos" || file.category === "videos") && file.modified > 0)
+    .sort((a, b) => a.modified - b.modified)
+    .slice(0, 400);
+
+  if (points.length < 2) {
+    return (
+      <section className="folder-table timeline-panel">
+        <div className="panel-header">
+          <h2>Media Timeline</h2>
+          <span>Photos and videos</span>
+        </div>
+        <div className="empty-state compact">Photo and video timestamps will appear here after the next indexed scan.</div>
+      </section>
+    );
+  }
+
+  const minTime = points[0].modified;
+  const maxTime = points[points.length - 1].modified;
+  const maxBytes = Math.max(...points.map((file) => file.bytes), 1);
+  const span = Math.max(maxTime - minTime, 1);
+
+  return (
+    <section className="folder-table timeline-panel">
+      <div className="panel-header">
+        <h2>Media Timeline</h2>
+        <span>{formatCount(points.length)} photos/videos</span>
+      </div>
+      <div className="timeline-scatter" aria-label="Photo and video timeline scatter">
+        {points.map((file) => {
+          const left = ((file.modified - minTime) / span) * 100;
+          const size = 7 + Math.min(13, Math.sqrt(file.bytes / maxBytes) * 13);
+          const lane = file.category === "photos" ? 34 : 66;
+          return (
+            <span
+              className={`timeline-dot ${file.category}`}
+              key={file.path}
+              style={{ left: `${left}%`, top: `${lane}%`, width: size, height: size }}
+              title={`${lastSegment(file.path)} - ${formatDate(Math.floor(file.modified / 1000))} - ${formatBytes(file.bytes)}`}
+            />
+          );
+        })}
+        <div className="timeline-axis">
+          <span>{formatDate(Math.floor(minTime / 1000))}</span>
+          <span>{formatDate(Math.floor(maxTime / 1000))}</span>
+        </div>
+      </div>
+    </section>
   );
 }
 

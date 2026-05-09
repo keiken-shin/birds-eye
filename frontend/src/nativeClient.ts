@@ -18,7 +18,7 @@ export type NativeJobEvent = {
 
 export type NativeIndexOverview = {
   folders: Array<{ path: string; total_files: number; total_bytes: number }>;
-  files: Array<{ path: string; size: number; extension: string | null; media_kind: string }>;
+  files: Array<{ path: string; size: number; extension: string | null; media_kind: string; modified_at: number | null }>;
   extensions: Array<{ extension: string; file_count: number; total_bytes: number }>;
   duplicate_groups: Array<{
     id: number;

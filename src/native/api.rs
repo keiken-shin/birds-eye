@@ -56,6 +56,7 @@ pub struct FileSummaryDto {
     pub size: i64,
     pub extension: Option<String>,
     pub media_kind: String,
+    pub modified_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -189,6 +190,7 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
                 size: file.size,
                 extension: file.extension,
                 media_kind: file.media_kind,
+                modified_at: file.modified_at,
             })
             .collect(),
         extensions: writer
