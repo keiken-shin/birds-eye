@@ -74,13 +74,15 @@ async function scanFiles(files: File[]) {
       const folderPath = getFolderPath(relativePath);
       const extension = getExtension(file.name);
       const category = classifyFile(file.name);
-      const folder = getOrCreateFolder(folderMap, folderPath);
       const extensionStats = getOrCreateExtension(extensionMap, extension);
       const sizeGroup = getOrCreateSizeGroup(sizeGroups, file.size);
 
-      folder.files += 1;
-      folder.bytes += file.size;
-      folder.categories[category] += file.size;
+      for (const path of getFolderPathChain(folderPath)) {
+        const folder = getOrCreateFolder(folderMap, path);
+        folder.files += 1;
+        folder.bytes += file.size;
+        folder.categories[category] += file.size;
+      }
       extensionStats.files += 1;
       extensionStats.bytes += file.size;
       sizeGroup.files += 1;
@@ -129,6 +131,12 @@ async function scanFiles(files: File[]) {
       categories: { ...categoryTotals },
     };
   }
+}
+
+function getFolderPathChain(path: string) {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length === 0) return ["Root"];
+  return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
 }
 
 function getOrCreateFolder(folderMap: Map<string, FolderStats>, path: string) {

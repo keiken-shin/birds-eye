@@ -70,6 +70,8 @@ type MoveSuggestion = {
   destination: string;
 };
 
+type AppPage = "workspace" | "index";
+
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -89,6 +91,7 @@ function App() {
   const [selectedDuplicateGroup, setSelectedDuplicateGroup] = useState<number | null>(null);
   const [savedIndexes, setSavedIndexes] = useState<NativeIndexEntry[]>([]);
   const [stagedActions, setStagedActions] = useState<StagedAction[]>([]);
+  const [activePage, setActivePage] = useState<AppPage>("workspace");
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
 
@@ -367,6 +370,14 @@ function App() {
             <h1>Understand where your disk space went.</h1>
           </div>
           <div className="action-row">
+            <nav className="top-nav" aria-label="Primary">
+              <button className={activePage === "workspace" ? "active" : ""} type="button" onClick={() => setActivePage("workspace")}>
+                Workspace
+              </button>
+              <button className={activePage === "index" ? "active" : ""} type="button" onClick={() => setActivePage("index")}>
+                Index Library
+              </button>
+            </nav>
             <input
               ref={fileInputRef}
               className="hidden-input"
@@ -400,6 +411,8 @@ function App() {
           </div>
         </header>
 
+        {activePage === "workspace" ? (
+        <>
         <section className="scan-strip" id="scan" aria-label="Scan progress">
           <div>
             <span>{scan.rootName}</span>
@@ -697,7 +710,8 @@ function App() {
             </>
           )}
         </section>
-
+        </>
+        ) : (
         <section className="folder-table" id="index-library">
           <div className="panel-header">
             <h2>Index Library</h2>
@@ -729,6 +743,7 @@ function App() {
             </ScrollableRows>
           )}
         </section>
+        )}
       </section>
     </main>
   );
@@ -822,6 +837,7 @@ function App() {
     }));
     setCurrentIndexPath(entry.index_path);
     setRuntimeMessage("Saved index loaded");
+    setActivePage("workspace");
   }
 
   async function rescanSavedIndex(entry: NativeIndexEntry) {
@@ -837,6 +853,7 @@ function App() {
       startedAt: performance.now(),
       currentPath: entry.root_path,
     });
+    setActivePage("workspace");
   }
 
   async function removeSavedIndex(entry: NativeIndexEntry) {
@@ -850,10 +867,15 @@ function App() {
 
 function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): ScanState {
   const folderCategoryMap = new Map<string, ReturnType<typeof emptyFolderCategories>>();
+  const folderPaths = overview.folders.map((folder) => folder.path);
   for (const media of overview.folder_media) {
-    const categories = folderCategoryMap.get(media.folder_path) ?? emptyFolderCategories();
-    categories[categoryFromMediaKind(media.media_kind)] += media.total_bytes;
-    folderCategoryMap.set(media.folder_path, categories);
+    for (const folderPath of folderPaths) {
+      if (folderPath === media.folder_path || isDescendantPath(media.folder_path, folderPath)) {
+        const categories = folderCategoryMap.get(folderPath) ?? emptyFolderCategories();
+        categories[categoryFromMediaKind(media.media_kind)] += media.total_bytes;
+        folderCategoryMap.set(folderPath, categories);
+      }
+    }
   }
 
   const folders = overview.folders.map((folder) => ({

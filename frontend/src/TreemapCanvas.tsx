@@ -146,8 +146,8 @@ function drawTreemap(context: CanvasRenderingContext2D, rects: Rect[], width: nu
     if (w <= 0 || h <= 0) continue;
 
     const gradient = context.createLinearGradient(x, y, x + w, y + h);
-    gradient.addColorStop(0, rect.color);
-    gradient.addColorStop(1, "rgba(255, 255, 255, 0.08)");
+    gradient.addColorStop(0, withAlpha(rect.color, 0.9));
+    gradient.addColorStop(1, withAlpha(rect.color, 0.34));
     context.fillStyle = gradient;
     context.fillRect(x, y, w, h);
     drawCategoryBands(context, rect.folder, x, y, w, h);

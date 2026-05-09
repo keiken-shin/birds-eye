@@ -105,6 +105,31 @@ h2 {
   justify-content: flex-end;
 }
 
+.top-nav {
+  display: inline-flex;
+  min-height: 42px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.top-nav button {
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  color: #96a1b6;
+  cursor: pointer;
+  font-weight: 750;
+  padding: 0 14px;
+}
+
+.top-nav button.active,
+.top-nav button:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
 .scan-manager-grid {
   display: flex;
   align-items: center;
@@ -882,6 +907,14 @@ h2 {
 
   .action-row {
     justify-content: flex-start;
+  }
+
+  .top-nav {
+    width: 100%;
+  }
+
+  .top-nav button {
+    flex: 1;
   }
 
   h1 {

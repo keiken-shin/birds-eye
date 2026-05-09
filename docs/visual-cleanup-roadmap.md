@@ -33,6 +33,7 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 - [ ] Lasso / paintbrush batch selection on visual blocks.
 - [ ] Before/after cleanup simulation slider.
 - [ ] Keyboard-first power mode for treemap/search/filter navigation.
+- [ ] Customizable layout: let users reorder, hide, and resize workbench panels.
 
 ## Trust And Explainability
 
