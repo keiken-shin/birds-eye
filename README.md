@@ -1,6 +1,12 @@
 # Birds Eye
 
-Birds Eye is an offline desktop disk space intelligence app. It scans local folders, persists an SQLite index, and presents storage usage through a fast dashboard with treemap exploration, media/category rollups, largest files, indexed search, and duplicate candidates.
+![logo](./frontend/public/favicon.svg)
+
+*Birds Eye* is an offline desktop disk space intelligence app. It scans local folders, persists an SQLite index, and presents storage usage through a fast dashboard with treemap exploration, media/category rollups, largest files, indexed search, and duplicate candidates.
+
+## Motivation
+
+I have a scattered external storage drive, can't find what I need, and what I have. And it was a trigger to my fake OCD too. Need to organize the drive but didn't know where to start. A live visualizer turns that chaos into a clear battle plan. A start.
 
 ## What Works
 
