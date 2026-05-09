@@ -36,8 +36,10 @@ import {
   isNativeRuntime,
   nativeJobEvents,
   queryNativeIndex,
+  searchNativeIndex,
   startNativeScan,
   type NativeIndexOverview,
+  type NativeSearchResult,
 } from "./nativeClient";
 import { TreemapCanvas } from "./TreemapCanvas";
 import "./styles.css";
@@ -48,6 +50,9 @@ function App() {
   const nativeJobRef = useRef<{ jobId: number; eventOffset: number; indexPath: string } | null>(null);
   const [scan, setScan] = useState<ScanState>(initialScanState);
   const [filter, setFilter] = useState<CategoryKey | "all">("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<NativeSearchResult[]>([]);
+  const [currentIndexPath, setCurrentIndexPath] = useState<string | null>(null);
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
 
@@ -71,6 +76,41 @@ function App() {
 
     return folders.sort((a, b) => b.displayBytes - a.displayBytes).slice(0, 48);
   }, [filter, scan.folders]);
+
+  useEffect(() => {
+    const trimmedQuery = searchQuery.trim();
+    if (trimmedQuery.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    if (!nativeRuntime || !currentIndexPath) {
+      const browserMatches = scan.largestFiles
+        .filter((file) => file.path.toLowerCase().includes(trimmedQuery.toLowerCase()))
+        .slice(0, 24)
+        .map((file) => ({
+          path: file.path,
+          name: file.name,
+          size: file.bytes,
+          extension: file.extension,
+          media_kind: mediaKindFromCategory(file.category),
+          modified_at: file.modified || null,
+        }));
+      setSearchResults(browserMatches);
+      return;
+    }
+
+    const handle = window.setTimeout(() => {
+      void searchNativeIndex(currentIndexPath, trimmedQuery, 24)
+        .then(setSearchResults)
+        .catch((error) => {
+          setRuntimeMessage(error instanceof Error ? error.message : "Search failed");
+          setSearchResults([]);
+        });
+    }, 180);
+
+    return () => window.clearTimeout(handle);
+  }, [currentIndexPath, nativeRuntime, scan.largestFiles, searchQuery]);
 
   const metrics = [
     { label: "Indexed", value: formatCount(scan.processedFiles), detail: `${formatCount(scan.totalFiles)} selected` },
@@ -99,6 +139,9 @@ function App() {
 
       stopWorker();
       setFilter("all");
+      setSearchQuery("");
+      setSearchResults([]);
+      setCurrentIndexPath(null);
       setRuntimeMessage("Native scan starting");
       setScan({
         ...initialScanState,
@@ -145,6 +188,7 @@ function App() {
         if (latest.status === "Completed" && nativeJobRef.current) {
           const overview = await queryNativeIndex(nativeJobRef.current.indexPath, 48);
           setScan((current) => mergeNativeOverview(current, overview));
+          setCurrentIndexPath(nativeJobRef.current.indexPath);
           setRuntimeMessage("Native index ready");
         }
         nativeJobRef.current = null;
@@ -161,6 +205,9 @@ function App() {
 
     stopWorker();
     setFilter("all");
+    setSearchQuery("");
+    setSearchResults([]);
+    setCurrentIndexPath(null);
     setScan({
       ...initialScanState,
       status: "scanning",
@@ -210,6 +257,9 @@ function App() {
     stopWorker();
     nativeJobRef.current = null;
     setFilter("all");
+    setSearchQuery("");
+    setSearchResults([]);
+    setCurrentIndexPath(null);
     setScan(initialScanState);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -356,6 +406,35 @@ function App() {
           )}
         </section>
 
+        <section className="folder-table search-panel">
+          <div className="panel-header">
+            <h2>File Search</h2>
+            <span><Search size={14} /> {formatCount(searchResults.length)} matches</span>
+          </div>
+          <label className="search-box">
+            <Search size={16} />
+            <input
+              type="search"
+              value={searchQuery}
+              placeholder="Search indexed paths"
+              onChange={(event) => setSearchQuery(event.currentTarget.value)}
+            />
+          </label>
+          {searchQuery.trim().length < 2 ? (
+            <div className="empty-state compact">Enter at least two characters to search the current index.</div>
+          ) : searchResults.length === 0 ? (
+            <div className="empty-state compact">No indexed files match this search.</div>
+          ) : (
+            searchResults.map((file) => (
+              <div className="folder-row file-row" key={file.path}>
+                <span>{file.path}</span>
+                <strong>{formatBytes(file.size)}</strong>
+                <small>{file.extension ?? "(none)"}</small>
+              </div>
+            ))
+          )}
+        </section>
+
         <section className="detail-grid">
           <div className="folder-table">
             <div className="panel-header">
@@ -480,6 +559,16 @@ function categoryFromMediaKind(kind: string): CategoryKey {
   if (kind === "installer") return "installers";
   if (kind === "model") return "models";
   return "other";
+}
+
+function mediaKindFromCategory(category: CategoryKey) {
+  if (category === "photos") return "photo";
+  if (category === "videos") return "video";
+  if (category === "archives") return "archive";
+  if (category === "documents") return "document";
+  if (category === "installers") return "installer";
+  if (category === "models") return "model";
+  return category === "other" ? "other" : category;
 }
 
 function Treemap({ folders }: { folders: Array<FolderStats & { displayBytes: number }> }) {

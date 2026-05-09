@@ -376,6 +376,37 @@ h2 {
   margin-top: 18px;
 }
 
+.search-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  color: #96a1b6;
+  padding: 0 12px;
+}
+
+.search-box input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #ffffff;
+  font: inherit;
+}
+
+.search-box input::placeholder {
+  color: #687386;
+}
+
 .folder-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 120px 100px;

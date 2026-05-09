@@ -43,6 +43,16 @@ pub struct FileSummary {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FileSearchResult {
+    pub path: String,
+    pub name: String,
+    pub size: i64,
+    pub extension: Option<String>,
+    pub media_kind: String,
+    pub modified_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExtensionSummary {
     pub extension: String,
     pub file_count: i64,
@@ -155,6 +165,35 @@ impl IndexWriter {
                 size: row.get(1)?,
                 extension: row.get(2)?,
                 media_kind: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn search_files(&self, query: &str, limit: usize) -> Result<Vec<FileSearchResult>, IndexError> {
+        let trimmed_query = query.trim();
+        if trimmed_query.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let escaped_query = escape_like_pattern(trimmed_query);
+        let pattern = format!("%{escaped_query}%");
+        let mut statement = self.connection.prepare(
+            "SELECT path, name, size, extension, media_kind, modified_at
+             FROM files
+             WHERE deleted_at IS NULL
+               AND (name LIKE ?1 ESCAPE '\\' OR path LIKE ?1 ESCAPE '\\')
+             ORDER BY size DESC, modified_at DESC
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![pattern, limit as i64], |row| {
+            Ok(FileSearchResult {
+                path: row.get(0)?,
+                name: row.get(1)?,
+                size: row.get(2)?,
+                extension: row.get(3)?,
+                media_kind: row.get(4)?,
+                modified_at: row.get(5)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -691,6 +730,17 @@ fn classify_media_kind(extension: Option<&str>) -> &'static str {
     }
 }
 
+fn escape_like_pattern(query: &str) -> String {
+    let mut escaped = String::with_capacity(query.len());
+    for character in query.chars() {
+        if matches!(character, '%' | '_' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
 fn partial_file_hash(path: &Path, size: u64) -> Option<String> {
     const BLOCK_SIZE: usize = 64 * 1024;
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
@@ -993,6 +1043,28 @@ mod tests {
         assert!(duplicates.is_empty());
         assert_eq!(media.first().map(|summary| summary.media_kind.as_str()), Some("video"));
         assert!(folder_media.iter().any(|summary| summary.media_kind == "video"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn searches_active_files_by_name_or_path() {
+        let root = test_root("search");
+        fs::create_dir_all(root.join("photos")).expect("failed to create folder");
+        fs::create_dir_all(root.join("docs")).expect("failed to create folder");
+        write_file(&root.join("photos").join("vacation.raw"), &[1; 96]);
+        write_file(&root.join("docs").join("budget.txt"), &[2; 16]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut writer);
+
+        let by_name = writer.search_files("vacation", 10).expect("search by name");
+        let by_path = writer.search_files("photos", 10).expect("search by path");
+        let empty = writer.search_files("   ", 10).expect("empty search");
+
+        assert_eq!(by_name.first().map(|file| file.name.as_str()), Some("vacation.raw"));
+        assert_eq!(by_name.first().map(|file| file.media_kind.as_str()), Some("photo"));
+        assert_eq!(by_path.len(), 1);
+        assert!(empty.is_empty());
         cleanup(&root);
     }
 

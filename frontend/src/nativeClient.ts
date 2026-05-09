@@ -30,6 +30,15 @@ export type NativeIndexOverview = {
   folder_media: Array<{ folder_path: string; media_kind: string; total_bytes: number }>;
 };
 
+export type NativeSearchResult = {
+  path: string;
+  name: string;
+  size: number;
+  extension: string | null;
+  media_kind: string;
+  modified_at: number | null;
+};
+
 export async function isNativeRuntime() {
   return isTauri();
 }
@@ -68,6 +77,16 @@ export async function queryNativeIndex(indexPath: string, limit: number) {
   return invoke<NativeIndexOverview>("query_index", {
     request: {
       index_path: indexPath,
+      limit,
+    },
+  });
+}
+
+export async function searchNativeIndex(indexPath: string, query: string, limit: number) {
+  return invoke<NativeSearchResult[]>("search_files", {
+    request: {
+      index_path: indexPath,
+      query,
       limit,
     },
   });

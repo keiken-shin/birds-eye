@@ -189,5 +189,5 @@ export function formatCount(value: number) {
 }
 
 export function lastSegment(path: string) {
-  return path.split("/").filter(Boolean).pop() ?? path;
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }

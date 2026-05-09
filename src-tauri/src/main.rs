@@ -1,6 +1,7 @@
 use birds_eye::native::api::{
-    query_index_overview, IndexOverviewDto, IndexQueryRequest, ScanToIndexRequest,
-    ScanToIndexResponse,
+    query_index_overview, search_files as search_index_files, FileSearchResultDto,
+    IndexOverviewDto, IndexQueryRequest, ScanToIndexRequest, ScanToIndexResponse,
+    SearchFilesRequest,
 };
 use birds_eye::native::{
     JobEventDto, JobStatusDto, ScanJobManager, StartScanJobRequest, StartScanJobResponse,
@@ -25,6 +26,11 @@ fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse, Str
 #[tauri::command]
 fn query_index(request: IndexQueryRequest) -> Result<IndexOverviewDto, String> {
     query_index_overview(request)
+}
+
+#[tauri::command]
+fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultDto>, String> {
+    search_index_files(request)
 }
 
 #[tauri::command]
@@ -107,6 +113,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             scan_to_index,
             query_index,
+            search_files,
             start_scan_job,
             start_scan_job_for_root,
             cancel_scan_job,

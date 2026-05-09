@@ -22,6 +22,13 @@ pub struct IndexQueryRequest {
     pub limit: usize,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct SearchFilesRequest {
+    pub index_path: PathBuf,
+    pub query: String,
+    pub limit: usize,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct FolderSummaryDto {
     pub path: String,
@@ -35,6 +42,16 @@ pub struct FileSummaryDto {
     pub size: i64,
     pub extension: Option<String>,
     pub media_kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FileSearchResultDto {
+    pub path: String,
+    pub name: String,
+    pub size: i64,
+    pub extension: Option<String>,
+    pub media_kind: String,
+    pub modified_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -177,6 +194,25 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
     })
 }
 
+pub fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultDto>, String> {
+    let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    let results = writer
+        .search_files(&request.query, request.limit)
+        .map_err(|error| format!("{error:?}"))?
+        .into_iter()
+        .map(|file| FileSearchResultDto {
+            path: file.path,
+            name: file.name,
+            size: file.size,
+            extension: file.extension,
+            media_kind: file.media_kind,
+            modified_at: file.modified_at,
+        })
+        .collect::<Vec<_>>();
+
+    Ok(results)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,6 +243,32 @@ mod tests {
         assert_eq!(overview.files.len(), 2);
         assert_eq!(overview.duplicate_groups.len(), 1);
         assert_eq!(overview.media.first().map(|summary| summary.media_kind.as_str()), Some("other"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn command_shaped_file_search() {
+        let root = test_root("native-search");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("failed to create folders");
+        write_file(&root.join("data").join("report.pdf"), &[1; 48]);
+        write_file(&root.join("data").join("clip.mp4"), &[2; 64]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+        })
+        .expect("scan command failed");
+
+        let results = search_files(SearchFilesRequest {
+            index_path,
+            query: "report".to_owned(),
+            limit: 10,
+        })
+        .expect("search command failed");
+
+        assert_eq!(results.first().map(|file| file.name.as_str()), Some("report.pdf"));
+        assert_eq!(results.first().map(|file| file.media_kind.as_str()), Some("document"));
         cleanup(&root);
     }
 
