@@ -45,6 +45,7 @@ export type DuplicateCandidate = {
   reclaimableBytes: number;
   samples: string[];
   confidence: "size-match";
+  confidenceScore?: number;
 };
 
 export type ScanStatus = "idle" | "scanning" | "paused" | "complete" | "cancelled";

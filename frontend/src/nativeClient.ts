@@ -130,3 +130,7 @@ export async function listNativeIndexes() {
 export async function deleteNativeIndex(indexPath: string) {
   await invoke("delete_index", { indexPath });
 }
+
+export async function revealNativePath(path: string) {
+  await invoke("reveal_path", { path });
+}

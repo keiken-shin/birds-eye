@@ -13,6 +13,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 
@@ -79,6 +80,32 @@ fn delete_index(app: tauri::AppHandle, index_path: PathBuf) -> Result<(), String
     }
 
     fs::remove_file(canonical_index).map_err(|error| format!("failed to delete index: {error}"))
+}
+
+#[tauri::command]
+fn reveal_path(path: PathBuf) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut command = Command::new("explorer.exe");
+        if path.is_file() {
+            command.arg(format!("/select,{}", path.display()));
+        } else {
+            command.arg(path);
+        }
+        command
+            .spawn()
+            .map_err(|error| format!("failed to open Explorer: {error}"))?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|error| format!("failed to open file manager: {error}"))?;
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -171,6 +198,7 @@ fn main() {
             duplicate_group_files,
             list_indexes,
             delete_index,
+            reveal_path,
             start_scan_job,
             start_scan_job_for_root,
             cancel_scan_job,

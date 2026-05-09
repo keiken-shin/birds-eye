@@ -513,9 +513,29 @@ h2 {
   grid-template-columns: minmax(0, 1fr) 110px 72px;
 }
 
+.action-row-grid {
+  grid-template-columns: minmax(0, 1fr) 110px 90px auto;
+}
+
+.action-row-grid button,
+.duplicate-actions button {
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dce6f5;
+  cursor: pointer;
+  padding: 0 10px;
+}
+
+.action-row-grid button:hover,
+.duplicate-actions button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 .duplicate-row {
   display: grid;
-  grid-template-columns: minmax(220px, 0.45fr) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 0.45fr) minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
   width: 100%;
@@ -550,6 +570,11 @@ h2 {
   color: #96a1b6;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.duplicate-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .duplicate-file-list {
@@ -609,6 +634,67 @@ h2 {
   color: #fb7185;
 }
 
+.stage-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 44px;
+  margin-bottom: 10px;
+}
+
+.stage-summary strong {
+  color: #ffffff;
+}
+
+.stage-summary span {
+  color: #96a1b6;
+}
+
+.stage-summary button,
+.staged-row button {
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dce6f5;
+  cursor: pointer;
+  padding: 0 10px;
+}
+
+.staged-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px 120px;
+  gap: 12px;
+  align-items: center;
+  min-height: 54px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.staged-row div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.staged-row strong,
+.staged-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staged-row span,
+.staged-row small {
+  color: #96a1b6;
+}
+
+.staged-row > strong,
+.staged-row small {
+  text-align: right;
+}
+
 @media (max-width: 1080px) {
   .scan-strip,
   .metric-grid,
@@ -655,6 +741,12 @@ h2 {
   .duplicate-row {
     grid-template-columns: 1fr;
     padding: 10px 0;
+  }
+
+  .action-row-grid,
+  .stage-summary,
+  .staged-row {
+    grid-template-columns: 1fr;
   }
 
   .index-row {

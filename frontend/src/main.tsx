@@ -39,17 +39,26 @@ import {
   listenNativeJobEvents,
   queryNativeIndex,
   queryNativeDuplicateFiles,
+  revealNativePath,
   searchNativeIndex,
   startNativeScan,
   type NativeDuplicateFile,
   type NativeIndexEntry,
   type NativeIndexOverview,
   type NativeJobEvent,
-  type NativeSearchResult,
+type NativeSearchResult,
 } from "./nativeClient";
 import { TreemapCanvas } from "./TreemapCanvas";
 import logoUrl from "./assets/birds-eye-logo.svg";
 import "./styles.css";
+
+type StagedAction = {
+  id: string;
+  label: string;
+  confidence: "Safe" | "Medium" | "Manual review";
+  bytes: number;
+  reason: string;
+};
 
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -64,6 +73,7 @@ function App() {
   const [duplicateFiles, setDuplicateFiles] = useState<NativeDuplicateFile[]>([]);
   const [selectedDuplicateGroup, setSelectedDuplicateGroup] = useState<number | null>(null);
   const [savedIndexes, setSavedIndexes] = useState<NativeIndexEntry[]>([]);
+  const [stagedActions, setStagedActions] = useState<StagedAction[]>([]);
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
 
@@ -449,10 +459,11 @@ function App() {
           ) : (
             <ScrollableRows>
               {sortedFolders.map((folder) => (
-                <div className="folder-row" key={folder.path}>
+                <div className="folder-row action-row-grid" key={folder.path}>
                   <span>{folder.path}</span>
                   <strong>{formatBytes(folder.bytes)}</strong>
                   <small>{formatCount(folder.files)} files</small>
+                  <button type="button" onClick={() => void revealPath(folder.path)}>Open</button>
                 </div>
               ))}
             </ScrollableRows>
@@ -480,10 +491,11 @@ function App() {
           ) : (
             <ScrollableRows compact>
               {searchResults.map((file) => (
-                <div className="folder-row file-row" key={file.path}>
+                <div className="folder-row file-row action-row-grid" key={file.path}>
                   <span>{file.path}</span>
                   <strong>{formatBytes(file.size)}</strong>
                   <small>{file.extension ?? "(none)"}</small>
+                  <button type="button" onClick={() => void revealPath(file.path)}>Open</button>
                 </div>
               ))}
             </ScrollableRows>
@@ -501,10 +513,11 @@ function App() {
             ) : (
               <ScrollableRows compact>
                 {scan.largestFiles.map((file) => (
-                  <div className="folder-row file-row" key={file.path}>
+                  <div className="folder-row file-row action-row-grid" key={file.path}>
                     <span>{file.path}</span>
                     <strong>{formatBytes(file.bytes)}</strong>
                     <small>{file.extension}</small>
+                    <button type="button" onClick={() => void revealPath(file.path)}>Open</button>
                   </div>
                 ))}
               </ScrollableRows>
@@ -543,31 +556,73 @@ function App() {
           ) : (
             <ScrollableRows compact>
               {scan.duplicateCandidates.map((candidate) => (
-                <button
+                <div
                   className={`duplicate-row ${selectedDuplicateGroup === candidate.id ? "active" : ""}`}
                   key={candidate.id ?? candidate.size}
-                  type="button"
                   onClick={() => void selectDuplicateCandidate(candidate)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      void selectDuplicateCandidate(candidate);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
                 >
                   <div>
                     <strong>{formatBytes(candidate.reclaimableBytes)} reclaimable</strong>
                     <span>{formatCount(candidate.files)} files at {formatBytes(candidate.size)} each</span>
                   </div>
                   <small>{candidate.samples.join(" | ")}</small>
-                </button>
+                  <span className="duplicate-actions">
+                    <button type="button" onClick={(event) => stageDuplicateAction(event, candidate)}>Stage</button>
+                  </span>
+                </div>
               ))}
             </ScrollableRows>
           )}
           {duplicateFiles.length > 0 && (
             <div className="duplicate-file-list">
               {duplicateFiles.map((file) => (
-                <div className="folder-row file-row" key={file.path}>
+                <div className="folder-row file-row action-row-grid" key={file.path}>
                   <span>{file.path}</span>
                   <strong>{formatBytes(file.size)}</strong>
                   <small>{file.modified_at ? formatDate(file.modified_at) : "-"}</small>
+                  <button type="button" onClick={() => void revealPath(file.path)}>Open</button>
                 </div>
               ))}
             </div>
+          )}
+        </section>
+
+        <section className="folder-table">
+          <div className="panel-header">
+            <h2>Staging Area</h2>
+            <span>{formatCount(stagedActions.length)} pending actions</span>
+          </div>
+          {stagedActions.length === 0 ? (
+            <div className="empty-state compact">Stage cleanup actions here first. Nothing is deleted or moved until a future commit step is explicitly added.</div>
+          ) : (
+            <>
+              <div className="stage-summary">
+                <strong>{formatBytes(stagedActions.reduce((sum, action) => sum + action.bytes, 0))}</strong>
+                <span>simulated reclaimable space</span>
+                <button type="button" onClick={() => setStagedActions((current) => current.slice(0, -1))}>Undo last</button>
+                <button type="button" onClick={() => setStagedActions([])}>Clear</button>
+              </div>
+              <ScrollableRows compact>
+                {stagedActions.map((action) => (
+                  <div className="staged-row" key={action.id}>
+                    <div>
+                      <strong>{action.label}</strong>
+                      <span>{action.reason}</span>
+                    </div>
+                    <small>{action.confidence}</small>
+                    <strong>{formatBytes(action.bytes)}</strong>
+                  </div>
+                ))}
+              </ScrollableRows>
+            </>
           )}
         </section>
 
@@ -613,6 +668,41 @@ function App() {
     } catch (error) {
       setRuntimeMessage(error instanceof Error ? error.message : "Duplicate details failed");
     }
+  }
+
+  async function revealPath(path: string) {
+    if (!nativeRuntime) {
+      setRuntimeMessage("Open in Explorer is available in the desktop app");
+      return;
+    }
+
+    try {
+      await revealNativePath(path);
+    } catch (error) {
+      setRuntimeMessage(error instanceof Error ? error.message : "Failed to open path");
+    }
+  }
+
+  function stageDuplicateAction(event: React.MouseEvent, candidate: ScanState["duplicateCandidates"][number]) {
+    event.stopPropagation();
+    const confidenceScore = candidate.confidenceScore ?? 0;
+    const confidence = confidenceScore >= 1 ? "Safe" : confidenceScore >= 0.65 ? "Medium" : "Manual review";
+    const id = `duplicate-${candidate.id ?? candidate.size}`;
+    setStagedActions((current) => {
+      if (current.some((action) => action.id === id)) return current;
+      return [
+        ...current,
+        {
+          id,
+          label: `Review duplicate group ${candidate.id ?? formatBytes(candidate.size)}`,
+          confidence,
+          bytes: candidate.reclaimableBytes,
+          reason: confidenceScore >= 1
+            ? "Exact duplicate group: matching full-file hashes. Commit is not implemented yet."
+            : "Candidate group needs review before any delete action can be committed.",
+        },
+      ];
+    });
   }
 
   async function refreshSavedIndexes() {
@@ -700,6 +790,7 @@ function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): Sc
     reclaimableBytes: group.reclaimable_bytes,
     samples: [`confidence ${(group.confidence * 100).toFixed(0)}%`],
     confidence: "size-match" as const,
+    confidenceScore: group.confidence,
   }));
   const categoryTotals = emptyCategories();
   for (const media of overview.media) {

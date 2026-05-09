@@ -12,8 +12,8 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 ## P0
 
 - [x] Color-coded treemap blocks by dominant category using the same palette as the filter tabs.
-- [ ] Staging area / commit queue for all move/delete suggestions.
-- [ ] Open in Explorer action for folders and files.
+- [x] Staging area / commit queue for all move/delete suggestions.
+- [x] Open in Explorer action for folders and files.
 
 ## P1
 
