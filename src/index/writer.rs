@@ -53,6 +53,7 @@ impl IndexWriter {
             ScanEvent::FileIndexed(file) => self.index_file(file),
             ScanEvent::Finished(report) => {
                 self.finish_session("complete", &report.stats)?;
+                self.recompute_folder_rollups()?;
                 self.rebuild_duplicate_size_groups()?;
                 self.capture_timeline(&report.root, &report.stats)
             }
@@ -161,6 +162,77 @@ impl IndexWriter {
             )?;
         }
 
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn recompute_folder_rollups(&mut self) -> Result<(), IndexError> {
+        #[derive(Clone, Debug)]
+        struct FolderNode {
+            id: i64,
+            parent_id: Option<i64>,
+            total_files: i64,
+            total_bytes: i64,
+        }
+
+        let mut folders = {
+            let mut statement = self
+                .connection
+                .prepare("SELECT id, parent_id FROM folders ORDER BY depth DESC")?;
+            let rows = statement.query_map([], |row| {
+                Ok(FolderNode {
+                    id: row.get(0)?,
+                    parent_id: row.get(1)?,
+                    total_files: 0,
+                    total_bytes: 0,
+                })
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        let positions = folders
+            .iter()
+            .enumerate()
+            .map(|(index, folder)| (folder.id, index))
+            .collect::<HashMap<_, _>>();
+
+        {
+            let mut statement = self
+                .connection
+                .prepare("SELECT folder_id, COUNT(*), COALESCE(SUM(size), 0) FROM files WHERE deleted_at IS NULL GROUP BY folder_id")?;
+            let rows = statement.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?;
+
+            for row in rows {
+                let (folder_id, file_count, bytes) = row?;
+                if let Some(index) = positions.get(&folder_id) {
+                    folders[*index].total_files = file_count;
+                    folders[*index].total_bytes = bytes;
+                }
+            }
+        }
+
+        for index in 0..folders.len() {
+            if let Some(parent_id) = folders[index].parent_id {
+                if let Some(parent_index) = positions.get(&parent_id) {
+                    folders[*parent_index].total_files += folders[index].total_files;
+                    folders[*parent_index].total_bytes += folders[index].total_bytes;
+                }
+            }
+        }
+
+        let tx = self.connection.transaction()?;
+        for folder in folders {
+            tx.execute(
+                "UPDATE folders SET total_files = ?1, total_bytes = ?2 WHERE id = ?3",
+                params![folder.total_files, folder.total_bytes, folder.id],
+            )?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -356,11 +428,20 @@ mod tests {
             .connection()
             .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
             .expect("failed to count duplicate groups");
+        let root_total_bytes: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT total_bytes FROM folders WHERE path = ?1",
+                params![path_to_string(&root)],
+                |row| row.get(0),
+            )
+            .expect("failed to read root rollup");
 
         assert_eq!(file_count, 2);
         assert_eq!(session_status, "complete");
         assert_eq!(timeline_count, 1);
         assert_eq!(duplicate_group_count, 0);
+        assert_eq!(root_total_bytes, 133);
         cleanup(&root);
     }
 
