@@ -39,6 +39,7 @@ export type ExtensionStats = {
 };
 
 export type DuplicateCandidate = {
+  id?: number;
   size: number;
   files: number;
   reclaimableBytes: number;

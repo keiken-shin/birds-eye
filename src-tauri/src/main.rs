@@ -1,7 +1,8 @@
 use birds_eye::native::api::{
-    query_index_overview, search_files as search_index_files, FileSearchResultDto,
-    IndexOverviewDto, IndexQueryRequest, ScanToIndexRequest, ScanToIndexResponse,
-    SearchFilesRequest,
+    duplicate_group_files as query_duplicate_group_files, query_index_overview,
+    search_files as search_index_files, DuplicateFileSummaryDto, DuplicateGroupFilesRequest,
+    FileSearchResultDto, IndexOverviewDto, IndexQueryRequest, ScanToIndexRequest,
+    ScanToIndexResponse, SearchFilesRequest,
 };
 use birds_eye::native::{
     JobEventDto, JobStatusDto, ScanJobManager, StartScanJobRequest, StartScanJobResponse,
@@ -31,6 +32,13 @@ fn query_index(request: IndexQueryRequest) -> Result<IndexOverviewDto, String> {
 #[tauri::command]
 fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultDto>, String> {
     search_index_files(request)
+}
+
+#[tauri::command]
+fn duplicate_group_files(
+    request: DuplicateGroupFilesRequest,
+) -> Result<Vec<DuplicateFileSummaryDto>, String> {
+    query_duplicate_group_files(request)
 }
 
 #[tauri::command]
@@ -114,6 +122,7 @@ fn main() {
             scan_to_index,
             query_index,
             search_files,
+            duplicate_group_files,
             start_scan_job,
             start_scan_job_for_root,
             cancel_scan_job,

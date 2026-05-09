@@ -39,6 +39,12 @@ export type NativeSearchResult = {
   modified_at: number | null;
 };
 
+export type NativeDuplicateFile = {
+  path: string;
+  size: number;
+  modified_at: number | null;
+};
+
 export async function isNativeRuntime() {
   return isTauri();
 }
@@ -87,6 +93,16 @@ export async function searchNativeIndex(indexPath: string, query: string, limit:
     request: {
       index_path: indexPath,
       query,
+      limit,
+    },
+  });
+}
+
+export async function queryNativeDuplicateFiles(indexPath: string, groupId: number, limit: number) {
+  return invoke<NativeDuplicateFile[]>("duplicate_group_files", {
+    request: {
+      index_path: indexPath,
+      group_id: groupId,
       limit,
     },
   });

@@ -37,8 +37,10 @@ import {
   isNativeRuntime,
   nativeJobEvents,
   queryNativeIndex,
+  queryNativeDuplicateFiles,
   searchNativeIndex,
   startNativeScan,
+  type NativeDuplicateFile,
   type NativeIndexOverview,
   type NativeSearchResult,
 } from "./nativeClient";
@@ -55,6 +57,8 @@ function App() {
   const [searchResults, setSearchResults] = useState<NativeSearchResult[]>([]);
   const [currentIndexPath, setCurrentIndexPath] = useState<string | null>(null);
   const [focusedFolder, setFocusedFolder] = useState<string | null>(null);
+  const [duplicateFiles, setDuplicateFiles] = useState<NativeDuplicateFile[]>([]);
+  const [selectedDuplicateGroup, setSelectedDuplicateGroup] = useState<number | null>(null);
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
 
@@ -152,6 +156,8 @@ function App() {
       setSearchQuery("");
       setSearchResults([]);
       setCurrentIndexPath(null);
+      setDuplicateFiles([]);
+      setSelectedDuplicateGroup(null);
       setRuntimeMessage("Native scan starting");
       setScan({
         ...initialScanState,
@@ -219,6 +225,8 @@ function App() {
     setSearchQuery("");
     setSearchResults([]);
     setCurrentIndexPath(null);
+    setDuplicateFiles([]);
+    setSelectedDuplicateGroup(null);
     setScan({
       ...initialScanState,
       status: "scanning",
@@ -272,6 +280,8 @@ function App() {
     setSearchQuery("");
     setSearchResults([]);
     setCurrentIndexPath(null);
+    setDuplicateFiles([]);
+    setSelectedDuplicateGroup(null);
     setScan(initialScanState);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -503,19 +513,50 @@ function App() {
             <div className="empty-state compact">Files with identical sizes will appear here as duplicate candidates.</div>
           ) : (
             scan.duplicateCandidates.slice(0, 12).map((candidate) => (
-              <div className="duplicate-row" key={candidate.size}>
+              <button
+                className={`duplicate-row ${selectedDuplicateGroup === candidate.id ? "active" : ""}`}
+                key={candidate.id ?? candidate.size}
+                type="button"
+                onClick={() => void selectDuplicateCandidate(candidate)}
+              >
                 <div>
                   <strong>{formatBytes(candidate.reclaimableBytes)} reclaimable</strong>
                   <span>{formatCount(candidate.files)} files at {formatBytes(candidate.size)} each</span>
                 </div>
                 <small>{candidate.samples.join(" | ")}</small>
-              </div>
+              </button>
             ))
+          )}
+          {duplicateFiles.length > 0 && (
+            <div className="duplicate-file-list">
+              {duplicateFiles.map((file) => (
+                <div className="folder-row file-row" key={file.path}>
+                  <span>{file.path}</span>
+                  <strong>{formatBytes(file.size)}</strong>
+                  <small>{file.modified_at ? formatDate(file.modified_at) : "-"}</small>
+                </div>
+              ))}
+            </div>
           )}
         </section>
       </section>
     </main>
   );
+
+  async function selectDuplicateCandidate(candidate: ScanState["duplicateCandidates"][number]) {
+    setSelectedDuplicateGroup(candidate.id ?? null);
+    setDuplicateFiles([]);
+    if (!candidate.id || !currentIndexPath) {
+      return;
+    }
+
+    try {
+      const files = await queryNativeDuplicateFiles(currentIndexPath, candidate.id, 24);
+      setDuplicateFiles(files);
+    } catch (error) {
+      setRuntimeMessage(error instanceof Error ? error.message : "Duplicate details failed");
+    }
+  }
 }
 
 function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): ScanState {
@@ -547,6 +588,7 @@ function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): Sc
     bytes: extension.total_bytes,
   }));
   const duplicateCandidates = overview.duplicate_groups.map((group) => ({
+    id: group.id,
     size: group.size,
     files: group.file_count,
     reclaimableBytes: group.reclaimable_bytes,
@@ -620,6 +662,10 @@ function makeDuplicateHint(scan: ScanState) {
 
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function formatDate(epochSeconds: number) {
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(epochSeconds * 1000));
 }
 
 function normalizePath(path: string) {

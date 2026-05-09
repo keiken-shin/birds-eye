@@ -69,6 +69,13 @@ pub struct DuplicateGroupSummary {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct DuplicateFileSummary {
+    pub path: String,
+    pub size: i64,
+    pub modified_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct MediaSummary {
     pub media_kind: String,
     pub file_count: i64,
@@ -232,6 +239,25 @@ impl IndexWriter {
                 file_count: row.get(2)?,
                 reclaimable_bytes: row.get(3)?,
                 confidence: row.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn duplicate_group_files(&self, group_id: i64, limit: usize) -> Result<Vec<DuplicateFileSummary>, IndexError> {
+        let mut statement = self.connection.prepare(
+            "SELECT files.path, files.size, files.modified_at
+             FROM duplicate_group_files dgf
+             JOIN files ON files.id = dgf.file_id
+             WHERE dgf.group_id = ?1 AND files.deleted_at IS NULL
+             ORDER BY files.path
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![group_id, limit as i64], |row| {
+            Ok(DuplicateFileSummary {
+                path: row.get(0)?,
+                size: row.get(1)?,
+                modified_at: row.get(2)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -879,6 +905,10 @@ mod tests {
             .connection()
             .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
             .expect("failed to count duplicate groups");
+        let duplicate_group_id: i64 = writer
+            .connection()
+            .query_row("SELECT id FROM duplicate_groups", [], |row| row.get(0))
+            .expect("failed to read duplicate group id");
         let duplicate_file_count: i64 = writer
             .connection()
             .query_row("SELECT COUNT(*) FROM duplicate_group_files", [], |row| row.get(0))
@@ -901,6 +931,13 @@ mod tests {
         assert_eq!(reclaimable_bytes, 32);
         assert_eq!(confidence, 1.0);
         assert_eq!(full_hashes, 2);
+        assert_eq!(
+            writer
+                .duplicate_group_files(duplicate_group_id, 10)
+                .expect("duplicate group files")
+                .len(),
+            2
+        );
         cleanup(&root);
     }
 

@@ -29,6 +29,13 @@ pub struct SearchFilesRequest {
     pub limit: usize,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct DuplicateGroupFilesRequest {
+    pub index_path: PathBuf,
+    pub group_id: i64,
+    pub limit: usize,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct FolderSummaryDto {
     pub path: String,
@@ -68,6 +75,13 @@ pub struct DuplicateGroupSummaryDto {
     pub file_count: i64,
     pub reclaimable_bytes: i64,
     pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DuplicateFileSummaryDto {
+    pub path: String,
+    pub size: i64,
+    pub modified_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -213,6 +227,22 @@ pub fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultD
     Ok(results)
 }
 
+pub fn duplicate_group_files(request: DuplicateGroupFilesRequest) -> Result<Vec<DuplicateFileSummaryDto>, String> {
+    let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    let results = writer
+        .duplicate_group_files(request.group_id, request.limit)
+        .map_err(|error| format!("{error:?}"))?
+        .into_iter()
+        .map(|file| DuplicateFileSummaryDto {
+            path: file.path,
+            size: file.size,
+            modified_at: file.modified_at,
+        })
+        .collect::<Vec<_>>();
+
+    Ok(results)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,6 +299,37 @@ mod tests {
 
         assert_eq!(results.first().map(|file| file.name.as_str()), Some("report.pdf"));
         assert_eq!(results.first().map(|file| file.media_kind.as_str()), Some("document"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn command_shaped_duplicate_group_files() {
+        let root = test_root("native-duplicate-files");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("failed to create folders");
+        write_file(&root.join("data").join("one.bin"), &[1; 48]);
+        write_file(&root.join("data").join("two.bin"), &[1; 48]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+        })
+        .expect("scan command failed");
+        let overview = query_index_overview(IndexQueryRequest {
+            index_path: index_path.clone(),
+            limit: 5,
+        })
+        .expect("query command failed");
+        let group_id = overview.duplicate_groups.first().expect("duplicate group").id;
+
+        let files = duplicate_group_files(DuplicateGroupFilesRequest {
+            index_path,
+            group_id,
+            limit: 10,
+        })
+        .expect("duplicate group files command failed");
+
+        assert_eq!(files.len(), 2);
         cleanup(&root);
     }
 
