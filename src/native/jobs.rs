@@ -93,6 +93,14 @@ impl ScanJobManager {
             };
 
             for event in events {
+                if let ScanEvent::Finished(report) = &event {
+                    push_event(
+                        &jobs,
+                        job_id,
+                        JobEventDto::running_from_stats(job_id, "finalizing index", &report.stats),
+                    );
+                }
+
                 if let Err(error) = writer.handle_event(&event) {
                     push_event(
                         &jobs,
@@ -143,6 +151,23 @@ impl ScanJobManager {
 }
 
 impl JobEventDto {
+    fn running_from_stats(job_id: u64, message: &str, stats: &crate::scanner::ScanStats) -> Self {
+        Self {
+            job_id,
+            status: JobStatusDto::Running,
+            message: message.to_owned(),
+            files_scanned: stats.files_scanned,
+            folders_scanned: stats.folders_scanned,
+            bytes_scanned: stats.bytes_scanned,
+            queue_depth: stats.queue_depth,
+            active_workers: stats.active_workers,
+            current_path: stats
+                .current_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+        }
+    }
+
     fn from_scan_event(job_id: u64, event: &ScanEvent) -> Option<Self> {
         match event {
             ScanEvent::Started { root, workers } => Some(Self {
@@ -271,6 +296,7 @@ mod tests {
         .expect("failed to query index");
 
         assert!(events.iter().any(|event| event.status == JobStatusDto::Completed));
+        assert!(events.iter().any(|event| event.message == "finalizing index"));
         assert_eq!(overview.files.len(), 2);
         assert_eq!(overview.duplicate_groups.len(), 1);
         cleanup(&root);
@@ -340,4 +366,3 @@ mod tests {
         }
     }
 }
-

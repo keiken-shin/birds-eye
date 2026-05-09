@@ -219,9 +219,11 @@ impl WorkerContext {
                 thread::sleep(Duration::from_millis(100));
             }
 
+            self.stats.active_workers.fetch_add(1, Ordering::Relaxed);
             let next_dir = self.next_directory();
 
             let Some(dir) = next_dir else {
+                self.stats.active_workers.fetch_sub(1, Ordering::Relaxed);
                 if self.queue.len() == 0 && self.stats.active_workers.load(Ordering::Relaxed) == 0 {
                     break;
                 }
@@ -229,7 +231,6 @@ impl WorkerContext {
                 continue;
             };
 
-            self.stats.active_workers.fetch_add(1, Ordering::Relaxed);
             if let Ok(mut current) = self.stats.current_path.lock() {
                 *current = Some(dir.clone());
             }
