@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Disk Space Visualizer - Find Your Media</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 30px 20px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 20px;
+            margin-bottom: 30px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        h1 {
+            font-size: 2.5em;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #8892b0;
+            font-size: 1.1em;
+        }
+
+        .controls {
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .control-row {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+        }
+
+        .control-row:last-child {
+            margin-bottom: 0;
+        }
+
+        label {
+            font-weight: 600;
+            color: #ccd6f6;
+            min-width: 120px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #00d4ff, #0099cc);
+            color: white;
+            border: none;
+            padding: 12px 28px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+        }
+
+        .btn-secondary {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255,255,255,0.2);
+            box-shadow: 0 10px 30px rgba(255,255,255,0.1);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+        }
+
+        .btn-danger:hover {
+            box-shadow: 0 10px 30px rgba(255, 107, 107, 0.3);
+        }
+
+        .path-display {
+            background: rgba(0,0,0,0.3);
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #64ffda;
+            flex: 1;
+            min-width: 200px;
+            word-break: break-all;
+        }
+
+        /* Enhanced Progress Section */
+        .progress-section {
+            background: rgba(0,0,0,0.2);
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .progress-section.active {
+            display: block;
+        }
+
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .progress-status {
+            font-size: 1em;
+            font-weight: 600;
+            color: #00d4ff;
+        }
+
+        .progress-stats {
+            display: flex;
+            gap: 20px;
+            font-size: 0.85em;
+            color: #8892b0;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 12px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 6px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf, #00d4ff);
+            background-size: 200% 100%;
+            border-radius: 6px;
+            transition: width 0.4s ease;
+            animation: shimmer 2s infinite linear;
+            position: relative;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        .progress-bar-fill::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0; }
+            50% { opacity: 1; }
+        }
+
+        .progress-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .progress-detail-item {
+            background: rgba(255,255,255,0.05);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.85em;
+        }
+
+        .progress-detail-label {
+            color: #8892b0;
+            font-size: 0.8em;
+            margin-bottom: 2px;
+        }
+
+        .progress-detail-value {
+            color: #ccd6f6;
+            font-weight: 600;
+        }
+
+        .progress-eta {
+            color: #4ade80;
+            font-weight: 600;
+        }
+
+        /* Live Preview During Scan */
+        .live-preview {
+            background: rgba(255,255,255,0.03);
+            border-radius: 12px;
+            padding: 15px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .live-preview.active {
+            display: block;
+        }
+
+        .live-preview-title {
+            font-size: 0.9em;
+            color: #8892b0;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .live-preview-title::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            background: #4ade80;
+            border-radius: 50%;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .live-folders {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .live-folder-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 10px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 6px;
+            font-size: 0.8em;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .live-folder-path {
+            color: #64ffda;
+            font-family: 'Courier New', monospace;
+            word-break: break-all;
+            flex: 1;
+            margin-right: 10px;
+        }
+
+        .live-folder-stats {
+            color: #8892b0;
+            white-space: nowrap;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-icon {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            color: #8892b0;
+            font-size: 0.9em;
+        }
+
+        .stat-card.photos { border-top: 3px solid #ff6b9d; }
+        .stat-card.photos .stat-value { color: #ff6b9d; }
+
+        .stat-card.videos { border-top: 3px solid #c084fc; }
+        .stat-card.videos .stat-value { color: #c084fc; }
+
+        .stat-card.music { border-top: 3px solid #4ade80; }
+        .stat-card.music .stat-value { color: #4ade80; }
+
+        .stat-card.documents { border-top: 3px solid #60a5fa; }
+        .stat-card.documents .stat-value { color: #60a5fa; }
+
+        .stat-card.archives { border-top: 3px solid #fbbf24; }
+        .stat-card.archives .stat-value { color: #fbbf24; }
+
+        .stat-card.other { border-top: 3px solid #94a3b8; }
+        .stat-card.other .stat-value { color: #94a3b8; }
+
+        .visualization-container {
+            background: rgba(255,255,255,0.05);
+            border-radius: 20px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .viz-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .viz-title {
+            font-size: 1.3em;
+            color: #ccd6f6;
+        }
+
+        .legend {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85em;
+            color: #8892b0;
+        }
+
+        .legend-color {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+        }
+
+        #treemap {
+            width: 100%;
+            height: 500px;
+            border-radius: 12px;
+            background: rgba(0,0,0,0.2);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .treemap-rect {
+            position: absolute;
+            border: 1px solid rgba(0,0,0,0.3);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            font-size: 0.75em;
+            text-align: center;
+            padding: 4px;
+        }
+
+        .treemap-rect:hover {
+            border-color: rgba(255,255,255,0.8);
+            z-index: 10;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        .treemap-label {
+            font-weight: 600;
+            color: white;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+            pointer-events: none;
+            word-break: break-word;
+            line-height: 1.2;
+        }
+
+        .treemap-size {
+            font-size: 0.8em;
+            opacity: 0.8;
+            color: white;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+            pointer-events: none;
+            margin-top: 2px;
+        }
+
+        .details-panel {
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 25px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .details-title {
+            font-size: 1.2em;
+            margin-bottom: 15px;
+            color: #ccd6f6;
+        }
+
+        .folder-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .folder-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            transition: background 0.2s;
+        }
+
+        .folder-item:hover {
+            background: rgba(255,255,255,0.08);
+        }
+
+        .folder-path {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            color: #64ffda;
+            flex: 1;
+            word-break: break-all;
+            margin-right: 15px;
+        }
+
+        .folder-stats {
+            display: flex;
+            gap: 15px;
+            font-size: 0.85em;
+            color: #8892b0;
+            white-space: nowrap;
+        }
+
+        .tooltip {
+            position: fixed;
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 0.85em;
+            pointer-events: none;
+            z-index: 1000;
+            max-width: 300px;
+            border: 1px solid rgba(255,255,255,0.2);
+            display: none;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #8892b0;
+        }
+
+        .empty-state-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .filter-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .filter-tab {
+            padding: 8px 16px;
+            border-radius: 20px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: #8892b0;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 0.9em;
+        }
+
+        .filter-tab.active {
+            background: rgba(0, 212, 255, 0.2);
+            border-color: #00d4ff;
+            color: #00d4ff;
+        }
+
+        .filter-tab:hover {
+            background: rgba(255,255,255,0.1);
+        }
+
+        /* Cancel button during scan */
+        .btn-cancel {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+            animation: pulse-red 2s infinite;
+        }
+
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.4); }
+            50% { box-shadow: 0 0 0 10px rgba(255, 107, 107, 0); }
+        }
+
+        @media (max-width: 768px) {
+            h1 { font-size: 1.8em; }
+            .control-row { flex-direction: column; align-items: stretch; }
+            label { min-width: auto; }
+            #treemap { height: 350px; }
+            .progress-header { flex-direction: column; align-items: flex-start; }
+        }
+    </style>
+</head>
+<body>
+    <div class="tooltip" id="tooltip"></div>
+
+    <div class="container">
+        <header>
+            <h1>🔍 Media Finder & Visualizer</h1>
+            <p class="subtitle">See where your photos, videos, and music are hiding across your drive</p>
+        </header>
+
+        <div class="controls">
+            <div class="control-row">
+                <label>📁 Select Folder:</label>
+                <div class="file-input-wrapper">
+                    <input type="file" id="folderInput" webkitdirectory directory multiple>
+                    <button class="btn" onclick="document.getElementById('folderInput').click()">
+                        📂 Choose External HDD
+                    </button>
+                </div>
+                <div class="path-display" id="pathDisplay">No folder selected</div>
+            </div>
+
+            <div class="control-row">
+                <label>⚡ Actions:</label>
+                <button class="btn btn-secondary" id="scanBtn" disabled>🔍 Start Scan</button>
+                <button class="btn btn-danger" id="cancelBtn" style="display: none;">⏹️ Cancel Scan</button>
+                <button class="btn btn-danger" id="clearBtn">🗑️ Clear All</button>
+            </div>
+
+            <!-- Enhanced Progress Section -->
+            <div class="progress-section" id="progressSection">
+                <div class="progress-header">
+                    <div class="progress-status" id="progressStatus">Initializing scan...</div>
+                    <div class="progress-stats">
+                        <span id="progressPercent">0%</span>
+                        <span id="progressETA">Calculating...</span>
+                    </div>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar-fill" id="progressBarFill" style="width: 0%"></div>
+                </div>
+                <div class="progress-details">
+                    <div class="progress-detail-item">
+                        <div class="progress-detail-label">Files Scanned</div>
+                        <div class="progress-detail-value" id="detailFiles">0 / 0</div>
+                    </div>
+                    <div class="progress-detail-item">
+                        <div class="progress-detail-label">Data Processed</div>
+                        <div class="progress-detail-value" id="detailSize">0 B / 0 B</div>
+                    </div>
+                    <div class="progress-detail-item">
+                        <div class="progress-detail-label">Scan Speed</div>
+                        <div class="progress-detail-value" id="detailSpeed">0 files/sec</div>
+                    </div>
+                    <div class="progress-detail-item">
+                        <div class="progress-detail-label">Elapsed Time</div>
+                        <div class="progress-detail-value" id="detailElapsed">00:00</div>
+                    </div>
+                    <div class="progress-detail-item">
+                        <div class="progress-detail-label">Estimated Remaining</div>
+                        <div class="progress-detail-value progress-eta" id="detailRemaining">--:--</div>
+                    </div>
+                    <div class="progress-detail-item">
+                        <div class="progress-detail-label">Current Folder</div>
+                        <div class="progress-detail-value" id="detailCurrent" style="font-size: 0.75em; word-break: break-all;">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Preview During Scan -->
+            <div class="live-preview" id="livePreview">
+                <div class="live-preview-title">📡 Live Discovery — Top folders found so far</div>
+                <div class="live-folders" id="liveFolders"></div>
+            </div>
+        </div>
+
+        <div id="results" style="display: none;">
+            <div class="stats-grid" id="statsGrid"></div>
+
+            <div class="visualization-container">
+                <div class="viz-header">
+                    <div class="viz-title">📊 Space Distribution by Folder</div>
+                    <div class="legend" id="legend"></div>
+                </div>
+
+                <div class="filter-tabs" id="filterTabs">
+                    <div class="filter-tab active" data-filter="all">All Files</div>
+                    <div class="filter-tab" data-filter="photos">📷 Photos</div>
+                    <div class="filter-tab" data-filter="videos">🎬 Videos</div>
+                    <div class="filter-tab" data-filter="music">🎵 Music</div>
+                    <div class="filter-tab" data-filter="documents">📄 Documents</div>
+                    <div class="filter-tab" data-filter="archives">📦 Archives</div>
+                </div>
+
+                <div id="treemap"></div>
+            </div>
+
+            <div class="details-panel">
+                <div class="details-title" id="detailsTitle">📂 Top Folders by Size</div>
+                <div class="folder-list" id="folderList"></div>
+            </div>
+        </div>
+
+        <div class="empty-state" id="emptyState">
+            <div class="empty-state-icon">📁</div>
+            <h2>Select Your External HDD</h2>
+            <p>Click "Choose External HDD" and select your drive to visualize where your media is scattered</p>
+        </div>
+    </div>
+
+    <script>
+        // File type categories
+        const CATEGORIES = {
+            photos: {
+                extensions: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp', '.raw', '.cr2', '.nef', '.arw', '.dng', '.heic', '.heif'],
+                color: '#ff6b9d',
+                icon: '📷',
+                label: 'Photos'
+            },
+            videos: {
+                extensions: ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg', '.3gp', '.ts', '.m2ts'],
+                color: '#c084fc',
+                icon: '🎬',
+                label: 'Videos'
+            },
+            music: {
+                extensions: ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma', '.m4a', '.opus', '.aiff', '.mid', '.midi'],
+                color: '#4ade80',
+                icon: '🎵',
+                label: 'Music'
+            },
+            documents: {
+                extensions: ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.odt', '.ods', '.odp', '.epub', '.mobi'],
+                color: '#60a5fa',
+                icon: '📄',
+                label: 'Documents'
+            },
+            archives: {
+                extensions: ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.iso', '.dmg'],
+                color: '#fbbf24',
+                icon: '📦',
+                label: 'Archives'
+            },
+            other: {
+                extensions: [],
+                color: '#94a3b8',
+                icon: '📎',
+                label: 'Other'
+            }
+        };
+
+        let scannedData = null;
+        let currentFilter = 'all';
+        let scanCancelled = false;
+        let scanController = null;
+
+        // Utility functions
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function formatDuration(seconds) {
+            if (!isFinite(seconds) || seconds < 0) return '--:--';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            if (mins >= 60) {
+                const hours = Math.floor(mins / 60);
+                const remMins = mins % 60;
+                return `${hours}h ${remMins}m`;
+            }
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function getCategory(filename) {
+            const ext = '.' + filename.split('.').pop().toLowerCase();
+            for (const [cat, info] of Object.entries(CATEGORIES)) {
+                if (cat !== 'other' && info.extensions.includes(ext)) {
+                    return cat;
+                }
+            }
+            return 'other';
+        }
+
+        function getFolderName(path) {
+            const parts = path.split('/').filter(p => p);
+            return parts[parts.length - 1] || 'Root';
+        }
+
+        // Scan files with progress
+        async function scanFiles(files) {
+            scanCancelled = false;
+            const data = {
+                totalFiles: 0,
+                totalSize: 0,
+                categories: {},
+                folders: {}
+            };
+
+            for (const cat of Object.keys(CATEGORIES)) {
+                data.categories[cat] = { count: 0, size: 0 };
+            }
+
+            const total = files.length;
+            let processed = 0;
+            let processedSize = 0;
+            const startTime = Date.now();
+            let lastUpdateTime = startTime;
+            let lastProcessed = 0;
+
+            // Update UI every 50ms for smooth progress, but process in batches
+            const BATCH_SIZE = 100;
+
+            for (let i = 0; i < files.length; i += BATCH_SIZE) {
+                if (scanCancelled) {
+                    throw new Error('Scan cancelled by user');
+                }
+
+                const batch = files.slice(i, Math.min(i + BATCH_SIZE, files.length));
+
+                for (const file of batch) {
+                    const path = file.webkitRelativePath || file.name;
+                    const folderPath = path.substring(0, path.lastIndexOf('/')) || 'Root';
+                    const category = getCategory(file.name);
+                    const size = file.size;
+
+                    data.totalFiles++;
+                    data.totalSize += size;
+                    data.categories[category].count++;
+                    data.categories[category].size += size;
+
+                    if (!data.folders[folderPath]) {
+                        data.folders[folderPath] = {
+                            path: folderPath,
+                            totalSize: 0,
+                            totalFiles: 0,
+                            categories: {}
+                        };
+                        for (const cat of Object.keys(CATEGORIES)) {
+                            data.folders[folderPath].categories[cat] = { count: 0, size: 0 };
+                        }
+                    }
+
+                    data.folders[folderPath].totalSize += size;
+                    data.folders[folderPath].totalFiles++;
+                    data.folders[folderPath].categories[category].count++;
+                    data.folders[folderPath].categories[category].size += size;
+
+                    processed++;
+                    processedSize += size;
+                }
+
+                // Update progress UI
+                const now = Date.now();
+                const elapsed = (now - startTime) / 1000;
+                const percent = (processed / total * 100).toFixed(1);
+
+                // Calculate speed and ETA
+                const instantSpeed = (processed - lastProcessed) / ((now - lastUpdateTime) / 1000);
+                const avgSpeed = processed / elapsed;
+                const remainingFiles = total - processed;
+                const eta = remainingFiles / avgSpeed;
+
+                // Update UI elements
+                document.getElementById('progressBarFill').style.width = percent + '%';
+                document.getElementById('progressPercent').textContent = percent + '%';
+                document.getElementById('progressStatus').textContent = 
+                    percent < 100 ? `🔍 Scanning... ${percent}%` : '✅ Finalizing results...';
+                document.getElementById('detailFiles').textContent = 
+                    `${processed.toLocaleString()} / ${total.toLocaleString()}`;
+                document.getElementById('detailSize').textContent = 
+                    `${formatBytes(processedSize)} / ${formatBytes(data.totalSize + (total - processed) * (processedSize / processed || 0))}`;
+                document.getElementById('detailSpeed').textContent = 
+                    `${Math.round(avgSpeed).toLocaleString()} files/sec`;
+                document.getElementById('detailElapsed').textContent = 
+                    formatDuration(elapsed);
+                document.getElementById('detailRemaining').textContent = 
+                    formatDuration(eta);
+
+                // Show current folder (last folder in batch)
+                const lastFile = batch[batch.length - 1];
+                if (lastFile) {
+                    const currentPath = lastFile.webkitRelativePath || lastFile.name;
+                    const currentFolder = currentPath.substring(0, currentPath.lastIndexOf('/')) || 'Root';
+                    document.getElementById('detailCurrent').textContent = currentFolder;
+                }
+
+                // Update live preview every 500ms
+                if (now - lastUpdateTime > 500) {
+                    updateLivePreview(data);
+                    lastUpdateTime = now;
+                    lastProcessed = processed;
+                }
+
+                // Yield to UI thread
+                await new Promise(r => setTimeout(r, 0));
+            }
+
+            return data;
+        }
+
+        // Live preview update
+        function updateLivePreview(data) {
+            const liveFolders = document.getElementById('liveFolders');
+            const folders = Object.values(data.folders)
+                .sort((a, b) => b.totalSize - a.totalSize)
+                .slice(0, 10);
+
+            liveFolders.innerHTML = '';
+            folders.forEach(folder => {
+                const item = document.createElement('div');
+                item.className = 'live-folder-item';
+
+                // Build mini category icons
+                let catIcons = '';
+                for (const [cat, catData] of Object.entries(folder.categories)) {
+                    if (catData.count > 0) {
+                        catIcons += CATEGORIES[cat].icon;
+                    }
+                }
+
+                item.innerHTML = `
+                    <div class="live-folder-path">${folder.path}</div>
+                    <div class="live-folder-stats">
+                        <span>${catIcons}</span>
+                        <span>${formatBytes(folder.totalSize)}</span>
+                        <span>${folder.totalFiles} files</span>
+                    </div>
+                `;
+                liveFolders.appendChild(item);
+            });
+        }
+
+        // Render stats
+        function renderStats(data) {
+            const grid = document.getElementById('statsGrid');
+            grid.innerHTML = '';
+
+            const order = ['photos', 'videos', 'music', 'documents', 'archives', 'other'];
+
+            for (const cat of order) {
+                const info = CATEGORIES[cat];
+                const stats = data.categories[cat];
+                const percent = data.totalSize > 0 ? (stats.size / data.totalSize * 100).toFixed(1) : 0;
+
+                const card = document.createElement('div');
+                card.className = `stat-card ${cat}`;
+                card.innerHTML = `
+                    <div class="stat-icon">${info.icon}</div>
+                    <div class="stat-value">${formatBytes(stats.size)}</div>
+                    <div class="stat-label">${info.label}<br>${stats.count.toLocaleString()} files (${percent}%)</div>
+                `;
+                card.style.cursor = 'pointer';
+                card.onclick = () => {
+                    document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelector(`[data-filter="${cat}"]`).classList.add('active');
+                    currentFilter = cat;
+                    renderTreemap(data);
+                    renderFolderList(data);
+                };
+                grid.appendChild(card);
+            }
+        }
+
+        // Render treemap
+        function renderTreemap(data) {
+            const container = document.getElementById('treemap');
+            container.innerHTML = '';
+
+            let folders = Object.values(data.folders).filter(f => f.totalSize > 0);
+
+            if (currentFilter !== 'all') {
+                folders = folders.filter(f => f.categories[currentFilter].size > 0);
+                folders.forEach(f => {
+                    f.displaySize = f.categories[currentFilter].size;
+                });
+            } else {
+                folders.forEach(f => {
+                    f.displaySize = f.totalSize;
+                });
+            }
+
+            folders.sort((a, b) => b.displaySize - a.displaySize);
+
+            const topFolders = folders.slice(0, 50);
+            const totalDisplaySize = topFolders.reduce((sum, f) => sum + f.displaySize, 0);
+
+            if (totalDisplaySize === 0) {
+                container.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:100%;color:#8892b0;">No files in this category</div>';
+                return;
+            }
+
+            const containerWidth = container.clientWidth;
+            const containerHeight = container.clientHeight;
+            const area = containerWidth * containerHeight;
+
+            let currentX = 0, currentY = 0;
+            let rowHeight = 0;
+            let row = [];
+            let rowSize = 0;
+
+            function layoutRow() {
+                if (row.length === 0) return;
+
+                const rowWidth = containerWidth;
+                const scale = rowWidth / rowSize;
+                let x = currentX;
+
+                for (const item of row) {
+                    const width = item.displaySize * scale;
+                    const height = rowHeight;
+
+                    const div = document.createElement('div');
+                    div.className = 'treemap-rect';
+                    div.style.left = x + 'px';
+                    div.style.top = currentY + 'px';
+                    div.style.width = width + 'px';
+                    div.style.height = height + 'px';
+
+                    let dominantCat = 'other';
+                    let maxSize = 0;
+                    for (const [cat, catData] of Object.entries(item.categories)) {
+                        if (catData.size > maxSize) {
+                            maxSize = catData.size;
+                            dominantCat = cat;
+                        }
+                    }
+
+                    const baseColor = CATEGORIES[dominantCat].color;
+                    div.style.background = baseColor + '40';
+                    div.style.borderColor = baseColor + '80';
+
+                    const folderName = getFolderName(item.path);
+                    const sizeText = formatBytes(item.displaySize);
+
+                    div.innerHTML = `
+                        <div class="treemap-label">${folderName}</div>
+                        <div class="treemap-size">${sizeText}</div>
+                    `;
+
+                    div.onmouseenter = (e) => showTooltip(e, item, dominantCat);
+                    div.onmouseleave = hideTooltip;
+                    div.onmousemove = moveTooltip;
+
+                    container.appendChild(div);
+                    x += width;
+                }
+
+                currentY += rowHeight;
+                currentX = 0;
+                row = [];
+                rowSize = 0;
+            }
+
+            for (const folder of topFolders) {
+                const folderArea = (folder.displaySize / totalDisplaySize) * area;
+                const width = folderArea / containerHeight;
+
+                if (row.length > 0 && width < rowHeight * 0.5) {
+                    layoutRow();
+                }
+
+                row.push(folder);
+                rowSize += folder.displaySize;
+                rowHeight = Math.max(rowHeight, Math.sqrt(folderArea));
+
+                if (row.length >= 3 || folder === topFolders[topFolders.length - 1]) {
+                    layoutRow();
+                }
+            }
+
+            layoutRow();
+        }
+
+        // Tooltip functions
+        function showTooltip(e, folder, dominantCat) {
+            const tooltip = document.getElementById('tooltip');
+            const catInfo = CATEGORIES[dominantCat];
+
+            let content = `<strong>${folder.path}</strong><br>`;
+            content += `Total: ${formatBytes(folder.totalSize)} (${folder.totalFiles} files)<br><br>`;
+
+            for (const [cat, data] of Object.entries(folder.categories)) {
+                if (data.size > 0) {
+                    const percent = (data.size / folder.totalSize * 100).toFixed(1);
+                    content += `${CATEGORIES[cat].icon} ${CATEGORIES[cat].label}: ${formatBytes(data.size)} (${percent}%)<br>`;
+                }
+            }
+
+            tooltip.innerHTML = content;
+            tooltip.style.display = 'block';
+            moveTooltip(e);
+        }
+
+        function moveTooltip(e) {
+            const tooltip = document.getElementById('tooltip');
+            tooltip.style.left = (e.clientX + 15) + 'px';
+            tooltip.style.top = (e.clientY + 15) + 'px';
+        }
+
+        function hideTooltip() {
+            document.getElementById('tooltip').style.display = 'none';
+        }
+
+        // Render folder list
+        function renderFolderList(data) {
+            const list = document.getElementById('folderList');
+            const title = document.getElementById('detailsTitle');
+
+            let folders = Object.values(data.folders);
+
+            if (currentFilter !== 'all') {
+                folders = folders.filter(f => f.categories[currentFilter].size > 0);
+                folders.sort((a, b) => b.categories[currentFilter].size - a.categories[currentFilter].size);
+                title.textContent = `${CATEGORIES[currentFilter].icon} Top Folders for ${CATEGORIES[currentFilter].label}`;
+            } else {
+                folders.sort((a, b) => b.totalSize - a.totalSize);
+                title.textContent = '📂 Top Folders by Total Size';
+            }
+
+            list.innerHTML = '';
+
+            folders.slice(0, 100).forEach(folder => {
+                const item = document.createElement('div');
+                item.className = 'folder-item';
+
+                let sizeDisplay, countDisplay;
+                if (currentFilter !== 'all') {
+                    sizeDisplay = formatBytes(folder.categories[currentFilter].size);
+                    countDisplay = folder.categories[currentFilter].count + ' files';
+                } else {
+                    sizeDisplay = formatBytes(folder.totalSize);
+                    countDisplay = folder.totalFiles + ' files';
+                }
+
+                let catBreakdown = '';
+                for (const [cat, catData] of Object.entries(folder.categories)) {
+                    if (catData.count > 0) {
+                        catBreakdown += `<span style="color:${CATEGORIES[cat].color}">${CATEGORIES[cat].icon}</span>`;
+                    }
+                }
+
+                item.innerHTML = `
+                    <div class="folder-path">${folder.path}</div>
+                    <div class="folder-stats">
+                        <span>${catBreakdown}</span>
+                        <span>${sizeDisplay}</span>
+                        <span>${countDisplay}</span>
+                    </div>
+                `;
+
+                list.appendChild(item);
+            });
+        }
+
+        // Start scan
+        async function startScan(files) {
+            scanCancelled = false;
+            document.getElementById('scanBtn').disabled = true;
+            document.getElementById('scanBtn').style.display = 'none';
+            document.getElementById('cancelBtn').style.display = 'inline-flex';
+            document.getElementById('progressSection').classList.add('active');
+            document.getElementById('livePreview').classList.add('active');
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('results').style.display = 'none';
+
+            try {
+                scannedData = await scanFiles(files);
+
+                // Hide progress and show results
+                document.getElementById('progressSection').classList.remove('active');
+                document.getElementById('livePreview').classList.remove('active');
+                document.getElementById('cancelBtn').style.display = 'none';
+                document.getElementById('scanBtn').style.display = 'inline-flex';
+                document.getElementById('scanBtn').disabled = false;
+                document.getElementById('scanBtn').textContent = '🔍 Scan Again';
+
+                document.getElementById('results').style.display = 'block';
+
+                // Build legend
+                const legend = document.getElementById('legend');
+                legend.innerHTML = '';
+                for (const [cat, info] of Object.entries(CATEGORIES)) {
+                    const item = document.createElement('div');
+                    item.className = 'legend-item';
+                    item.innerHTML = `
+                        <div class="legend-color" style="background: ${info.color}"></div>
+                        <span>${info.icon} ${info.label}</span>
+                    `;
+                    legend.appendChild(item);
+                }
+
+                renderStats(scannedData);
+                renderTreemap(scannedData);
+                renderFolderList(scannedData);
+
+            } catch (err) {
+                if (err.message === 'Scan cancelled by user') {
+                    document.getElementById('progressStatus').textContent = '⏹️ Scan cancelled';
+                    document.getElementById('progressBarFill').style.width = '0%';
+                    setTimeout(() => {
+                        document.getElementById('progressSection').classList.remove('active');
+                        document.getElementById('livePreview').classList.remove('active');
+                        document.getElementById('cancelBtn').style.display = 'none';
+                        document.getElementById('scanBtn').style.display = 'inline-flex';
+                        document.getElementById('scanBtn').disabled = false;
+                        document.getElementById('emptyState').style.display = 'block';
+                    }, 1500);
+                } else {
+                    console.error(err);
+                    alert('Error during scan: ' + err.message);
+                }
+            }
+        }
+
+        // Event listeners
+        document.getElementById('folderInput').addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+
+            const firstFile = files[0];
+            const rootPath = firstFile.webkitRelativePath ? 
+                firstFile.webkitRelativePath.split('/')[0] : 'Selected Folder';
+
+            document.getElementById('pathDisplay').textContent = `${rootPath} (${files.length.toLocaleString()} files selected)`;
+            document.getElementById('scanBtn').disabled = false;
+
+            // Auto-start scan
+            startScan(files);
+        });
+
+        document.getElementById('scanBtn').addEventListener('click', () => {
+            const files = Array.from(document.getElementById('folderInput').files);
+            if (files.length > 0) {
+                startScan(files);
+            }
+        });
+
+        document.getElementById('cancelBtn').addEventListener('click', () => {
+            scanCancelled = true;
+            document.getElementById('cancelBtn').disabled = true;
+            document.getElementById('cancelBtn').textContent = '⏹️ Cancelling...';
+        });
+
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            scanCancelled = true;
+            scannedData = null;
+            currentFilter = 'all';
+            document.getElementById('folderInput').value = '';
+            document.getElementById('pathDisplay').textContent = 'No folder selected';
+            document.getElementById('scanBtn').disabled = true;
+            document.getElementById('scanBtn').style.display = 'inline-flex';
+            document.getElementById('scanBtn').textContent = '🔍 Start Scan';
+            document.getElementById('cancelBtn').style.display = 'none';
+            document.getElementById('cancelBtn').disabled = false;
+            document.getElementById('cancelBtn').textContent = '⏹️ Cancel Scan';
+            document.getElementById('progressSection').classList.remove('active');
+            document.getElementById('livePreview').classList.remove('active');
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'block';
+            document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('[data-filter="all"]').classList.add('active');
+        });
+
+        // Filter tabs
+        document.querySelectorAll('.filter-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentFilter = tab.dataset.filter;
+
+                if (scannedData) {
+                    renderTreemap(scannedData);
+                    renderFolderList(scannedData);
+                }
+            });
+        });
+
+        // Handle window resize for treemap
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                if (scannedData) {
+                    renderTreemap(scannedData);
+                }
+            }, 250);
+        });
+    </script>
+</body>
+</html>
