@@ -150,6 +150,7 @@ function drawTreemap(context: CanvasRenderingContext2D, rects: Rect[], width: nu
     gradient.addColorStop(1, "rgba(255, 255, 255, 0.08)");
     context.fillStyle = gradient;
     context.fillRect(x, y, w, h);
+    drawCategoryBands(context, rect.folder, x, y, w, h);
     context.strokeStyle = "rgba(255, 255, 255, 0.18)";
     context.strokeRect(x, y, w, h);
 
@@ -166,6 +167,47 @@ function drawTreemap(context: CanvasRenderingContext2D, rects: Rect[], width: nu
       context.fillText(trimToWidth(context, lastSegment(rect.folder.path), w - 8), x + 4, y + h - 7);
     }
   }
+}
+
+function drawCategoryBands(context: CanvasRenderingContext2D, folder: TreemapFolder, x: number, y: number, width: number, height: number) {
+  const entries = (Object.keys(categories) as CategoryKey[])
+    .map((key) => ({ key, bytes: folder.categories[key] }))
+    .filter((entry) => entry.bytes > 0)
+    .sort((a, b) => b.bytes - a.bytes);
+
+  const total = entries.reduce((sum, entry) => sum + entry.bytes, 0);
+  if (entries.length <= 1 || total <= 0 || width < 22 || height < 18) return;
+
+  let offset = 0;
+  const horizontal = width >= height;
+  for (const entry of entries) {
+    const share = entry.bytes / total;
+    const band = Math.max(2, Math.round((horizontal ? width : height) * share));
+    context.fillStyle = withAlpha(categories[entry.key].color, entry.key === entries[0].key ? 0.82 : 0.72);
+
+    if (horizontal) {
+      const bandWidth = Math.min(width - offset, band);
+      context.fillRect(x + offset, y, bandWidth, height);
+      offset += bandWidth;
+    } else {
+      const bandHeight = Math.min(height - offset, band);
+      context.fillRect(x, y + offset, width, bandHeight);
+      offset += bandHeight;
+    }
+
+    if (offset >= (horizontal ? width : height)) break;
+  }
+
+  context.fillStyle = "rgba(0, 0, 0, 0.1)";
+  context.fillRect(x, y, width, height);
+}
+
+function withAlpha(hex: string, alpha: number) {
+  const color = hex.replace("#", "");
+  const red = parseInt(color.slice(0, 2), 16);
+  const green = parseInt(color.slice(2, 4), 16);
+  const blue = parseInt(color.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
 function trimToWidth(context: CanvasRenderingContext2D, text: string, maxWidth: number) {
