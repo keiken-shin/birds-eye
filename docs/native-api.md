@@ -1,6 +1,6 @@
 # Native API Boundary
 
-The current native boundary is intentionally Tauri-shaped without requiring the Tauri shell yet.
+The native boundary is implemented as serializable Rust DTOs that are wrapped by Tauri commands in `src-tauri/src/main.rs`.
 
 Module:
 
@@ -16,6 +16,11 @@ Commands:
   - Returns final file, folder, and byte counts.
 - `query_index_overview({ index_path, limit })`
   - Returns largest folders, largest files, extension summaries, duplicate groups, media summaries, and per-folder media rollups.
+- `search_files({ index_path, query, limit })`
+  - Searches active indexed files by file name or path.
+  - Escapes SQLite `LIKE` wildcard characters and orders matches by size.
+- `duplicate_group_files({ index_path, group_id, limit })`
+  - Returns the files inside a duplicate group for previewing reclaimable candidates.
 
 Background job API:
 
@@ -30,10 +35,11 @@ Background job API:
 - `ScanJobManager::job_status(job_id)`
   - Returns `Running`, `Completed`, `Cancelled`, or `Failed`.
 
-These functions use serializable DTOs so they can be wrapped by `#[tauri::command]` once the desktop shell lands.
+Desktop-only command helpers:
 
-Next native work:
+- `start_scan_job_for_root(root)`
+  - Resolves the app data index path for the selected root and starts a background scan.
+- `scan_job_events(job_id, offset)`
+  - Lets the frontend poll buffered scan progress without blocking the UI.
 
-- Emit scan progress events to the frontend.
-- Add Tauri file/folder picker integration.
-- Keep query methods separate from long-running scans.
+The frontend talks to this boundary through `frontend/src/nativeClient.ts`. Browser preview mode uses the File API worker instead of native commands.
