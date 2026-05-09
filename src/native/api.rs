@@ -54,11 +54,27 @@ pub struct DuplicateGroupSummaryDto {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MediaSummaryDto {
+    pub media_kind: String,
+    pub file_count: i64,
+    pub total_bytes: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FolderMediaSummaryDto {
+    pub folder_path: String,
+    pub media_kind: String,
+    pub total_bytes: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct IndexOverviewDto {
     pub folders: Vec<FolderSummaryDto>,
     pub files: Vec<FileSummaryDto>,
     pub extensions: Vec<ExtensionSummaryDto>,
     pub duplicate_groups: Vec<DuplicateGroupSummaryDto>,
+    pub media: Vec<MediaSummaryDto>,
+    pub folder_media: Vec<FolderMediaSummaryDto>,
 }
 
 pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse, String> {
@@ -138,6 +154,26 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
                 confidence: group.confidence,
             })
             .collect(),
+        media: writer
+            .media_summaries()
+            .map_err(|error| format!("{error:?}"))?
+            .into_iter()
+            .map(|media| MediaSummaryDto {
+                media_kind: media.media_kind,
+                file_count: media.file_count,
+                total_bytes: media.total_bytes,
+            })
+            .collect(),
+        folder_media: writer
+            .folder_media_summaries(request.limit * 6)
+            .map_err(|error| format!("{error:?}"))?
+            .into_iter()
+            .map(|media| FolderMediaSummaryDto {
+                folder_path: media.folder_path,
+                media_kind: media.media_kind,
+                total_bytes: media.total_bytes,
+            })
+            .collect(),
     })
 }
 
@@ -170,6 +206,7 @@ mod tests {
         assert_eq!(response.files_scanned, 2);
         assert_eq!(overview.files.len(), 2);
         assert_eq!(overview.duplicate_groups.len(), 1);
+        assert_eq!(overview.media.first().map(|summary| summary.media_kind.as_str()), Some("other"));
         cleanup(&root);
     }
 
@@ -201,4 +238,3 @@ mod tests {
         }
     }
 }
-

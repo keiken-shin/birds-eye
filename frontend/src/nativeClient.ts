@@ -26,6 +26,8 @@ export type NativeIndexOverview = {
     reclaimable_bytes: number;
     confidence: number;
   }>;
+  media: Array<{ media_kind: string; file_count: number; total_bytes: number }>;
+  folder_media: Array<{ folder_path: string; media_kind: string; total_bytes: number }>;
 };
 
 export async function isNativeRuntime() {

@@ -58,6 +58,20 @@ pub struct DuplicateGroupSummary {
     pub confidence: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct MediaSummary {
+    pub media_kind: String,
+    pub file_count: i64,
+    pub total_bytes: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FolderMediaSummary {
+    pub folder_path: String,
+    pub media_kind: String,
+    pub total_bytes: i64,
+}
+
 impl IndexWriter {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, IndexError> {
         let connection = Connection::open(path)?;
@@ -179,6 +193,44 @@ impl IndexWriter {
                 file_count: row.get(2)?,
                 reclaimable_bytes: row.get(3)?,
                 confidence: row.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn media_summaries(&self) -> Result<Vec<MediaSummary>, IndexError> {
+        let mut statement = self.connection.prepare(
+            "SELECT media_kind, COUNT(*), COALESCE(SUM(size), 0)
+             FROM files
+             WHERE deleted_at IS NULL
+             GROUP BY media_kind
+             ORDER BY SUM(size) DESC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(MediaSummary {
+                media_kind: row.get(0)?,
+                file_count: row.get(1)?,
+                total_bytes: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn folder_media_summaries(&self, limit: usize) -> Result<Vec<FolderMediaSummary>, IndexError> {
+        let mut statement = self.connection.prepare(
+            "SELECT f.path, files.media_kind, COALESCE(SUM(files.size), 0) AS total_bytes
+             FROM files
+             JOIN folders f ON f.id = files.folder_id
+             WHERE files.deleted_at IS NULL
+             GROUP BY f.path, files.media_kind
+             ORDER BY total_bytes DESC
+             LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit as i64], |row| {
+            Ok(FolderMediaSummary {
+                folder_path: row.get(0)?,
+                media_kind: row.get(1)?,
+                total_bytes: row.get(2)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -932,11 +984,15 @@ mod tests {
         let files = writer.largest_files(2).expect("largest files");
         let extensions = writer.extension_summaries(3).expect("extensions");
         let duplicates = writer.duplicate_groups(3).expect("duplicates");
+        let media = writer.media_summaries().expect("media summaries");
+        let folder_media = writer.folder_media_summaries(6).expect("folder media");
 
         assert_eq!(folders.first().map(|folder| folder.total_bytes), Some(160));
         assert_eq!(files.first().map(|file| file.size), Some(128));
         assert_eq!(extensions.first().map(|extension| extension.extension.as_str()), Some("mp4"));
         assert!(duplicates.is_empty());
+        assert_eq!(media.first().map(|summary| summary.media_kind.as_str()), Some("video"));
+        assert!(folder_media.iter().any(|summary| summary.media_kind == "video"));
         cleanup(&root);
     }
 

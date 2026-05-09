@@ -15,7 +15,7 @@ Commands:
   - Streams scanner events into SQLite through `IndexWriter`.
   - Returns final file, folder, and byte counts.
 - `query_index_overview({ index_path, limit })`
-  - Returns largest folders, largest files, extension summaries, and duplicate groups.
+  - Returns largest folders, largest files, extension summaries, duplicate groups, media summaries, and per-folder media rollups.
 
 Background job API:
 

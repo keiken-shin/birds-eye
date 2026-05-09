@@ -418,11 +418,18 @@ function App() {
 }
 
 function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): ScanState {
+  const folderCategoryMap = new Map<string, ReturnType<typeof emptyFolderCategories>>();
+  for (const media of overview.folder_media) {
+    const categories = folderCategoryMap.get(media.folder_path) ?? emptyFolderCategories();
+    categories[categoryFromMediaKind(media.media_kind)] += media.total_bytes;
+    folderCategoryMap.set(media.folder_path, categories);
+  }
+
   const folders = overview.folders.map((folder) => ({
     path: folder.path,
     files: folder.total_files,
     bytes: folder.total_bytes,
-    categories: emptyFolderCategories(),
+    categories: folderCategoryMap.get(folder.path) ?? emptyFolderCategories(),
   }));
   const largestFiles = overview.files.map((file) => ({
     path: file.path,
@@ -445,6 +452,12 @@ function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): Sc
     samples: [`confidence ${(group.confidence * 100).toFixed(0)}%`],
     confidence: "size-match" as const,
   }));
+  const categoryTotals = emptyCategories();
+  for (const media of overview.media) {
+    const category = categoryFromMediaKind(media.media_kind);
+    categoryTotals[category].files += media.file_count;
+    categoryTotals[category].bytes += media.total_bytes;
+  }
 
   return {
     ...scan,
@@ -452,7 +465,7 @@ function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): Sc
     largestFiles,
     extensions,
     duplicateCandidates,
-    categories: emptyCategories(),
+    categories: categoryTotals,
   };
 }
 
