@@ -36,7 +36,7 @@ import {
   deleteNativeIndex,
   isNativeRuntime,
   listNativeIndexes,
-  nativeJobEvents,
+  listenNativeJobEvents,
   queryNativeIndex,
   queryNativeDuplicateFiles,
   searchNativeIndex,
@@ -44,6 +44,7 @@ import {
   type NativeDuplicateFile,
   type NativeIndexEntry,
   type NativeIndexOverview,
+  type NativeJobEvent,
   type NativeSearchResult,
 } from "./nativeClient";
 import { TreemapCanvas } from "./TreemapCanvas";
@@ -53,7 +54,7 @@ import "./styles.css";
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
-  const nativeJobRef = useRef<{ jobId: number; eventOffset: number; indexPath: string } | null>(null);
+  const nativeJobRef = useRef<{ jobId: number; indexPath: string } | null>(null);
   const [scan, setScan] = useState<ScanState>(initialScanState);
   const [filter, setFilter] = useState<CategoryKey | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -75,6 +76,21 @@ function App() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (!nativeRuntime) return;
+
+    let unlisten: (() => void) | null = null;
+    void listenNativeJobEvents((event) => {
+      void handleNativeJobEvent(event);
+    }).then((cleanup) => {
+      unlisten = cleanup;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, [nativeRuntime]);
 
   const sortedFolders = useMemo(() => {
     return [...scan.folders].sort((a, b) => b.bytes - a.bytes);
@@ -175,53 +191,47 @@ function App() {
       });
 
       const { jobId, indexPath } = await startNativeScan(folder);
-      nativeJobRef.current = { jobId, eventOffset: 0, indexPath };
+      nativeJobRef.current = { jobId, indexPath };
       setRuntimeMessage("Native index mode");
-      void pollNativeJob(jobId);
     } catch (error) {
       setRuntimeMessage(error instanceof Error ? error.message : "Native scan failed");
       setScan((current) => ({ ...current, status: "cancelled" }));
     }
   }
 
-  async function pollNativeJob(jobId: number) {
-    while (nativeJobRef.current?.jobId === jobId) {
-      const offset = nativeJobRef.current.eventOffset;
-      const events = await nativeJobEvents(jobId, offset);
-      nativeJobRef.current.eventOffset += events.length;
+  async function handleNativeJobEvent(event: NativeJobEvent) {
+    if (nativeJobRef.current?.jobId !== event.job_id) return;
 
-      const latest = events.at(-1);
-      if (latest) {
-        if (latest.status === "Failed") {
-          setRuntimeMessage(latest.message);
-        } else if (latest.message === "finalizing index") {
-          setRuntimeMessage("Finalizing index");
-        }
-        setScan((current) => ({
-          ...current,
-          status: latest.status === "Completed" ? "complete" : latest.status === "Cancelled" ? "cancelled" : "scanning",
-          processedFiles: latest.files_scanned,
-          totalFiles: Math.max(current.totalFiles, latest.files_scanned),
-          processedBytes: latest.bytes_scanned,
-          totalBytes: Math.max(current.totalBytes, latest.bytes_scanned),
-          currentPath: latest.current_path ?? current.currentPath,
-          elapsedMs: performance.now() - current.startedAt,
-        }));
-      }
+    if (event.status === "Failed") {
+      setRuntimeMessage(event.message);
+    } else if (event.message === "finalizing index") {
+      setRuntimeMessage("Finalizing index");
+    }
 
-      if (latest?.status === "Completed" || latest?.status === "Cancelled" || latest?.status === "Failed") {
-        if (latest.status === "Completed" && nativeJobRef.current) {
-          const overview = await queryNativeIndex(nativeJobRef.current.indexPath, 1000);
-          setScan((current) => mergeNativeOverview(current, overview));
-          setCurrentIndexPath(nativeJobRef.current.indexPath);
-          setRuntimeMessage("Native index ready");
-          void refreshSavedIndexes();
-        }
-        nativeJobRef.current = null;
-        return;
-      }
+    setScan((current) => ({
+      ...current,
+      status: event.status === "Completed" ? "complete" : event.status === "Cancelled" ? "cancelled" : "scanning",
+      processedFiles: event.files_scanned,
+      totalFiles: Math.max(current.totalFiles, event.files_scanned),
+      processedBytes: event.bytes_scanned,
+      totalBytes: Math.max(current.totalBytes, event.bytes_scanned),
+      currentPath: event.current_path ?? current.currentPath,
+      elapsedMs: performance.now() - current.startedAt,
+    }));
 
-      await wait(300);
+    if (event.status === "Completed" && nativeJobRef.current) {
+      const indexPath = nativeJobRef.current.indexPath;
+      const overview = await queryNativeIndex(indexPath, 1000);
+      setScan((current) => mergeNativeOverview(current, overview));
+      setCurrentIndexPath(indexPath);
+      setRuntimeMessage("Native index ready");
+      nativeJobRef.current = null;
+      void refreshSavedIndexes();
+      return;
+    }
+
+    if (event.status === "Cancelled" || event.status === "Failed") {
+      nativeJobRef.current = null;
     }
   }
 
@@ -633,7 +643,7 @@ function App() {
   async function rescanSavedIndex(entry: NativeIndexEntry) {
     if (!entry.root_path) return;
     const { jobId, indexPath } = await startNativeScan(entry.root_path);
-    nativeJobRef.current = { jobId, eventOffset: 0, indexPath };
+    nativeJobRef.current = { jobId, indexPath };
     setCurrentIndexPath(null);
     setRuntimeMessage("Native rescan starting");
     setScan({
@@ -643,7 +653,6 @@ function App() {
       startedAt: performance.now(),
       currentPath: entry.root_path,
     });
-    void pollNativeJob(jobId);
     window.location.hash = "scan";
   }
 
@@ -759,10 +768,6 @@ function getProgress(scan: ScanState) {
 function makeDuplicateHint(scan: ScanState) {
   const reclaimable = scan.duplicateCandidates.reduce((sum, candidate) => sum + candidate.reclaimableBytes, 0);
   return reclaimable > 0 ? `${formatBytes(reclaimable)} possible duplicates found` : "Duplicate scan ready after indexing";
-}
-
-function wait(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function formatDate(epochSeconds: number) {
