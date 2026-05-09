@@ -217,7 +217,7 @@ The index writer should run separately from scanners and batch events into SQLit
 
 ## 7. Treemap Rendering Strategy
 
-Use a canvas renderer with a squarified treemap layout. Keep a compact node array with numeric indexes instead of object-heavy recursive nodes. Render only visible nodes at the current zoom. Hit testing uses a spatial index or sorted rectangle list. Labels are density-gated so small cells draw color only.
+Use a canvas renderer with a compact rectangle list instead of DOM-heavy nodes. Keep a compact node array with numeric indexes instead of object-heavy recursive nodes. Render only visible nodes at the current zoom. Hit testing uses a spatial index or sorted rectangle list. Labels are density-gated so small cells draw color only.
 
 Targets:
 
@@ -298,4 +298,3 @@ Phase order:
 5. Duplicate engine.
 6. Media intelligence.
 7. Optimization and polish.
-

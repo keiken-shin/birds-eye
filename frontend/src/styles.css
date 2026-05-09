@@ -300,44 +300,42 @@ h2 {
   gap: 6px;
 }
 
-.treemap-grid {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  grid-auto-rows: 52px;
-  grid-auto-flow: dense;
-  gap: 8px;
-  min-height: 428px;
-}
-
-.treemap-cell {
-  display: grid;
-  align-content: end;
-  min-width: 0;
+.treemap-canvas-wrap {
+  position: relative;
+  min-height: 360px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 7px;
+  border-radius: 8px;
+}
+
+.treemap-canvas {
+  display: block;
+  width: 100%;
+  min-height: 360px;
+  border-radius: 8px;
+  cursor: crosshair;
+}
+
+.treemap-tooltip {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  gap: 5px;
+  max-width: 320px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(7, 10, 16, 0.94);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
   color: #ffffff;
-  padding: 10px;
-}
-
-.treemap-cell span {
-  align-self: start;
-  width: fit-content;
-  border-radius: 5px;
-  background: rgba(0, 0, 0, 0.24);
-  color: rgba(255, 255, 255, 0.74);
   font-size: 12px;
-  font-weight: 800;
-  margin-bottom: auto;
-  padding: 3px 6px;
+  pointer-events: none;
+  padding: 10px 12px;
 }
 
-.treemap-cell strong,
-.treemap-cell small {
+.treemap-tooltip strong,
+.treemap-tooltip span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.48);
   white-space: nowrap;
 }
 
@@ -472,10 +470,6 @@ h2 {
 
   h1 {
     font-size: 28px;
-  }
-
-  .treemap-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .folder-row {

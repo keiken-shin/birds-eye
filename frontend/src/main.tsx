@@ -39,6 +39,7 @@ import {
   startNativeScan,
   type NativeIndexOverview,
 } from "./nativeClient";
+import { TreemapCanvas } from "./TreemapCanvas";
 import "./styles.css";
 
 function App() {
@@ -482,39 +483,11 @@ function categoryFromMediaKind(kind: string): CategoryKey {
 }
 
 function Treemap({ folders }: { folders: Array<FolderStats & { displayBytes: number }> }) {
-  const total = folders.reduce((sum, folder) => sum + folder.displayBytes, 0);
-
-  if (folders.length === 0 || total === 0) {
+  if (folders.length === 0) {
     return <div className="treemap-empty">No indexed folders yet</div>;
   }
 
-  return (
-    <div className="treemap-grid">
-      {folders.map((folder, index) => {
-        const share = folder.displayBytes / total;
-        const dominant = getDominantCategory(folder);
-        const area = Math.max(8, Math.min(54, share * 100));
-
-        return (
-          <motion.div
-            className="treemap-cell"
-            key={folder.path}
-            layout
-            title={`${folder.path} - ${formatBytes(folder.displayBytes)}`}
-            style={{
-              background: `linear-gradient(135deg, ${categories[dominant].color}, rgba(255,255,255,0.08))`,
-              gridColumn: `span ${Math.max(1, Math.round(area / 8))}`,
-              gridRow: `span ${Math.max(1, Math.round(area / 10))}`,
-            }}
-          >
-            <span>{index + 1}</span>
-            <strong>{lastSegment(folder.path)}</strong>
-            <small>{formatBytes(folder.displayBytes)}</small>
-          </motion.div>
-        );
-      })}
-    </div>
-  );
+  return <TreemapCanvas folders={folders} />;
 }
 
 function Recommendation({ text }: { text: string }) {
@@ -523,12 +496,6 @@ function Recommendation({ text }: { text: string }) {
 
 function postWorker(worker: Worker | null, message: ScanWorkerCommand) {
   worker?.postMessage(message);
-}
-
-function getDominantCategory(folder: FolderStats): CategoryKey {
-  return (Object.keys(folder.categories) as CategoryKey[]).reduce((best, key) => {
-    return folder.categories[key] > folder.categories[best] ? key : best;
-  }, "other");
 }
 
 function getProgress(scan: ScanState) {
