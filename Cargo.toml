@@ -1,0 +1,15 @@
+[package]
+name = "birds-eye"
+version = "0.1.0"
+edition = "2021"
+description = "Native disk space intelligence platform scanner core"
+license = "MIT"
+
+[lib]
+name = "birds_eye"
+path = "src/lib.rs"
+
+[[bin]]
+name = "birds-eye-scan"
+path = "src/main.rs"
+
