@@ -22,30 +22,42 @@ Data flow:
 
 ## 2. Backend Module Structure
 
-Current Phase 1 implementation starts with a Rust scanner core:
+Current implementation:
 
 ```text
 src/
+  index/
+    mod.rs
+    schema.rs
+    writer.rs
+  native/
+    api.rs
+    jobs.rs
   scanner/
     mod.rs
     types.rs
     worker.rs
   lib.rs
   main.rs
+src-tauri/
+  src/main.rs
+frontend/
+  src/
+    main.tsx
+    nativeClient.ts
+    scanWorker.ts
+    TreemapCanvas.tsx
 ```
 
-Planned native backend modules:
+Future native backend modules can be split further as the app grows:
 
 ```text
 src-tauri/src/
-  commands/          Tauri command handlers
-  scanner/           traversal, worker pool, cancellation, progress
-  index/             SQLite writer, schema migrations, query API
-  duplicates/        staged hashing and duplicate groups
-  media/             extension/MIME/metadata extraction
-  search/            tokenization, filters, FTS integration
+  commands/          Tauri command handlers beyond the current main.rs
+  media/             optional metadata extraction
+  search/            filters, regex, FTS integration
   cleanup/           rules, simulations, recycle-bin moves
-  events/            frontend event contract
+  events/            pushed frontend event contract
 ```
 
 ## 3. Database Schema
@@ -159,30 +171,26 @@ CREATE INDEX idx_folders_parent ON folders(parent_id);
 
 Backend commands:
 
-- `scan_start(root, options) -> session_id`
-- `scan_pause(session_id)`
-- `scan_resume(session_id)`
-- `scan_cancel(session_id)`
-- `scan_status(session_id) -> ScanStats`
-- `query_largest_files(filter, limit, cursor)`
-- `query_folder_tree(folder_id)`
-- `query_duplicates(filter)`
-- `query_media_summary(root)`
-- `cleanup_simulate(selection)`
-- `cleanup_execute(plan_id)`
+- `start_scan_job_for_root(root) -> { job_id, index_path }`
+- `scan_job_events(job_id, offset) -> JobEvent[]`
+- `scan_job_status(job_id) -> JobStatus`
+- `cancel_scan_job(job_id)`
+- `query_index({ index_path, limit }) -> IndexOverview`
+- `search_files({ index_path, query, limit }) -> FileSearchResult[]`
+- `duplicate_group_files({ index_path, group_id, limit }) -> DuplicateFile[]`
+- `scan_to_index({ root, index_path }) -> ScanToIndexResponse`
 
 Event stream:
 
-- `scan.started`
-- `scan.progress`
-- `scan.file_indexed`
-- `scan.folder_indexed`
-- `scan.error`
-- `scan.finished`
-- `scan.cancelled`
-- `index.batch_committed`
-- `duplicates.group_found`
-- `cleanup.plan_ready`
+- `Started`
+- `Progress`
+- `FileIndexed`
+- `FolderIndexed`
+- `Error`
+- `Finished`
+- `Cancelled`
+
+The desktop frontend currently polls buffered scan job events. A pushed Tauri event stream remains a good follow-up for lower-latency progress updates.
 
 ## 5. Frontend Component Hierarchy
 
@@ -289,12 +297,12 @@ Use Tauri for Windows, macOS, and Linux packages. Ship the scanner/index engine 
 - exiftool for rich photo metadata.
 - platform recycle-bin APIs for safe deletion.
 
-Phase order:
+Current status:
 
-1. Scanner core: in progress.
-2. Database/indexing.
-3. UI shell.
-4. Treemap visualization.
-5. Duplicate engine.
-6. Media intelligence.
-7. Optimization and polish.
+1. Scanner core: implemented.
+2. Database/indexing: implemented.
+3. UI shell: implemented.
+4. Treemap visualization: implemented with canvas and drilldown.
+5. Duplicate engine: implemented with staged hashing and group details.
+6. Media intelligence: implemented as extension-based media rollups.
+7. Optimization and polish: ongoing.

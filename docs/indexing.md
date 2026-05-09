@@ -29,11 +29,15 @@ Duplicate confidence is currently:
 - `0.65` for same-size files with matching partial hashes.
 - `1.0` for same-size files with matching full hashes.
 
-This is the durable Phase 2 foundation. Next indexing work should improve batching and expose these queries through the native app boundary.
+The same indexing APIs are exposed through the native boundary and Tauri commands for the desktop app.
 
 Read API currently exposed by `IndexWriter`:
 
 - `largest_folders(limit)`
 - `largest_files(limit)`
+- `search_files(query, limit)`
 - `extension_summaries(limit)`
 - `duplicate_groups(limit)`
+- `duplicate_group_files(group_id, limit)`
+- `media_summaries()`
+- `folder_media_summaries(limit)`
