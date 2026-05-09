@@ -5,6 +5,7 @@ import {
   getExtension,
   getFolderPath,
   getRelativePath,
+  type DuplicateCandidate,
   type ExtensionStats,
   type FileStats,
   type FolderStats,
@@ -47,6 +48,7 @@ async function scanFiles(files: File[]) {
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   const folderMap = new Map<string, FolderStats>();
   const extensionMap = new Map<string, ExtensionStats>();
+  const sizeGroups = new Map<number, { files: number; samples: string[] }>();
   const categoryTotals = emptyCategories();
   const largestFiles: FileStats[] = [];
   const startedAt = performance.now();
@@ -74,12 +76,17 @@ async function scanFiles(files: File[]) {
       const category = classifyFile(file.name);
       const folder = getOrCreateFolder(folderMap, folderPath);
       const extensionStats = getOrCreateExtension(extensionMap, extension);
+      const sizeGroup = getOrCreateSizeGroup(sizeGroups, file.size);
 
       folder.files += 1;
       folder.bytes += file.size;
       folder.categories[category] += file.size;
       extensionStats.files += 1;
       extensionStats.bytes += file.size;
+      sizeGroup.files += 1;
+      if (sizeGroup.samples.length < 4) {
+        sizeGroup.samples.push(relativePath);
+      }
       categoryTotals[category].files += 1;
       categoryTotals[category].bytes += file.size;
       trackLargestFile(largestFiles, {
@@ -117,6 +124,7 @@ async function scanFiles(files: File[]) {
       folders: Array.from(folderMap.values()),
       largestFiles: [...largestFiles],
       extensions: Array.from(extensionMap.values()).sort((a, b) => b.bytes - a.bytes).slice(0, 24),
+      duplicateCandidates: getDuplicateCandidates(sizeGroups),
       categories: { ...categoryTotals },
     };
   }
@@ -151,6 +159,29 @@ function trackLargestFile(largestFiles: FileStats[], file: FileStats) {
   if (largestFiles.length > 30) {
     largestFiles.length = 30;
   }
+}
+
+function getOrCreateSizeGroup(sizeGroups: Map<number, { files: number; samples: string[] }>, size: number) {
+  const existing = sizeGroups.get(size);
+  if (existing) return existing;
+
+  const created = { files: 0, samples: [] };
+  sizeGroups.set(size, created);
+  return created;
+}
+
+function getDuplicateCandidates(sizeGroups: Map<number, { files: number; samples: string[] }>): DuplicateCandidate[] {
+  return Array.from(sizeGroups.entries())
+    .filter(([size, group]) => size > 0 && group.files > 1)
+    .map(([size, group]) => ({
+      size,
+      files: group.files,
+      reclaimableBytes: size * (group.files - 1),
+      samples: group.samples,
+      confidence: "size-match" as const,
+    }))
+    .sort((a, b) => b.reclaimableBytes - a.reclaimableBytes)
+    .slice(0, 20);
 }
 
 function post(type: ScanWorkerMessage["type"], payload: ScanProgressPayload) {

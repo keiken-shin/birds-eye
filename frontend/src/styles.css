@@ -410,6 +410,33 @@ h2 {
   grid-template-columns: minmax(0, 1fr) 110px 72px;
 }
 
+.duplicate-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.45fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  min-height: 58px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.duplicate-row div {
+  display: grid;
+  gap: 4px;
+}
+
+.duplicate-row strong {
+  color: #ffffff;
+}
+
+.duplicate-row span,
+.duplicate-row small {
+  min-width: 0;
+  overflow: hidden;
+  color: #96a1b6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 1080px) {
   .scan-strip,
   .metric-grid,
@@ -454,6 +481,11 @@ h2 {
   .folder-row {
     grid-template-columns: 1fr;
     gap: 4px;
+    padding: 10px 0;
+  }
+
+  .duplicate-row {
+    grid-template-columns: 1fr;
     padding: 10px 0;
   }
 

@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
+  CopyCheck,
   Database,
   FolderOpen,
   FolderSearch,
@@ -296,6 +297,26 @@ function App() {
             )}
           </div>
         </section>
+
+        <section className="folder-table">
+          <div className="panel-header">
+            <h2>Duplicate Candidates</h2>
+            <span><CopyCheck size={14} /> Stage 1 size groups</span>
+          </div>
+          {scan.duplicateCandidates.length === 0 ? (
+            <div className="empty-state compact">Files with identical sizes will appear here as duplicate candidates.</div>
+          ) : (
+            scan.duplicateCandidates.slice(0, 12).map((candidate) => (
+              <div className="duplicate-row" key={candidate.size}>
+                <div>
+                  <strong>{formatBytes(candidate.reclaimableBytes)} reclaimable</strong>
+                  <span>{formatCount(candidate.files)} files at {formatBytes(candidate.size)} each</span>
+                </div>
+                <small>{candidate.samples.join(" | ")}</small>
+              </div>
+            ))
+          )}
+        </section>
       </section>
     </main>
   );
@@ -357,8 +378,8 @@ function getProgress(scan: ScanState) {
 }
 
 function makeDuplicateHint(scan: ScanState) {
-  const possible = scan.folders.filter((folder) => folder.bytes > 1024 * 1024 * 1024).length;
-  return possible > 0 ? `${possible} large folders ready for duplicate analysis` : "Duplicate scan ready after indexing";
+  const reclaimable = scan.duplicateCandidates.reduce((sum, candidate) => sum + candidate.reclaimableBytes, 0);
+  return reclaimable > 0 ? `${formatBytes(reclaimable)} possible duplicates found` : "Duplicate scan ready after indexing";
 }
 
 function makeCategoryHint(scan: ScanState, category: CategoryKey, label: string) {

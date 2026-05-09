@@ -38,6 +38,14 @@ export type ExtensionStats = {
   bytes: number;
 };
 
+export type DuplicateCandidate = {
+  size: number;
+  files: number;
+  reclaimableBytes: number;
+  samples: string[];
+  confidence: "size-match";
+};
+
 export type ScanStatus = "idle" | "scanning" | "paused" | "complete" | "cancelled";
 
 export type ScanState = {
@@ -53,6 +61,7 @@ export type ScanState = {
   folders: FolderStats[];
   largestFiles: FileStats[];
   extensions: ExtensionStats[];
+  duplicateCandidates: DuplicateCandidate[];
   categories: Record<CategoryKey, { files: number; bytes: number }>;
 };
 
@@ -144,6 +153,7 @@ export const initialScanState: ScanState = {
   folders: [],
   largestFiles: [],
   extensions: [],
+  duplicateCandidates: [],
   categories: emptyCategories(),
 };
 
