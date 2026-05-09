@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
@@ -18,6 +18,8 @@ import {
 import { motion } from "framer-motion";
 import {
   categories,
+  emptyCategories,
+  emptyFolderCategories,
   formatBytes,
   formatCount,
   initialScanState,
@@ -28,13 +30,32 @@ import {
   type ScanWorkerCommand,
   type ScanWorkerMessage,
 } from "./domain";
+import {
+  cancelNativeScan,
+  chooseNativeFolder,
+  isNativeRuntime,
+  nativeJobEvents,
+  queryNativeIndex,
+  startNativeScan,
+  type NativeIndexOverview,
+} from "./nativeClient";
 import "./styles.css";
 
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
+  const nativeJobRef = useRef<{ jobId: number; eventOffset: number; indexPath: string } | null>(null);
   const [scan, setScan] = useState<ScanState>(initialScanState);
   const [filter, setFilter] = useState<CategoryKey | "all">("all");
+  const [nativeRuntime, setNativeRuntime] = useState(false);
+  const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
+
+  useEffect(() => {
+    void isNativeRuntime().then((native) => {
+      setNativeRuntime(native);
+      setRuntimeMessage(native ? "Native index mode" : "Browser preview");
+    });
+  }, []);
 
   const topFolders = useMemo(() => {
     return [...scan.folders].sort((a, b) => b.bytes - a.bytes).slice(0, 9);
@@ -58,11 +79,79 @@ function App() {
   ];
 
   function openFolderPicker() {
+    if (nativeRuntime) {
+      void startNativeFolderScan();
+      return;
+    }
+
     const input = fileInputRef.current;
     if (!input) return;
     input.setAttribute("webkitdirectory", "");
     input.setAttribute("directory", "");
     input.click();
+  }
+
+  async function startNativeFolderScan() {
+    try {
+      const folder = await chooseNativeFolder();
+      if (!folder) return;
+
+      stopWorker();
+      setFilter("all");
+      setRuntimeMessage("Native scan starting");
+      setScan({
+        ...initialScanState,
+        status: "scanning",
+        rootName: lastSegment(folder) || folder,
+        startedAt: performance.now(),
+        currentPath: folder,
+      });
+
+      const { jobId, indexPath } = await startNativeScan(folder);
+      nativeJobRef.current = { jobId, eventOffset: 0, indexPath };
+      setRuntimeMessage("Native index mode");
+      void pollNativeJob(jobId);
+    } catch (error) {
+      setRuntimeMessage(error instanceof Error ? error.message : "Native scan failed");
+      setScan((current) => ({ ...current, status: "cancelled" }));
+    }
+  }
+
+  async function pollNativeJob(jobId: number) {
+    while (nativeJobRef.current?.jobId === jobId) {
+      const offset = nativeJobRef.current.eventOffset;
+      const events = await nativeJobEvents(jobId, offset);
+      nativeJobRef.current.eventOffset += events.length;
+
+      const latest = events.at(-1);
+      if (latest) {
+        if (latest.status === "Failed") {
+          setRuntimeMessage(latest.message);
+        }
+        setScan((current) => ({
+          ...current,
+          status: latest.status === "Completed" ? "complete" : latest.status === "Cancelled" ? "cancelled" : "scanning",
+          processedFiles: latest.files_scanned,
+          totalFiles: Math.max(current.totalFiles, latest.files_scanned),
+          processedBytes: latest.bytes_scanned,
+          totalBytes: Math.max(current.totalBytes, latest.bytes_scanned),
+          currentPath: latest.current_path ?? current.currentPath,
+          elapsedMs: performance.now() - current.startedAt,
+        }));
+      }
+
+      if (latest?.status === "Completed" || latest?.status === "Cancelled" || latest?.status === "Failed") {
+        if (latest.status === "Completed" && nativeJobRef.current) {
+          const overview = await queryNativeIndex(nativeJobRef.current.indexPath, 48);
+          setScan((current) => mergeNativeOverview(current, overview));
+          setRuntimeMessage("Native index ready");
+        }
+        nativeJobRef.current = null;
+        return;
+      }
+
+      await wait(300);
+    }
   }
 
   function handleFiles(fileList: FileList | null) {
@@ -108,11 +197,17 @@ function App() {
   }
 
   function cancelScan() {
+    if (nativeJobRef.current) {
+      void cancelNativeScan(nativeJobRef.current.jobId);
+      return;
+    }
+
     postWorker(workerRef.current, { type: "cancel" });
   }
 
   function clearScan() {
     stopWorker();
+    nativeJobRef.current = null;
     setFilter("all");
     setScan(initialScanState);
     if (fileInputRef.current) {
@@ -189,7 +284,7 @@ function App() {
           <div className="progress-track">
             <div className="progress-fill" style={{ width: `${getProgress(scan)}%` }} />
           </div>
-          <small>{scan.currentPath}</small>
+          <small>{runtimeMessage} - {scan.currentPath}</small>
         </section>
 
         <section className="metric-grid" aria-label="Scan metrics">
@@ -322,6 +417,57 @@ function App() {
   );
 }
 
+function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): ScanState {
+  const folders = overview.folders.map((folder) => ({
+    path: folder.path,
+    files: folder.total_files,
+    bytes: folder.total_bytes,
+    categories: emptyFolderCategories(),
+  }));
+  const largestFiles = overview.files.map((file) => ({
+    path: file.path,
+    name: lastSegment(file.path),
+    folder: file.path.includes("\\") ? file.path.slice(0, file.path.lastIndexOf("\\")) : file.path.slice(0, file.path.lastIndexOf("/")),
+    extension: file.extension ?? "(none)",
+    bytes: file.size,
+    category: categoryFromMediaKind(file.media_kind),
+    modified: 0,
+  }));
+  const extensions = overview.extensions.map((extension) => ({
+    extension: extension.extension,
+    files: extension.file_count,
+    bytes: extension.total_bytes,
+  }));
+  const duplicateCandidates = overview.duplicate_groups.map((group) => ({
+    size: group.size,
+    files: group.file_count,
+    reclaimableBytes: group.reclaimable_bytes,
+    samples: [`confidence ${(group.confidence * 100).toFixed(0)}%`],
+    confidence: "size-match" as const,
+  }));
+
+  return {
+    ...scan,
+    folders,
+    largestFiles,
+    extensions,
+    duplicateCandidates,
+    categories: emptyCategories(),
+  };
+}
+
+function categoryFromMediaKind(kind: string): CategoryKey {
+  if (kind === "photo") return "photos";
+  if (kind === "video") return "videos";
+  if (kind === "music") return "music";
+  if (kind === "archive") return "archives";
+  if (kind === "document") return "documents";
+  if (kind === "code") return "code";
+  if (kind === "installer") return "installers";
+  if (kind === "model") return "models";
+  return "other";
+}
+
 function Treemap({ folders }: { folders: Array<FolderStats & { displayBytes: number }> }) {
   const total = folders.reduce((sum, folder) => sum + folder.displayBytes, 0);
 
@@ -380,6 +526,10 @@ function getProgress(scan: ScanState) {
 function makeDuplicateHint(scan: ScanState) {
   const reclaimable = scan.duplicateCandidates.reduce((sum, candidate) => sum + candidate.reclaimableBytes, 0);
   return reclaimable > 0 ? `${formatBytes(reclaimable)} possible duplicates found` : "Duplicate scan ready after indexing";
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function makeCategoryHint(scan: ScanState, category: CategoryKey, label: string) {

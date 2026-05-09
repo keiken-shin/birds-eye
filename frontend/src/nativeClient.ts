@@ -1,0 +1,76 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+
+export type NativeJobStatus = "Running" | "Completed" | "Cancelled" | "Failed";
+
+export type NativeJobEvent = {
+  job_id: number;
+  status: NativeJobStatus;
+  message: string;
+  files_scanned: number;
+  folders_scanned: number;
+  bytes_scanned: number;
+  queue_depth: number;
+  active_workers: number;
+  current_path: string | null;
+};
+
+export type NativeIndexOverview = {
+  folders: Array<{ path: string; total_files: number; total_bytes: number }>;
+  files: Array<{ path: string; size: number; extension: string | null; media_kind: string }>;
+  extensions: Array<{ extension: string; file_count: number; total_bytes: number }>;
+  duplicate_groups: Array<{
+    id: number;
+    size: number;
+    file_count: number;
+    reclaimable_bytes: number;
+    confidence: number;
+  }>;
+};
+
+export async function isNativeRuntime() {
+  return isTauri();
+}
+
+export async function chooseNativeFolder() {
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    title: "Choose a folder to index",
+  });
+
+  return typeof selected === "string" ? selected : null;
+}
+
+export async function startNativeScan(root: string) {
+  const indexPath = `${root}/.birds-eye.sqlite`;
+  const response = await invoke<{ job_id: number }>("start_scan_job", {
+    request: {
+      root,
+      index_path: indexPath,
+    },
+  });
+
+  return { jobId: response.job_id, indexPath };
+}
+
+export async function cancelNativeScan(jobId: number) {
+  await invoke("cancel_scan_job", { jobId });
+}
+
+export async function nativeJobEvents(jobId: number, offset: number) {
+  return invoke<NativeJobEvent[]>("scan_job_events", { jobId, offset });
+}
+
+export async function nativeJobStatus(jobId: number) {
+  return invoke<NativeJobStatus>("scan_job_status", { jobId });
+}
+
+export async function queryNativeIndex(indexPath: string, limit: number) {
+  return invoke<NativeIndexOverview>("query_index", {
+    request: {
+      index_path: indexPath,
+      limit,
+    },
+  });
+}
