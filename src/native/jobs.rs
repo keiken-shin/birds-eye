@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+pub type JobEventListener = Arc<dyn Fn(JobEventDto) + Send + Sync + 'static>;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct StartScanJobRequest {
     pub root: PathBuf,
@@ -61,6 +63,14 @@ impl ScanJobManager {
     }
 
     pub fn start_scan_job(&self, request: StartScanJobRequest) -> Result<StartScanJobResponse, String> {
+        self.start_scan_job_with_listener(request, None)
+    }
+
+    pub fn start_scan_job_with_listener(
+        &self,
+        request: StartScanJobRequest,
+        listener: Option<JobEventListener>,
+    ) -> Result<StartScanJobResponse, String> {
         let job_id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let scanner = Scanner::new(ScanOptions::new(request.root));
         let controller = scanner.controller();
@@ -87,6 +97,7 @@ impl ScanJobManager {
                         &jobs,
                         job_id,
                         JobEventDto::failed(job_id, format!("failed to open index: {error:?}")),
+                        listener.as_ref(),
                     );
                     return;
                 }
@@ -98,6 +109,7 @@ impl ScanJobManager {
                         &jobs,
                         job_id,
                         JobEventDto::running_from_stats(job_id, "finalizing index", &report.stats),
+                        listener.as_ref(),
                     );
                 }
 
@@ -106,13 +118,14 @@ impl ScanJobManager {
                         &jobs,
                         job_id,
                         JobEventDto::failed(job_id, format!("failed to write index: {error:?}")),
+                        listener.as_ref(),
                     );
                     return;
                 }
 
                 let terminal = matches!(event, ScanEvent::Finished(_) | ScanEvent::Cancelled(_));
                 if let Some(event) = JobEventDto::from_scan_event(job_id, &event) {
-                    push_event(&jobs, job_id, event);
+                    push_event(&jobs, job_id, event, listener.as_ref());
                 }
 
                 if terminal {
@@ -250,12 +263,21 @@ impl JobEventDto {
     }
 }
 
-fn push_event(jobs: &Arc<Mutex<HashMap<u64, JobState>>>, job_id: u64, event: JobEventDto) {
+fn push_event(
+    jobs: &Arc<Mutex<HashMap<u64, JobState>>>,
+    job_id: u64,
+    event: JobEventDto,
+    listener: Option<&JobEventListener>,
+) {
     if let Ok(mut jobs) = jobs.lock() {
         if let Some(job) = jobs.get_mut(&job_id) {
             job.status = event.status.clone();
-            job.events.push(event);
+            job.events.push(event.clone());
         }
+    }
+
+    if let Some(listener) = listener {
+        listener(event);
     }
 }
 

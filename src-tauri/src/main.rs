@@ -13,8 +13,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use tauri::Manager;
+use std::sync::{Arc, Mutex};
+use tauri::{Emitter, Manager};
 
 struct AppState {
     jobs: Mutex<ScanJobManager>,
@@ -110,10 +110,16 @@ fn start_scan_job_for_root(
         .jobs
         .lock()
         .map_err(|_| "job manager lock poisoned".to_owned())?;
-    let response = jobs.start_scan_job(StartScanJobRequest {
-        root,
-        index_path: index_path.clone(),
-    })?;
+    let event_app = app.clone();
+    let response = jobs.start_scan_job_with_listener(
+        StartScanJobRequest {
+            root,
+            index_path: index_path.clone(),
+        },
+        Some(Arc::new(move |event| {
+            let _ = event_app.emit("scan-job-event", event);
+        })),
+    )?;
 
     Ok(StartScanJobForRootResponse {
         job_id: response.job_id,

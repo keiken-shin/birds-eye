@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
 export type NativeJobStatus = "Running" | "Completed" | "Cancelled" | "Failed";
@@ -87,6 +88,10 @@ export async function nativeJobEvents(jobId: number, offset: number) {
 
 export async function nativeJobStatus(jobId: number) {
   return invoke<NativeJobStatus>("scan_job_status", { jobId });
+}
+
+export async function listenNativeJobEvents(callback: (event: NativeJobEvent) => void) {
+  return listen<NativeJobEvent>("scan-job-event", (event) => callback(event.payload));
 }
 
 export async function queryNativeIndex(indexPath: string, limit: number) {
