@@ -20,6 +20,8 @@ impl From<rusqlite::Error> for IndexError {
 pub struct IndexWriter {
     connection: Connection,
     session_id: Option<i64>,
+    active_root: Option<PathBuf>,
+    active_scan_started_at: Option<i64>,
     folder_ids: HashMap<PathBuf, i64>,
 }
 
@@ -29,6 +31,8 @@ impl IndexWriter {
         let writer = Self {
             connection,
             session_id: None,
+            active_root: None,
+            active_scan_started_at: None,
             folder_ids: HashMap::new(),
         };
         writer.migrate()?;
@@ -40,6 +44,8 @@ impl IndexWriter {
         let writer = Self {
             connection,
             session_id: None,
+            active_root: None,
+            active_scan_started_at: None,
             folder_ids: HashMap::new(),
         };
         writer.migrate()?;
@@ -53,7 +59,9 @@ impl IndexWriter {
             ScanEvent::FileIndexed(file) => self.index_file(file),
             ScanEvent::Finished(report) => {
                 self.finish_session("complete", &report.stats)?;
+                self.mark_missing_files_deleted()?;
                 self.recompute_folder_rollups()?;
+                self.rebuild_extension_stats()?;
                 self.rebuild_duplicate_size_groups()?;
                 self.capture_timeline(&report.root, &report.stats)
             }
@@ -74,12 +82,15 @@ impl IndexWriter {
     }
 
     fn start_session(&mut self, root: &Path) -> Result<(), IndexError> {
+        let started_at = now_millis();
         self.folder_ids.clear();
         self.connection.execute(
             "INSERT INTO scan_sessions (root_path, started_at, status) VALUES (?1, ?2, 'running')",
-            params![path_to_string(root), unix_now()],
+            params![path_to_string(root), started_at],
         )?;
         self.session_id = Some(self.connection.last_insert_rowid());
+        self.active_root = Some(root.to_path_buf());
+        self.active_scan_started_at = Some(started_at);
         self.ensure_folder(root)?;
         Ok(())
     }
@@ -96,7 +107,7 @@ impl IndexWriter {
                  inaccessible_entries = ?6
              WHERE id = ?7",
             params![
-                unix_now(),
+                now_millis(),
                 status,
                 stats.files_scanned as i64,
                 stats.folders_scanned as i64,
@@ -108,18 +119,54 @@ impl IndexWriter {
         Ok(())
     }
 
+    fn mark_missing_files_deleted(&self) -> Result<(), IndexError> {
+        let Some(root) = &self.active_root else {
+            return Ok(());
+        };
+        let Some(started_at) = self.active_scan_started_at else {
+            return Ok(());
+        };
+
+        let root_text = path_to_string(root);
+        let root_prefix = path_prefix(root);
+        self.connection.execute(
+            "UPDATE files
+             SET deleted_at = ?1
+             WHERE deleted_at IS NULL
+               AND indexed_at < ?2
+               AND (path = ?3 OR path LIKE ?4)",
+            params![now_millis(), started_at, root_text, format!("{root_prefix}%")],
+        )?;
+        Ok(())
+    }
+
     fn capture_timeline(&self, root: &Path, stats: &ScanStats) -> Result<(), IndexError> {
         self.connection.execute(
             "INSERT INTO timeline_history (root_path, captured_at, total_bytes, file_count, folder_count)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 path_to_string(root),
-                unix_now(),
+                now_millis(),
                 stats.bytes_scanned as i64,
                 stats.files_scanned as i64,
                 stats.folders_scanned as i64
             ],
         )?;
+        Ok(())
+    }
+
+    fn rebuild_extension_stats(&mut self) -> Result<(), IndexError> {
+        let tx = self.connection.transaction()?;
+        tx.execute("DELETE FROM extension_stats", [])?;
+        tx.execute(
+            "INSERT INTO extension_stats (extension, file_count, total_bytes, updated_at)
+             SELECT extension, COUNT(*), COALESCE(SUM(size), 0), ?1
+             FROM files
+             WHERE deleted_at IS NULL AND extension IS NOT NULL
+             GROUP BY extension",
+            params![now_millis()],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -152,7 +199,7 @@ impl IndexWriter {
             tx.execute(
                 "INSERT INTO duplicate_groups (size, confidence, reclaimable_bytes, created_at)
                  VALUES (?1, ?2, ?3, ?4)",
-                params![size, 0.35_f64, reclaimable_bytes, unix_now()],
+                params![size, 0.35_f64, reclaimable_bytes, now_millis()],
             )?;
             let group_id = tx.last_insert_rowid();
             tx.execute(
@@ -250,7 +297,7 @@ impl IndexWriter {
             params![
                 folder.direct_files as i64,
                 folder.direct_bytes as i64,
-                unix_now(),
+                self.active_scan_started_at.unwrap_or_else(now_millis),
                 folder_id
             ],
         )?;
@@ -285,21 +332,9 @@ impl IndexWriter {
                 system_time_to_unix(file.accessed),
                 system_time_to_unix(file.created),
                 classify_media_kind(file.extension.as_deref()),
-                unix_now()
+                self.active_scan_started_at.unwrap_or_else(now_millis)
             ],
         )?;
-
-        if let Some(extension) = &file.extension {
-            self.connection.execute(
-                "INSERT INTO extension_stats (extension, file_count, total_bytes, updated_at)
-                 VALUES (?1, 1, ?2, ?3)
-                 ON CONFLICT(extension) DO UPDATE SET
-                   file_count = file_count + 1,
-                   total_bytes = total_bytes + excluded.total_bytes,
-                   updated_at = excluded.updated_at",
-                params![extension, file.size as i64, unix_now()],
-            )?;
-        }
 
         Ok(())
     }
@@ -338,7 +373,7 @@ impl IndexWriter {
                 path_text,
                 folder_name(path),
                 path.components().count() as i64,
-                unix_now()
+                self.active_scan_started_at.unwrap_or_else(now_millis)
             ],
         )?;
         let id = self.connection.last_insert_rowid();
@@ -351,6 +386,14 @@ fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+fn path_prefix(path: &Path) -> String {
+    let mut path = path_to_string(path);
+    if !path.ends_with(std::path::MAIN_SEPARATOR) {
+        path.push(std::path::MAIN_SEPARATOR);
+    }
+    path
+}
+
 fn folder_name(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -358,8 +401,11 @@ fn folder_name(path: &Path) -> String {
         .unwrap_or_else(|| path_to_string(path))
 }
 
-fn unix_now() -> i64 {
-    system_time_to_unix(Some(SystemTime::now())).unwrap_or_default()
+fn now_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or_default()
 }
 
 fn system_time_to_unix(time: Option<SystemTime>) -> Option<i64> {
@@ -486,6 +532,55 @@ mod tests {
         cleanup(&root);
     }
 
+    #[test]
+    fn rescans_mark_missing_files_deleted_and_rebuild_projections() {
+        let root = test_root("incremental");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        let keep_path = root.join("keep.bin");
+        let remove_path = root.join("remove.bin");
+        write_file(&keep_path, &[1; 32]);
+        write_file(&remove_path, &[2; 32]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut writer);
+
+        fs::remove_file(&remove_path).expect("failed to remove test file");
+        scan_into_index(&root, &mut writer);
+
+        let active_files: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM files WHERE deleted_at IS NULL", [], |row| row.get(0))
+            .expect("failed to count active files");
+        let deleted_files: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM files WHERE deleted_at IS NOT NULL", [], |row| row.get(0))
+            .expect("failed to count deleted files");
+        let duplicate_groups: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .expect("failed to count duplicate groups");
+        let extension_file_count: i64 = writer
+            .connection()
+            .query_row("SELECT file_count FROM extension_stats WHERE extension = 'bin'", [], |row| row.get(0))
+            .expect("failed to read extension stats");
+        let root_total_bytes: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT total_bytes FROM folders WHERE path = ?1",
+                params![path_to_string(&root)],
+                |row| row.get(0),
+            )
+            .expect("failed to read root rollup");
+
+        assert_eq!(active_files, 1);
+        assert_eq!(deleted_files, 1);
+        assert_eq!(duplicate_groups, 0);
+        assert_eq!(extension_file_count, 1);
+        assert_eq!(root_total_bytes, 32);
+        assert!(keep_path.exists());
+        cleanup(&root);
+    }
+
     fn test_root(name: &str) -> PathBuf {
         let root = std::env::current_dir()
             .expect("failed to get current dir")
@@ -506,6 +601,21 @@ mod tests {
     fn write_file(path: &Path, bytes: &[u8]) {
         let mut file = File::create(path).expect("failed to create file");
         file.write_all(bytes).expect("failed to write file");
+    }
+
+    fn scan_into_index(root: &Path, writer: &mut IndexWriter) {
+        let scanner = Scanner::new(ScanOptions {
+            root: root.to_path_buf(),
+            workers: 2,
+        });
+        let events = scanner.scan();
+
+        for event in events {
+            writer.handle_event(&event).expect("failed to index event");
+            if matches!(event, ScanEvent::Finished(_)) {
+                break;
+            }
+        }
     }
 
     fn cleanup(root: &Path) {

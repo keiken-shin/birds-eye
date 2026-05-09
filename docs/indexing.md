@@ -13,10 +13,10 @@ Current flow:
 1. `Scanner` emits `Started`, `FileIndexed`, `FolderIndexed`, `Progress`, `Finished`, and `Cancelled` events.
 2. `IndexWriter` applies schema migrations on open.
 3. `Started` creates a `scan_sessions` row.
-4. `FileIndexed` upserts the file, ensures its folder exists, classifies a coarse `media_kind`, and updates `extension_stats`.
+4. `FileIndexed` upserts the file, ensures its folder exists, and classifies a coarse `media_kind`.
 5. `FolderIndexed` updates direct folder totals.
-6. `Finished` finalizes the scan session, recomputes folder rollups, rebuilds Stage 1 duplicate groups by file size, and writes a `timeline_history` snapshot.
+6. `Finished` marks files under the scan root as deleted when they were not seen in the current run, recomputes folder rollups, rebuilds extension statistics, rebuilds Stage 1 duplicate groups by file size, and writes a `timeline_history` snapshot.
 
 Duplicate confidence is currently `0.35` for size-only matches. Later stages should raise confidence only after partial hashing and full hashing.
 
-This is the durable Phase 2 foundation. Next indexing work should improve batching, deleted-file cleanup, and partial/full hash duplicate refinement.
+This is the durable Phase 2 foundation. Next indexing work should improve batching and partial/full hash duplicate refinement.
