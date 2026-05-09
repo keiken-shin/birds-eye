@@ -312,7 +312,41 @@ h2 {
   width: 100%;
   min-height: 360px;
   border-radius: 8px;
-  cursor: crosshair;
+  cursor: pointer;
+}
+
+.breadcrumb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  margin: -6px 0 12px;
+}
+
+.breadcrumb-row span {
+  min-width: 0;
+  overflow: hidden;
+  color: #b7c1d3;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breadcrumb-row button {
+  display: inline-grid;
+  place-items: center;
+  min-width: 36px;
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dce6f5;
+  cursor: pointer;
+  padding: 0 10px;
+}
+
+.breadcrumb-row button:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .treemap-tooltip {

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
+  ChevronLeft,
   CopyCheck,
   Database,
   FolderOpen,
@@ -53,6 +54,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<NativeSearchResult[]>([]);
   const [currentIndexPath, setCurrentIndexPath] = useState<string | null>(null);
+  const [focusedFolder, setFocusedFolder] = useState<string | null>(null);
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
 
@@ -68,14 +70,21 @@ function App() {
   }, [scan.folders]);
 
   const filteredFolders = useMemo(() => {
-    const folders = filter === "all"
+    const categoryFolders = filter === "all"
       ? scan.folders.map((folder) => ({ ...folder, displayBytes: folder.bytes }))
       : scan.folders
           .filter((folder) => folder.categories[filter] > 0)
           .map((folder) => ({ ...folder, displayBytes: folder.categories[filter] }));
 
-    return folders.sort((a, b) => b.displayBytes - a.displayBytes).slice(0, 48);
-  }, [filter, scan.folders]);
+    if (!focusedFolder) {
+      return categoryFolders.sort((a, b) => b.displayBytes - a.displayBytes).slice(0, 48);
+    }
+
+    const childFolders = categoryFolders.filter((folder) => parentPath(folder.path) === focusedFolder);
+    const descendantFolders = categoryFolders.filter((folder) => folder.path !== focusedFolder && isDescendantPath(folder.path, focusedFolder));
+    const focused = childFolders.length > 0 ? childFolders : descendantFolders;
+    return focused.sort((a, b) => b.displayBytes - a.displayBytes).slice(0, 48);
+  }, [filter, focusedFolder, scan.folders]);
 
   useEffect(() => {
     const trimmedQuery = searchQuery.trim();
@@ -139,6 +148,7 @@ function App() {
 
       stopWorker();
       setFilter("all");
+      setFocusedFolder(null);
       setSearchQuery("");
       setSearchResults([]);
       setCurrentIndexPath(null);
@@ -205,6 +215,7 @@ function App() {
 
     stopWorker();
     setFilter("all");
+    setFocusedFolder(null);
     setSearchQuery("");
     setSearchResults([]);
     setCurrentIndexPath(null);
@@ -257,6 +268,7 @@ function App() {
     stopWorker();
     nativeJobRef.current = null;
     setFilter("all");
+    setFocusedFolder(null);
     setSearchQuery("");
     setSearchResults([]);
     setCurrentIndexPath(null);
@@ -374,9 +386,18 @@ function App() {
           <div className="treemap-panel">
             <div className="panel-header">
               <h2>Space Distribution</h2>
-              <span>{filteredFolders.length > 0 ? "Largest folders by selected category" : "Select a folder to begin"}</span>
+              <span>{focusedFolder ? lastSegment(focusedFolder) : filteredFolders.length > 0 ? "Largest folders by selected category" : "Select a folder to begin"}</span>
             </div>
-            <Treemap folders={filteredFolders} />
+            {focusedFolder && (
+              <div className="breadcrumb-row">
+                <button type="button" onClick={() => setFocusedFolder(parentPath(focusedFolder))} title="Go up one folder">
+                  <ChevronLeft size={16} />
+                </button>
+                <span>{focusedFolder}</span>
+                <button type="button" onClick={() => setFocusedFolder(null)}>Root</button>
+              </div>
+            )}
+            <Treemap folders={filteredFolders} onSelect={(folder) => setFocusedFolder(folder.path)} />
           </div>
 
           <aside className="recommendations">
@@ -571,12 +592,12 @@ function mediaKindFromCategory(category: CategoryKey) {
   return category === "other" ? "other" : category;
 }
 
-function Treemap({ folders }: { folders: Array<FolderStats & { displayBytes: number }> }) {
+function Treemap({ folders, onSelect }: { folders: Array<FolderStats & { displayBytes: number }>; onSelect: (folder: FolderStats & { displayBytes: number }) => void }) {
   if (folders.length === 0) {
     return <div className="treemap-empty">No indexed folders yet</div>;
   }
 
-  return <TreemapCanvas folders={folders} />;
+  return <TreemapCanvas folders={folders} onSelect={onSelect} />;
 }
 
 function Recommendation({ text }: { text: string }) {
@@ -599,6 +620,23 @@ function makeDuplicateHint(scan: ScanState) {
 
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function normalizePath(path: string) {
+  return path.replace(/[\\/]+$/, "");
+}
+
+function parentPath(path: string) {
+  const normalized = normalizePath(path);
+  const index = Math.max(normalized.lastIndexOf("\\"), normalized.lastIndexOf("/"));
+  return index > 0 ? normalized.slice(0, index) : null;
+}
+
+function isDescendantPath(path: string, parent: string) {
+  const normalizedPath = normalizePath(path);
+  const normalizedParent = normalizePath(parent);
+  if (normalizedPath === normalizedParent) return false;
+  return normalizedPath.startsWith(`${normalizedParent}\\`) || normalizedPath.startsWith(`${normalizedParent}/`);
 }
 
 function makeCategoryHint(scan: ScanState, category: CategoryKey, label: string) {

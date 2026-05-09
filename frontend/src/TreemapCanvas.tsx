@@ -18,7 +18,7 @@ type HoverState = {
   folder: TreemapFolder;
 };
 
-export function TreemapCanvas({ folders }: { folders: TreemapFolder[] }) {
+export function TreemapCanvas({ folders, onSelect }: { folders: TreemapFolder[]; onSelect?: (folder: TreemapFolder) => void }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const rectsRef = useRef<Rect[]>([]);
@@ -75,6 +75,15 @@ export function TreemapCanvas({ folders }: { folders: TreemapFolder[] }) {
           const y = event.clientY - bounds.top;
           const rect = rectsRef.current.find((rect) => x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height);
           setHover(rect ? { x, y, folder: rect.folder } : null);
+        }}
+        onClick={(event) => {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const bounds = canvas.getBoundingClientRect();
+          const x = event.clientX - bounds.left;
+          const y = event.clientY - bounds.top;
+          const rect = rectsRef.current.find((rect) => x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height);
+          if (rect) onSelect?.(rect.folder);
         }}
         ref={canvasRef}
       />
@@ -169,4 +178,3 @@ function getDominantCategory(folder: FolderStats): CategoryKey {
     return folder.categories[key] > folder.categories[best] ? key : best;
   }, "other");
 }
-
