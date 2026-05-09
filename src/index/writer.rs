@@ -53,6 +53,7 @@ impl IndexWriter {
             ScanEvent::FileIndexed(file) => self.index_file(file),
             ScanEvent::Finished(report) => {
                 self.finish_session("complete", &report.stats)?;
+                self.rebuild_duplicate_size_groups()?;
                 self.capture_timeline(&report.root, &report.stats)
             }
             ScanEvent::Cancelled(stats) => self.finish_session("cancelled", stats),
@@ -118,6 +119,49 @@ impl IndexWriter {
                 stats.folders_scanned as i64
             ],
         )?;
+        Ok(())
+    }
+
+    fn rebuild_duplicate_size_groups(&mut self) -> Result<(), IndexError> {
+        let tx = self.connection.transaction()?;
+        tx.execute("DELETE FROM duplicate_group_files", [])?;
+        tx.execute("DELETE FROM duplicate_groups", [])?;
+
+        let groups = {
+            let mut statement = tx.prepare(
+                "SELECT size, COUNT(*) AS file_count, size * (COUNT(*) - 1) AS reclaimable_bytes
+                 FROM files
+                 WHERE deleted_at IS NULL AND size > 0
+                 GROUP BY size
+                 HAVING COUNT(*) > 1
+                 ORDER BY reclaimable_bytes DESC",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?;
+
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        for (size, _file_count, reclaimable_bytes) in groups {
+            tx.execute(
+                "INSERT INTO duplicate_groups (size, confidence, reclaimable_bytes, created_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![size, 0.35_f64, reclaimable_bytes, unix_now()],
+            )?;
+            let group_id = tx.last_insert_rowid();
+            tx.execute(
+                "INSERT INTO duplicate_group_files (group_id, file_id)
+                 SELECT ?1, id FROM files WHERE deleted_at IS NULL AND size = ?2",
+                params![group_id, size],
+            )?;
+        }
+
+        tx.commit()?;
         Ok(())
     }
 
@@ -308,10 +352,56 @@ mod tests {
             .connection()
             .query_row("SELECT COUNT(*) FROM timeline_history", [], |row| row.get(0))
             .expect("failed to count timeline rows");
+        let duplicate_group_count: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .expect("failed to count duplicate groups");
 
         assert_eq!(file_count, 2);
         assert_eq!(session_status, "complete");
         assert_eq!(timeline_count, 1);
+        assert_eq!(duplicate_group_count, 0);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn creates_stage_one_duplicate_groups_by_size() {
+        let root = test_root("duplicates");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("one.bin"), &[1; 32]);
+        write_file(&root.join("two.bin"), &[2; 32]);
+        write_file(&root.join("unique.bin"), &[3; 64]);
+
+        let scanner = Scanner::new(ScanOptions {
+            root: root.clone(),
+            workers: 2,
+        });
+        let events = scanner.scan();
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+
+        for event in events {
+            writer.handle_event(&event).expect("failed to index event");
+            if matches!(event, ScanEvent::Finished(_)) {
+                break;
+            }
+        }
+
+        let duplicate_group_count: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .expect("failed to count duplicate groups");
+        let duplicate_file_count: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_group_files", [], |row| row.get(0))
+            .expect("failed to count duplicate files");
+        let reclaimable_bytes: i64 = writer
+            .connection()
+            .query_row("SELECT reclaimable_bytes FROM duplicate_groups", [], |row| row.get(0))
+            .expect("failed to read reclaimable bytes");
+
+        assert_eq!(duplicate_group_count, 1);
+        assert_eq!(duplicate_file_count, 2);
+        assert_eq!(reclaimable_bytes, 32);
         cleanup(&root);
     }
 
