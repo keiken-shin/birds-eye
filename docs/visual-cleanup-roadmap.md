@@ -5,7 +5,7 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 ## Foundation First
 
 - [x] Replace scan polling with pushed Tauri scan events.
-- [ ] Add richer indexed search filters: media kind, extension, min/max size, optional regex.
+- [x] Add richer indexed search filters: media kind, extension, min/max size, optional regex.
 - [ ] Add safe recycle-bin integration for staged cleanup commits.
 - [ ] Keep every destructive or move operation staged first. No direct delete/move from visual surfaces.
 

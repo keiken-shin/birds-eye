@@ -1,6 +1,6 @@
 use crate::index::schema::ALL_MIGRATIONS;
 use crate::scanner::{FileRecord, FolderRecord, ScanEvent, ScanStats};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -50,6 +50,15 @@ pub struct FileSearchResult {
     pub extension: Option<String>,
     pub media_kind: String,
     pub modified_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FileSearchFilters {
+    pub query: String,
+    pub extension: Option<String>,
+    pub media_kind: Option<String>,
+    pub min_size: Option<i64>,
+    pub max_size: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -178,22 +187,68 @@ impl IndexWriter {
     }
 
     pub fn search_files(&self, query: &str, limit: usize) -> Result<Vec<FileSearchResult>, IndexError> {
-        let trimmed_query = query.trim();
-        if trimmed_query.is_empty() {
+        self.search_files_with_filters(
+            FileSearchFilters {
+                query: query.to_owned(),
+                ..FileSearchFilters::default()
+            },
+            limit,
+        )
+    }
+
+    pub fn search_files_with_filters(
+        &self,
+        filters: FileSearchFilters,
+        limit: usize,
+    ) -> Result<Vec<FileSearchResult>, IndexError> {
+        let trimmed_query = filters.query.trim();
+        let has_filters = filters.extension.is_some()
+            || filters.media_kind.is_some()
+            || filters.min_size.is_some()
+            || filters.max_size.is_some();
+        if trimmed_query.is_empty() && !has_filters {
             return Ok(Vec::new());
         }
 
-        let escaped_query = escape_like_pattern(trimmed_query);
-        let pattern = format!("%{escaped_query}%");
-        let mut statement = self.connection.prepare(
+        let mut sql = String::from(
             "SELECT path, name, size, extension, media_kind, modified_at
              FROM files
-             WHERE deleted_at IS NULL
-               AND (name LIKE ?1 ESCAPE '\\' OR path LIKE ?1 ESCAPE '\\')
-             ORDER BY size DESC, modified_at DESC
-             LIMIT ?2",
-        )?;
-        let rows = statement.query_map(params![pattern, limit as i64], |row| {
+             WHERE deleted_at IS NULL",
+        );
+        let mut values = Vec::new();
+
+        if !trimmed_query.is_empty() {
+            let escaped_query = escape_like_pattern(trimmed_query);
+            sql.push_str(" AND (name LIKE ? ESCAPE '\\' OR path LIKE ? ESCAPE '\\')");
+            values.push(Value::Text(format!("%{escaped_query}%")));
+            values.push(Value::Text(format!("%{escaped_query}%")));
+        }
+
+        if let Some(extension) = filters.extension.filter(|extension| !extension.trim().is_empty()) {
+            sql.push_str(" AND extension = ?");
+            values.push(Value::Text(extension.trim().trim_start_matches('.').to_ascii_lowercase()));
+        }
+
+        if let Some(media_kind) = filters.media_kind.filter(|media_kind| !media_kind.trim().is_empty()) {
+            sql.push_str(" AND media_kind = ?");
+            values.push(Value::Text(media_kind));
+        }
+
+        if let Some(min_size) = filters.min_size {
+            sql.push_str(" AND size >= ?");
+            values.push(Value::Integer(min_size.max(0)));
+        }
+
+        if let Some(max_size) = filters.max_size {
+            sql.push_str(" AND size <= ?");
+            values.push(Value::Integer(max_size.max(0)));
+        }
+
+        sql.push_str(" ORDER BY size DESC, modified_at DESC LIMIT ?");
+        values.push(Value::Integer(limit as i64));
+
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(values.iter()), |row| {
             Ok(FileSearchResult {
                 path: row.get(0)?,
                 name: row.get(1)?,

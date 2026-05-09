@@ -1,5 +1,6 @@
-use crate::index::IndexWriter;
+use crate::index::{FileSearchFilters, IndexWriter};
 use crate::scanner::{ScanEvent, ScanOptions, Scanner};
+use regex::Regex;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -28,6 +29,11 @@ pub struct SearchFilesRequest {
     pub index_path: PathBuf,
     pub query: String,
     pub limit: usize,
+    pub extension: Option<String>,
+    pub media_kind: Option<String>,
+    pub min_size: Option<i64>,
+    pub max_size: Option<i64>,
+    pub regex: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -222,10 +228,38 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
 
 pub fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultDto>, String> {
     let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    let use_regex = request.regex.unwrap_or(false);
+    let regex = if use_regex && !request.query.trim().is_empty() {
+        Some(Regex::new(&request.query).map_err(|error| format!("invalid regex: {error}"))?)
+    } else {
+        None
+    };
+    let query = if use_regex { String::new() } else { request.query };
+    let limit = if use_regex {
+        request.limit.saturating_mul(50).max(request.limit)
+    } else {
+        request.limit
+    };
     let results = writer
-        .search_files(&request.query, request.limit)
+        .search_files_with_filters(
+            FileSearchFilters {
+                query,
+                extension: request.extension,
+                media_kind: request.media_kind,
+                min_size: request.min_size,
+                max_size: request.max_size,
+            },
+            limit,
+        )
         .map_err(|error| format!("{error:?}"))?
         .into_iter()
+        .filter(|file| {
+            regex
+                .as_ref()
+                .map(|regex| regex.is_match(&file.name) || regex.is_match(&file.path))
+                .unwrap_or(true)
+        })
+        .take(request.limit)
         .map(|file| FileSearchResultDto {
             path: file.path,
             name: file.name,
@@ -350,6 +384,11 @@ mod tests {
             index_path,
             query: "report".to_owned(),
             limit: 10,
+            extension: None,
+            media_kind: None,
+            min_size: None,
+            max_size: None,
+            regex: None,
         })
         .expect("search command failed");
 
@@ -361,6 +400,37 @@ mod tests {
             results.first().map(|file| file.media_kind.as_str()),
             Some("document")
         );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn command_shaped_file_search_filters_and_regex() {
+        let root = test_root("native-filtered-search");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("failed to create folders");
+        write_file(&root.join("data").join("clip-2024.mp4"), &[1; 128]);
+        write_file(&root.join("data").join("clip-2023.txt"), &[2; 32]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+        })
+        .expect("scan command failed");
+
+        let results = search_files(SearchFilesRequest {
+            index_path,
+            query: "clip-[0-9]{4}".to_owned(),
+            limit: 10,
+            extension: Some("mp4".to_owned()),
+            media_kind: Some("video".to_owned()),
+            min_size: Some(100),
+            max_size: None,
+            regex: Some(true),
+        })
+        .expect("filtered regex search command failed");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results.first().map(|file| file.name.as_str()), Some("clip-2024.mp4"));
         cleanup(&root);
     }
 

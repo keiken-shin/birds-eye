@@ -6,6 +6,7 @@ description = "Native disk space intelligence platform scanner core"
 license = "MIT"
 
 [dependencies]
+regex = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 

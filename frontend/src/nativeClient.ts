@@ -40,6 +40,14 @@ export type NativeSearchResult = {
   modified_at: number | null;
 };
 
+export type NativeSearchFilters = {
+  extension?: string;
+  mediaKind?: string;
+  minSize?: number;
+  maxSize?: number;
+  regex?: boolean;
+};
+
 export type NativeIndexEntry = {
   index_path: string;
   root_path: string | null;
@@ -103,12 +111,17 @@ export async function queryNativeIndex(indexPath: string, limit: number) {
   });
 }
 
-export async function searchNativeIndex(indexPath: string, query: string, limit: number) {
+export async function searchNativeIndex(indexPath: string, query: string, limit: number, filters: NativeSearchFilters = {}) {
   return invoke<NativeSearchResult[]>("search_files", {
     request: {
       index_path: indexPath,
       query,
       limit,
+      extension: filters.extension || null,
+      media_kind: filters.mediaKind || null,
+      min_size: filters.minSize ?? null,
+      max_size: filters.maxSize ?? null,
+      regex: filters.regex ?? false,
     },
   });
 }

@@ -67,6 +67,11 @@ function App() {
   const [scan, setScan] = useState<ScanState>(initialScanState);
   const [filter, setFilter] = useState<CategoryKey | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchExtension, setSearchExtension] = useState("");
+  const [searchMediaKind, setSearchMediaKind] = useState("");
+  const [searchMinMb, setSearchMinMb] = useState("");
+  const [searchMaxMb, setSearchMaxMb] = useState("");
+  const [searchRegex, setSearchRegex] = useState(false);
   const [searchResults, setSearchResults] = useState<NativeSearchResult[]>([]);
   const [currentIndexPath, setCurrentIndexPath] = useState<string | null>(null);
   const [focusedFolder, setFocusedFolder] = useState<string | null>(null);
@@ -125,14 +130,24 @@ function App() {
 
   useEffect(() => {
     const trimmedQuery = searchQuery.trim();
-    if (trimmedQuery.length < 2) {
+    const hasAdvancedFilter = searchExtension.trim() || searchMediaKind || searchMinMb.trim() || searchMaxMb.trim() || searchRegex;
+    if (trimmedQuery.length < 2 && !hasAdvancedFilter) {
       setSearchResults([]);
       return;
     }
 
     if (!nativeRuntime || !currentIndexPath) {
       const browserMatches = scan.largestFiles
-        .filter((file) => file.path.toLowerCase().includes(trimmedQuery.toLowerCase()))
+        .filter((file) => {
+          const matchesText = trimmedQuery.length < 2 || file.path.toLowerCase().includes(trimmedQuery.toLowerCase());
+          const matchesExtension = !searchExtension.trim() || file.extension === searchExtension.trim().replace(/^\./, "").toLowerCase();
+          const matchesMedia = !searchMediaKind || mediaKindFromCategory(file.category) === searchMediaKind;
+          const minBytes = parseMegabytes(searchMinMb);
+          const maxBytes = parseMegabytes(searchMaxMb);
+          const matchesMin = minBytes == null || file.bytes >= minBytes;
+          const matchesMax = maxBytes == null || file.bytes <= maxBytes;
+          return matchesText && matchesExtension && matchesMedia && matchesMin && matchesMax;
+        })
         .slice(0, 24)
         .map((file) => ({
           path: file.path,
@@ -147,7 +162,13 @@ function App() {
     }
 
     const handle = window.setTimeout(() => {
-      void searchNativeIndex(currentIndexPath, trimmedQuery, 24)
+      void searchNativeIndex(currentIndexPath, trimmedQuery, 100, {
+        extension: searchExtension,
+        mediaKind: searchMediaKind,
+        minSize: parseMegabytes(searchMinMb) ?? undefined,
+        maxSize: parseMegabytes(searchMaxMb) ?? undefined,
+        regex: searchRegex,
+      })
         .then(setSearchResults)
         .catch((error) => {
           setRuntimeMessage(error instanceof Error ? error.message : "Search failed");
@@ -156,7 +177,7 @@ function App() {
     }, 180);
 
     return () => window.clearTimeout(handle);
-  }, [currentIndexPath, nativeRuntime, scan.largestFiles, searchQuery]);
+  }, [currentIndexPath, nativeRuntime, scan.largestFiles, searchExtension, searchMaxMb, searchMediaKind, searchMinMb, searchQuery, searchRegex]);
 
   const metrics = [
     { label: "Indexed", value: formatCount(scan.processedFiles), detail: `${formatCount(scan.totalFiles)} selected` },
@@ -480,12 +501,50 @@ function App() {
             <input
               type="search"
               value={searchQuery}
-              placeholder="Search indexed paths"
+              placeholder={searchRegex ? "Regex search indexed paths" : "Search indexed paths"}
               onChange={(event) => setSearchQuery(event.currentTarget.value)}
             />
           </label>
-          {searchQuery.trim().length < 2 ? (
-            <div className="empty-state compact">Enter at least two characters to search the current index.</div>
+          <div className="search-filters">
+            <input
+              type="text"
+              value={searchExtension}
+              placeholder="Extension"
+              onChange={(event) => setSearchExtension(event.currentTarget.value)}
+            />
+            <select value={searchMediaKind} onChange={(event) => setSearchMediaKind(event.currentTarget.value)}>
+              <option value="">Any media</option>
+              <option value="photo">Photos</option>
+              <option value="video">Videos</option>
+              <option value="music">Music</option>
+              <option value="archive">Archives</option>
+              <option value="document">Documents</option>
+              <option value="code">Code</option>
+              <option value="installer">Installers</option>
+              <option value="model">AI Models</option>
+              <option value="other">Other</option>
+            </select>
+            <input
+              type="number"
+              min="0"
+              value={searchMinMb}
+              placeholder="Min MB"
+              onChange={(event) => setSearchMinMb(event.currentTarget.value)}
+            />
+            <input
+              type="number"
+              min="0"
+              value={searchMaxMb}
+              placeholder="Max MB"
+              onChange={(event) => setSearchMaxMb(event.currentTarget.value)}
+            />
+            <label>
+              <input type="checkbox" checked={searchRegex} onChange={(event) => setSearchRegex(event.currentTarget.checked)} />
+              Regex
+            </label>
+          </div>
+          {searchQuery.trim().length < 2 && !searchExtension.trim() && !searchMediaKind && !searchMinMb.trim() && !searchMaxMb.trim() && !searchRegex ? (
+            <div className="empty-state compact">Enter at least two characters or choose a filter to search the current index.</div>
           ) : searchResults.length === 0 ? (
             <div className="empty-state compact">No indexed files match this search.</div>
           ) : (
@@ -863,6 +922,12 @@ function makeDuplicateHint(scan: ScanState) {
 
 function formatDate(epochSeconds: number) {
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(epochSeconds * 1000));
+}
+
+function parseMegabytes(value: string) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return Math.round(parsed * 1024 * 1024);
 }
 
 function normalizePath(path: string) {
