@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { categories, formatBytes, lastSegment, type CategoryKey, type FolderStats } from "./domain";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { categories, formatBytes, lastSegment, type CategoryKey, type FileStats, type FolderStats } from "./domain";
 
 type TreemapFolder = FolderStats & { displayBytes: number };
 
@@ -18,7 +19,17 @@ type HoverState = {
   folder: TreemapFolder;
 };
 
-export function TreemapCanvas({ folders, onSelect }: { folders: TreemapFolder[]; onSelect?: (folder: TreemapFolder) => void }) {
+export function TreemapCanvas({
+  files = [],
+  folders,
+  nativeRuntime = false,
+  onSelect,
+}: {
+  files?: FileStats[];
+  folders: TreemapFolder[];
+  nativeRuntime?: boolean;
+  onSelect?: (folder: TreemapFolder) => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const rectsRef = useRef<Rect[]>([]);
@@ -92,10 +103,47 @@ export function TreemapCanvas({ folders, onSelect }: { folders: TreemapFolder[];
           <strong>{hover.folder.path}</strong>
           <span>{formatBytes(hover.folder.displayBytes)}</span>
           <span>{hover.folder.files.toLocaleString()} files</span>
+          <FolderFilmstrip files={files} folder={hover.folder.path} nativeRuntime={nativeRuntime} />
         </div>
       )}
     </div>
   );
+}
+
+function FolderFilmstrip({ files, folder, nativeRuntime }: { files: FileStats[]; folder: string; nativeRuntime: boolean }) {
+  const samples = useMemo(() => {
+    return files
+      .filter((file) => (file.category === "photos" || file.category === "videos") && isPathInsideFolder(file.path, folder))
+      .slice(0, 4);
+  }, [files, folder]);
+
+  if (samples.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="tooltip-filmstrip">
+      {samples.map((file) => (
+        <div className={`filmstrip-frame ${file.category}`} key={file.path}>
+          {nativeRuntime && file.category === "photos" ? (
+            <img src={toAssetUrl(file.path)} alt="" loading="lazy" />
+          ) : (
+            <span>{file.category === "videos" ? "Video" : "Photo"}</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function toAssetUrl(path: string) {
+  return convertFileSrc(path);
+}
+
+function isPathInsideFolder(path: string, folder: string) {
+  const normalizedPath = path.replace(/\\/g, "/");
+  const normalizedFolder = folder.replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalizedPath === normalizedFolder || normalizedPath.startsWith(`${normalizedFolder}/`);
 }
 
 function layoutTreemap(folders: TreemapFolder[], x: number, y: number, width: number, height: number): Rect[] {

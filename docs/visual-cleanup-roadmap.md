@@ -25,6 +25,7 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 ## P2
 
 - [ ] Lazy thumbnail hover previews for visible/hovered photo/video folders with a small cache.
+  First pass exists: treemap hover tooltips show lazy photo previews or media placeholders from indexed samples.
 - [x] Timeline scatter for photos/videos by EXIF or file timestamp, colored by folder.
 - [x] Depth-based sunburst chart for folder hierarchy.
 

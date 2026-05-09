@@ -404,6 +404,44 @@ h2 {
   white-space: nowrap;
 }
 
+.tooltip-filmstrip {
+  display: grid;
+  grid-template-columns: repeat(4, 42px);
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.filmstrip-frame {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 34px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.filmstrip-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.filmstrip-frame span {
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.filmstrip-frame.photos {
+  background: rgba(244, 114, 182, 0.18);
+}
+
+.filmstrip-frame.videos {
+  background: rgba(192, 132, 252, 0.2);
+}
+
 .treemap-empty,
 .empty-state {
   display: grid;

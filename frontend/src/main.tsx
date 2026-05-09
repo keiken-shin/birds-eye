@@ -473,7 +473,7 @@ function App() {
                 <button type="button" onClick={() => setFocusedFolder(null)}>Root</button>
               </div>
             )}
-            <Treemap folders={filteredFolders} onSelect={(folder) => setFocusedFolder(folder.path)} />
+            <Treemap files={scan.largestFiles} folders={filteredFolders} nativeRuntime={nativeRuntime} onSelect={(folder) => setFocusedFolder(folder.path)} />
             <SunburstHierarchy folders={scan.folders} />
           </div>
 
@@ -1364,12 +1364,22 @@ function IconButton({
   );
 }
 
-function Treemap({ folders, onSelect }: { folders: Array<FolderStats & { displayBytes: number }>; onSelect: (folder: FolderStats & { displayBytes: number }) => void }) {
+function Treemap({
+  files,
+  folders,
+  nativeRuntime,
+  onSelect,
+}: {
+  files: ScanState["largestFiles"];
+  folders: Array<FolderStats & { displayBytes: number }>;
+  nativeRuntime: boolean;
+  onSelect: (folder: FolderStats & { displayBytes: number }) => void;
+}) {
   if (folders.length === 0) {
     return <div className="treemap-empty">No indexed folders yet</div>;
   }
 
-  return <TreemapCanvas folders={folders} onSelect={onSelect} />;
+  return <TreemapCanvas files={files} folders={folders} nativeRuntime={nativeRuntime} onSelect={onSelect} />;
 }
 
 function ScrollableRows({ children, compact = false }: { children: React.ReactNode; compact?: boolean }) {
