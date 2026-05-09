@@ -50,6 +50,13 @@ button {
   font-weight: 750;
 }
 
+.brand img {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  box-shadow: 0 0 26px rgba(14, 211, 255, 0.24);
+}
+
 .sidebar nav {
   display: grid;
   gap: 6px;

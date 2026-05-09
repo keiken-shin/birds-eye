@@ -7,7 +7,6 @@ import {
   Database,
   FolderOpen,
   FolderSearch,
-  HardDrive,
   Pause,
   Play,
   Radar,
@@ -45,6 +44,7 @@ import {
   type NativeSearchResult,
 } from "./nativeClient";
 import { TreemapCanvas } from "./TreemapCanvas";
+import logoUrl from "./assets/birds-eye-logo.svg";
 import "./styles.css";
 
 function App() {
@@ -187,6 +187,8 @@ function App() {
       if (latest) {
         if (latest.status === "Failed") {
           setRuntimeMessage(latest.message);
+        } else if (latest.message === "finalizing index") {
+          setRuntimeMessage("Finalizing index");
         }
         setScan((current) => ({
           ...current,
@@ -297,7 +299,7 @@ function App() {
     <main className="app-shell">
       <aside className="sidebar" aria-label="Primary navigation">
         <div className="brand">
-          <HardDrive size={26} />
+          <img src={logoUrl} alt="" />
           <span>Birds Eye</span>
         </div>
         <nav>
