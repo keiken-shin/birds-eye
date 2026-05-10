@@ -108,6 +108,8 @@ function App() {
   const [activePage, setActivePage] = useState<AppPage>("workspace");
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
+  const [showHeatmap, setShowHeatmap] = useState(true);
+  const [showSuggestedMoves, setShowSuggestedMoves] = useState(true);
   const isWindowsRuntime = useMemo(() => {
     return typeof navigator !== "undefined" && navigator.userAgent.toLowerCase().includes("windows");
   }, []);
@@ -549,9 +551,28 @@ function App() {
           </div>
 
           <aside className="recommendations">
-            <h2>Action Heatmap</h2>
-            <ActionHeatmap scan={scan} onStageAction={stageHeatmapAction} />
-            <SmartSuggestedMoves scan={scan} onStage={stageSuggestedMove} />
+            <div className="panel-header compact">
+              <h2>Cleanup Signals</h2>
+              <span>Toggle panels</span>
+            </div>
+            <div className="panel-toggles" role="group" aria-label="Cleanup panel visibility">
+              <button className={showHeatmap ? "active" : ""} type="button" onClick={() => setShowHeatmap((current) => !current)}>
+                Heatmap
+              </button>
+              <button className={showSuggestedMoves ? "active" : ""} type="button" onClick={() => setShowSuggestedMoves((current) => !current)}>
+                Suggested moves
+              </button>
+            </div>
+            {showHeatmap ? (
+              <ActionHeatmap scan={scan} onStageAction={stageHeatmapAction} />
+            ) : (
+              <div className="empty-state compact">Action heatmap hidden. Toggle it back on to review cleanup signals.</div>
+            )}
+            {showSuggestedMoves ? (
+              <SmartSuggestedMoves scan={scan} onStage={stageSuggestedMove} />
+            ) : (
+              <div className="empty-state compact">Suggested moves hidden. Toggle it back on to review move ideas.</div>
+            )}
           </aside>
         </section>
 

@@ -52,6 +52,8 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 - [ ] Keyboard-first power mode for treemap/search/filter navigation.
   First pass exists: `/` focuses search, `1-0` switch filters, `W/I` switch workspace/index, `Esc` clears folder focus.
 - [ ] Customizable layout: let users reorder, hide, and resize workbench panels.
+  First pass exists: cleanup sidebar panels (heatmap and suggested moves) can be hidden with toggles, but reordering and resizing remain pending.
+  First pass exists: cleanup sidebar panels (heatmap and suggested moves) can be hidden with toggles, but reordering and resizing remain pending.
 
 ## Trust And Explainability
 
