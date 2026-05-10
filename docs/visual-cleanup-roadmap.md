@@ -47,6 +47,7 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 ## P3
 
 - [ ] Lasso / paintbrush batch selection on visual blocks.
+  First pass exists: treemap batch selection mode toggles multi-select with a visible folder chip list, but lasso/paintbrush input is not implemented yet.
 - [ ] Before/after cleanup simulation slider.
   First pass exists: duplicate simulation renders before/after treemaps with a confidence slider and falls back to proportional reclaim estimates when folder overlap data is incomplete.
 - [ ] Keyboard-first power mode for treemap/search/filter navigation.

@@ -418,6 +418,64 @@ h2 {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.treemap-selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: #96a1b6;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.treemap-selection-bar button {
+  min-height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dce6f5;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 12px;
+}
+
+.treemap-selection-bar button.active {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.treemap-selection-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.treemap-selection-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #dce6f5;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.treemap-selection-chip button {
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.treemap-selection-chip.muted {
+  background: rgba(255, 255, 255, 0.04);
+  color: #8a95a8;
+}
+
 .focused-folder-summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, auto) auto;

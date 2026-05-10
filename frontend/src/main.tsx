@@ -108,6 +108,8 @@ function App() {
   const [activePage, setActivePage] = useState<AppPage>("workspace");
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showSuggestedMoves, setShowSuggestedMoves] = useState(true);
   const [showDetailGrid, setShowDetailGrid] = useState(true);
@@ -169,6 +171,9 @@ function App() {
     const focused = childFolders.length > 0 ? childFolders : descendantFolders;
     return focused.sort((a, b) => b.displayBytes - a.displayBytes).slice(0, 48);
   }, [filter, focusedFolder, scan.folders]);
+
+  const selectedFolderPreview = selectedFolders.slice(0, 6);
+  const remainingSelectedFolders = Math.max(0, selectedFolders.length - selectedFolderPreview.length);
 
   useEffect(() => {
     const trimmedQuery = searchQuery.trim();
@@ -565,7 +570,48 @@ function App() {
                 <button type="button" onClick={() => setFocusedFolder(null)}>Root</button>
               </div>
             )}
-            <Treemap files={scan.largestFiles} folders={filteredFolders} nativeRuntime={nativeRuntime} onSelect={(folder) => setFocusedFolder(folder.path)} />
+            <div className="treemap-selection-bar">
+              <button
+                className={selectionMode ? "active" : ""}
+                type="button"
+                onClick={() => setSelectionMode((current) => !current)}
+              >
+                Batch select
+              </button>
+              <span>{selectedFolders.length > 0 ? `${formatCount(selectedFolders.length)} selected` : "Select multiple folders"}</span>
+              {selectedFolders.length > 0 && (
+                <button type="button" onClick={() => setSelectedFolders([])}>
+                  Clear
+                </button>
+              )}
+            </div>
+            {selectedFolders.length > 0 && (
+              <div className="treemap-selection-list">
+                {selectedFolderPreview.map((path) => (
+                  <span className="treemap-selection-chip" key={path} title={path}>
+                    {lastSegment(path)}
+                    <button type="button" onClick={() => toggleSelectedFolder(path)} aria-label={`Remove ${path}`}>
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+                {remainingSelectedFolders > 0 && (
+                  <span className="treemap-selection-chip muted">+{formatCount(remainingSelectedFolders)} more</span>
+                )}
+              </div>
+            )}
+            <Treemap
+              files={scan.largestFiles}
+              folders={filteredFolders}
+              nativeRuntime={nativeRuntime}
+              onSelect={(folder) => {
+                if (selectionMode) {
+                  toggleSelectedFolder(folder.path);
+                } else {
+                  setFocusedFolder(folder.path);
+                }
+              }}
+            />
             <details className="insight-disclosure">
               <summary>Hierarchy rings</summary>
               <SunburstHierarchy folders={scan.folders} onSelectFolder={(path) => setFocusedFolder(path)} />
@@ -1276,6 +1322,15 @@ function App() {
       clearScan();
     }
     await refreshSavedIndexes();
+  }
+
+  function toggleSelectedFolder(path: string) {
+    setSelectedFolders((current) => {
+      if (current.includes(path)) {
+        return current.filter((entry) => entry !== path);
+      }
+      return [...current, path];
+    });
   }
 }
 
