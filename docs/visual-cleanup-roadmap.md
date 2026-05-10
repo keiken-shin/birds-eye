@@ -29,7 +29,7 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 ## P1
 
 - [ ] Duplicate overlap graph: folders as bubbles, shared duplicate edges weighted by reclaimable bytes or duplicate count.
-  First pass exists; a second pass now surfaces top overlap pairs and most affected folders, but it is still treated as an experimental detail behind a disclosure.
+  First pass exists; a second pass now surfaces top overlap pairs and most affected folders with a reclaim/files weighting toggle, but it is still treated as an experimental detail behind a disclosure.
 - [x] Action heatmap replacing text-only cleanup cards.
   Heatmap cells can stage review actions; all file operations remain non-destructive.
 - [ ] Smart suggested moves panel for scattered media, grouped by dates and destination folders.

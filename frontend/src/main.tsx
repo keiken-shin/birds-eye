@@ -1432,47 +1432,52 @@ function polarPoint(cx: number, cy: number, radius: number, angle: number) {
 }
 
 function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: DuplicateOverlap[]; onSelectFolder: (path: string) => void }) {
+  const [weightMode, setWeightMode] = useState<"bytes" | "files">("bytes");
+  const weight = (overlap: DuplicateOverlap) => weightMode === "bytes" ? overlap.reclaimableBytes : overlap.sharedFiles;
+  const formatWeight = (value: number) => weightMode === "bytes" ? formatBytes(value) : formatCount(value);
   const topOverlaps = [...overlaps]
-    .sort((a, b) => b.reclaimableBytes - a.reclaimableBytes)
+    .sort((a, b) => weight(b) - weight(a))
     .slice(0, 8);
   if (topOverlaps.length === 0) {
     return null;
   }
 
-  const folderStats = new Map<string, { bytes: number; overlaps: number }>();
+  const folderStats = new Map<string, { weight: number; overlaps: number }>();
   for (const overlap of overlaps) {
+    const value = weight(overlap);
     for (const path of [overlap.folderA, overlap.folderB]) {
-      const entry = folderStats.get(path) ?? { bytes: 0, overlaps: 0 };
-      entry.bytes += overlap.reclaimableBytes;
+      const entry = folderStats.get(path) ?? { weight: 0, overlaps: 0 };
+      entry.weight += value;
       entry.overlaps += 1;
       folderStats.set(path, entry);
     }
   }
   const topFolders = [...folderStats.entries()]
-    .sort((a, b) => b[1].bytes - a[1].bytes)
+    .sort((a, b) => b[1].weight - a[1].weight)
     .slice(0, 5)
     .map(([path, stats]) => ({ path, ...stats }));
 
   const folderWeights = new Map<string, number>();
   for (const overlap of topOverlaps) {
-    folderWeights.set(overlap.folderA, (folderWeights.get(overlap.folderA) ?? 0) + overlap.reclaimableBytes);
-    folderWeights.set(overlap.folderB, (folderWeights.get(overlap.folderB) ?? 0) + overlap.reclaimableBytes);
+    const value = weight(overlap);
+    folderWeights.set(overlap.folderA, (folderWeights.get(overlap.folderA) ?? 0) + value);
+    folderWeights.set(overlap.folderB, (folderWeights.get(overlap.folderB) ?? 0) + value);
   }
 
   const folders = [...folderWeights.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 6)
-    .map(([path, bytes], index, list) => {
+    .map(([path, weightValue], index, list) => {
       const angle = list.length === 1 ? 0 : (Math.PI * 2 * index) / list.length - Math.PI / 2;
       return {
         path,
-        bytes,
+        weight: weightValue,
         x: 50 + Math.cos(angle) * 27,
         y: 50 + Math.sin(angle) * 27,
       };
     });
   const folderByPath = new Map(folders.map((folder) => [folder.path, folder]));
-  const maxBytes = Math.max(...topOverlaps.map((overlap) => overlap.reclaimableBytes), 1);
+  const maxWeight = Math.max(...topOverlaps.map((overlap) => weight(overlap)), 1);
 
   return (
     <div className="overlap-graph" aria-label="Duplicate overlap graph">
@@ -1482,7 +1487,7 @@ function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: Duplica
             const source = folderByPath.get(overlap.folderA);
             const target = folderByPath.get(overlap.folderB);
             if (!source || !target) return null;
-            const width = 1.5 + (overlap.reclaimableBytes / maxBytes) * 7;
+            const width = 1.5 + (weight(overlap) / maxWeight) * 7;
             return (
               <line
                 key={`${overlap.folderA}-${overlap.folderB}`}
@@ -1495,7 +1500,7 @@ function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: Duplica
             );
           })}
           {folders.map((folder) => {
-            const radius = 7 + Math.min(9, Math.sqrt(folder.bytes / Math.max(maxBytes, 1)) * 7);
+            const radius = 7 + Math.min(9, Math.sqrt(folder.weight / Math.max(maxWeight, 1)) * 7);
             return (
               <g
                 className="overlap-node"
@@ -1519,11 +1524,20 @@ function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: Duplica
         </svg>
       </div>
       <div className="overlap-list">
+        <div className="overlap-toggle" role="group" aria-label="Overlap weighting">
+          <span>Weight</span>
+          <button type="button" className={weightMode === "bytes" ? "active" : ""} onClick={() => setWeightMode("bytes")}>
+            Reclaim
+          </button>
+          <button type="button" className={weightMode === "files" ? "active" : ""} onClick={() => setWeightMode("files")}>
+            Files
+          </button>
+        </div>
         <div className="overlap-section">
           <h4>Top overlap pairs</h4>
           {topOverlaps.slice(0, 4).map((overlap) => (
             <div className="overlap-pair" key={`${overlap.folderA}-${overlap.folderB}`}>
-              <strong>{formatBytes(overlap.reclaimableBytes)}</strong>
+              <strong>{formatWeight(weight(overlap))}</strong>
               <span className="overlap-pair-label">
                 <button
                   className="overlap-target"
@@ -1548,7 +1562,7 @@ function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: Duplica
           ))}
         </div>
         <div className="overlap-section">
-          <h4>Most affected folders</h4>
+          <h4>Most affected folders ({weightMode === "bytes" ? "reclaim" : "files"})</h4>
           {topFolders.map((folder) => (
             <button
               className="overlap-pair overlap-folder"
@@ -1557,7 +1571,7 @@ function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: Duplica
               title={folder.path}
               onClick={() => onSelectFolder(folder.path)}
             >
-              <strong>{formatBytes(folder.bytes)}</strong>
+              <strong>{formatWeight(folder.weight)}</strong>
               <span>{lastSegment(folder.path)}</span>
               <small>{formatCount(folder.overlaps)} overlaps</small>
             </button>
