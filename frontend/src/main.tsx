@@ -77,6 +77,7 @@ type AppPage = "workspace" | "index";
 
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const nativeJobRef = useRef<{ jobId: number; indexPath: string } | null>(null);
   const [scan, setScan] = useState<ScanState>(initialScanState);
@@ -194,6 +195,47 @@ function App() {
 
     return () => window.clearTimeout(handle);
   }, [currentIndexPath, nativeRuntime, scan.largestFiles, searchExtension, searchMaxMb, searchMediaKind, searchMinMb, searchQuery, searchRegex]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT";
+      if (isTyping && event.key !== "Escape") return;
+
+      if (event.key === "/") {
+        event.preventDefault();
+        setActivePage("workspace");
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      if (event.key === "Escape") {
+        setFocusedFolder(null);
+        searchInputRef.current?.blur();
+        return;
+      }
+
+      if (event.key.toLowerCase() === "i") {
+        setActivePage("index");
+        return;
+      }
+
+      if (event.key.toLowerCase() === "w") {
+        setActivePage("workspace");
+        return;
+      }
+
+      const filterKeys: Array<CategoryKey | "all"> = ["all", "photos", "videos", "music", "documents", "archives", "code", "installers", "models", "other"];
+      const numericKey = Number(event.key);
+      if (Number.isInteger(numericKey) && numericKey >= 1 && numericKey <= filterKeys.length) {
+        setActivePage("workspace");
+        setFilter(filterKeys[numericKey - 1]);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const metrics = [
     { label: "Indexed", value: formatCount(scan.processedFiles), detail: `${formatCount(scan.totalFiles)} selected` },
@@ -522,6 +564,7 @@ function App() {
           <label className="search-box">
             <Search size={16} />
             <input
+              ref={searchInputRef}
               type="search"
               value={searchQuery}
               placeholder={searchRegex ? "Regex search indexed paths" : "Search indexed paths"}
