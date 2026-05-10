@@ -1099,7 +1099,21 @@ function App() {
       const result = await recycleNativeFiles(paths);
       const committedIds = new Set(recycleActions.map((action) => action.id));
       setStagedActions((current) => current.filter((action) => !committedIds.has(action.id)));
-      setRuntimeMessage(`Moved ${formatCount(result.moved)} duplicate files to the Recycle Bin. Rescan the folder to refresh the index.`);
+      setDuplicateFiles([]);
+      setSelectedDuplicateGroup(null);
+      if (currentIndexPath) {
+        try {
+          const overview = await queryNativeIndex(currentIndexPath, 1000);
+          setScan((current) => mergeNativeOverview(current, overview));
+          setRuntimeMessage(`Moved ${formatCount(result.moved)} duplicate files to the Recycle Bin. Index refreshed.`);
+        } catch (error) {
+          setRuntimeMessage(error instanceof Error
+            ? error.message
+            : `Moved ${formatCount(result.moved)} duplicate files. Rescan to refresh the index.`);
+        }
+      } else {
+        setRuntimeMessage(`Moved ${formatCount(result.moved)} duplicate files to the Recycle Bin. Rescan the folder to refresh the index.`);
+      }
     } catch (error) {
       setRuntimeMessage(error instanceof Error ? error.message : "Failed to recycle duplicate files");
     } finally {
