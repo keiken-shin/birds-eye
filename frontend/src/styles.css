@@ -570,7 +570,8 @@ h2 {
 }
 
 .timeline-toolbar button,
-.timeline-filters button {
+.timeline-filters button,
+.timeline-pan-controls button {
   min-height: 34px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
@@ -616,6 +617,16 @@ h2 {
   opacity: 0.42;
 }
 
+.timeline-pan-controls {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.timeline-pan-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .timeline-toolbar > button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
@@ -642,6 +653,14 @@ h2 {
   background:
     linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px) 0 0 / 12.5% 100%,
     rgba(0, 0, 0, 0.18);
+}
+
+.timeline-scatter.can-pan {
+  cursor: grab;
+}
+
+.timeline-scatter.panning {
+  cursor: grabbing;
 }
 
 .timeline-scatter::before,

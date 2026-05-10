@@ -1431,6 +1431,7 @@ function TimelineScatter({
   onSelectFile: (file: ScanState["largestFiles"][number]) => void;
 }) {
   const [mediaFilter, setMediaFilter] = useState<CategoryKey | "all">("all");
+  const timelineDragRef = useRef<{ x: number; start: number; end: number } | null>(null);
   const timelineFiles = useMemo(() => {
     const timelineCategories: CategoryKey[] = ["photos", "videos", "music", "documents"];
     return files
@@ -1456,6 +1457,7 @@ function TimelineScatter({
   }, [mediaFilter, timelineFiles]);
   const [zoomRange, setZoomRange] = useState<{ start: number; end: number } | null>(null);
   const [selectedFile, setSelectedFile] = useState<ScanState["largestFiles"][number] | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
 
   useEffect(() => {
     setZoomRange(null);
@@ -1475,6 +1477,15 @@ function TimelineScatter({
   const clusters = hasEnoughPoints ? buildTimelineClusters(visiblePoints, visibleStart, visibleEnd) : [];
   const shouldSplitClusters = span < 1000 * 60 * 60 * 24 * 45;
   const filterLabel = mediaFilter === "all" ? "media files" : categories[mediaFilter].label.toLowerCase();
+  const canPan = hasEnoughPoints && span < Math.max(maxTime - minTime, 1);
+
+  function panTimeline(fraction: number) {
+    if (!canPan) return;
+    setZoomRange((current) => {
+      const range = current ?? { start: visibleStart, end: visibleEnd };
+      return panTimelineRange(range.start, range.end, fraction, minTime, maxTime);
+    });
+  }
 
   return (
     <section className="folder-table timeline-panel">
@@ -1500,11 +1511,40 @@ function TimelineScatter({
             </button>
           ))}
         </div>
+        <div className="timeline-pan-controls" aria-label="Timeline pan controls">
+          <button type="button" onClick={() => panTimeline(-0.65)} disabled={!canPan}>Earlier</button>
+          <button type="button" onClick={() => panTimeline(0.65)} disabled={!canPan}>Later</button>
+        </div>
         <button type="button" onClick={() => setZoomRange(null)} disabled={!zoomRange}>Reset zoom</button>
         <span>{hasEnoughPoints ? `${formatDate(Math.floor(visibleStart / 1000))} to ${formatDate(Math.floor(visibleEnd / 1000))}` : `No timeline points for ${filterLabel}`}</span>
       </div>
       <div className="timeline-workbench">
-        <div className="timeline-scatter" aria-label="Photo and video timeline scatter">
+        <div
+          className={`timeline-scatter ${canPan ? "can-pan" : ""} ${isPanning ? "panning" : ""}`}
+          aria-label="Media timeline scatter"
+          onPointerDown={(event) => {
+            if (!canPan || (event.target as HTMLElement).closest("button")) return;
+            timelineDragRef.current = { x: event.clientX, start: visibleStart, end: visibleEnd };
+            setIsPanning(true);
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            const drag = timelineDragRef.current;
+            if (!drag) return;
+            const width = Math.max(event.currentTarget.getBoundingClientRect().width, 1);
+            const delta = ((event.clientX - drag.x) / width) * (drag.end - drag.start);
+            setZoomRange(clampTimelineRange(drag.start - delta, drag.end - delta, minTime, maxTime));
+          }}
+          onPointerUp={(event) => {
+            timelineDragRef.current = null;
+            setIsPanning(false);
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }}
+          onPointerCancel={() => {
+            timelineDragRef.current = null;
+            setIsPanning(false);
+          }}
+        >
           {!hasEnoughPoints && (
             <div className="timeline-empty">
               <strong>{timelineFiles.length === 0 ? "No timestamped media yet" : `Not enough ${filterLabel}`}</strong>
@@ -1705,10 +1745,32 @@ function buildTimelineClusters(files: ScanState["largestFiles"], start: number, 
 function expandTimelineRange(start: number, end: number, minTime: number, maxTime: number) {
   const span = Math.max(end - start, 1000 * 60 * 60 * 24);
   const padding = span * 0.35;
-  return {
-    start: Math.max(minTime, start - padding),
-    end: Math.min(maxTime, end + padding),
-  };
+  return clampTimelineRange(start - padding, end + padding, minTime, maxTime);
+}
+
+function panTimelineRange(start: number, end: number, fraction: number, minTime: number, maxTime: number) {
+  const span = Math.max(end - start, 1);
+  const delta = span * fraction;
+  return clampTimelineRange(start + delta, end + delta, minTime, maxTime);
+}
+
+function clampTimelineRange(start: number, end: number, minTime: number, maxTime: number) {
+  const fullSpan = Math.max(maxTime - minTime, 1);
+  const span = Math.min(Math.max(end - start, 1), fullSpan);
+  let nextStart = start;
+  let nextEnd = start + span;
+
+  if (nextStart < minTime) {
+    nextStart = minTime;
+    nextEnd = minTime + span;
+  }
+
+  if (nextEnd > maxTime) {
+    nextEnd = maxTime;
+    nextStart = maxTime - span;
+  }
+
+  return { start: nextStart, end: nextEnd };
 }
 
 function SmartSuggestedMoves({ scan, onStage }: { scan: ScanState; onStage: (suggestion: MoveSuggestion) => void }) {
