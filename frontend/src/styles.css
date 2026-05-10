@@ -470,12 +470,15 @@ h2 {
 }
 
 .sunburst-panel path {
+  cursor: pointer;
   opacity: 0.9;
+  outline: none;
   stroke: rgba(9, 11, 16, 0.82);
   stroke-width: 1.2;
 }
 
-.sunburst-panel path:hover {
+.sunburst-panel path:hover,
+.sunburst-panel path:focus-visible {
   opacity: 1;
   stroke: rgba(255, 255, 255, 0.78);
 }
@@ -536,7 +539,17 @@ h2 {
   border: 1px solid rgba(255, 255, 255, 0.72);
   border-radius: 999px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.36);
+  cursor: pointer;
+  padding: 0;
   transform: translate(-50%, -50%);
+}
+
+.timeline-dot:hover,
+.timeline-dot:focus-visible {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.14), 0 8px 24px rgba(0, 0, 0, 0.42);
+  outline: none;
+  z-index: 2;
 }
 
 .timeline-dot.photos {
@@ -715,6 +728,17 @@ h2 {
   stroke-width: 0.8;
 }
 
+.overlap-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.overlap-node:hover circle,
+.overlap-node:focus-visible circle {
+  fill: rgba(192, 132, 252, 0.5);
+  stroke: #ffffff;
+}
+
 .overlap-canvas text {
   fill: #dce6f5;
   font-size: 3px;
@@ -735,10 +759,21 @@ h2 {
   align-items: baseline;
   padding: 10px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
 }
 
 .overlap-pair:last-child {
   border-bottom: 0;
+}
+
+.overlap-pair:hover,
+.overlap-pair:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .overlap-pair strong {

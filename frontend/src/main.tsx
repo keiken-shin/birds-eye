@@ -474,7 +474,7 @@ function App() {
               </div>
             )}
             <Treemap files={scan.largestFiles} folders={filteredFolders} nativeRuntime={nativeRuntime} onSelect={(folder) => setFocusedFolder(folder.path)} />
-            <SunburstHierarchy folders={scan.folders} />
+            <SunburstHierarchy folders={scan.folders} onSelectFolder={(path) => setFocusedFolder(path)} />
           </div>
 
           <aside className="recommendations">
@@ -624,7 +624,13 @@ function App() {
           </div>
         </section>
 
-        <TimelineScatter files={scan.largestFiles} />
+        <TimelineScatter
+          files={scan.largestFiles}
+          onSelectFile={(file) => {
+            setSearchQuery(file.path);
+            void revealPath(file.path);
+          }}
+        />
 
         <section className="folder-table">
           <div className="panel-header">
@@ -632,7 +638,7 @@ function App() {
             <span><CopyCheck size={14} /> Size + partial + full hash</span>
           </div>
           <p className="section-note">Duplicate groups start by identical file size, then matching candidates are refined with partial hashes and full-file hashes. A 100% confidence group means matching full hashes.</p>
-          <DuplicateOverlapGraph overlaps={scan.duplicateOverlaps} />
+          <DuplicateOverlapGraph overlaps={scan.duplicateOverlaps} onSelectFolder={(path) => setFocusedFolder(path)} />
           {scan.duplicateCandidates.length === 0 ? (
             <div className="empty-state compact">Files with identical sizes will appear here as duplicate candidates.</div>
           ) : (
@@ -1087,7 +1093,7 @@ function polarPoint(cx: number, cy: number, radius: number, angle: number) {
   };
 }
 
-function DuplicateOverlapGraph({ overlaps }: { overlaps: DuplicateOverlap[] }) {
+function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: DuplicateOverlap[]; onSelectFolder: (path: string) => void }) {
   const topOverlaps = overlaps.slice(0, 8);
   if (topOverlaps.length === 0) {
     return null;
@@ -1137,9 +1143,22 @@ function DuplicateOverlapGraph({ overlaps }: { overlaps: DuplicateOverlap[] }) {
           {folders.map((folder) => {
             const radius = 7 + Math.min(11, Math.sqrt(folder.bytes / Math.max(maxBytes, 1)) * 9);
             return (
-              <g key={folder.path}>
+              <g
+                className="overlap-node"
+                key={folder.path}
+                onClick={() => onSelectFolder(folder.path)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelectFolder(folder.path);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+              >
                 <circle cx={folder.x} cy={folder.y} r={radius} />
                 <text x={folder.x} y={folder.y + radius + 5}>{lastSegment(folder.path)}</text>
+                <title>{folder.path}</title>
               </g>
             );
           })}
@@ -1147,11 +1166,11 @@ function DuplicateOverlapGraph({ overlaps }: { overlaps: DuplicateOverlap[] }) {
       </div>
       <div className="overlap-list">
         {topOverlaps.slice(0, 4).map((overlap) => (
-          <div className="overlap-pair" key={`${overlap.folderA}-${overlap.folderB}`}>
+          <button className="overlap-pair" key={`${overlap.folderA}-${overlap.folderB}`} type="button" onClick={() => onSelectFolder(overlap.folderA)}>
             <strong>{formatBytes(overlap.reclaimableBytes)}</strong>
             <span>{lastSegment(overlap.folderA)} <span aria-hidden="true">/</span> {lastSegment(overlap.folderB)}</span>
             <small>{formatCount(overlap.sharedGroups)} groups, {formatCount(overlap.sharedFiles)} files</small>
-          </div>
+          </button>
         ))}
       </div>
     </div>
@@ -1221,7 +1240,7 @@ function ActionHeatmap({ scan }: { scan: ScanState }) {
   );
 }
 
-function SunburstHierarchy({ folders }: { folders: FolderStats[] }) {
+function SunburstHierarchy({ folders, onSelectFolder }: { folders: FolderStats[]; onSelectFolder: (path: string) => void }) {
   const slices = useMemo(() => buildSunburstSlices(folders), [folders]);
   if (slices.length === 0) {
     return null;
@@ -1239,6 +1258,15 @@ function SunburstHierarchy({ folders }: { folders: FolderStats[] }) {
             d={describeArc(110, 110, slice.innerRadius, slice.outerRadius, slice.startAngle, slice.endAngle)}
             fill={slice.color}
             key={`${slice.path}-${slice.depth}-${slice.startAngle}`}
+            onClick={() => onSelectFolder(slice.path)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onSelectFolder(slice.path);
+              }
+            }}
+            role="button"
+            tabIndex={0}
           >
             <title>{slice.path}: {formatBytes(slice.bytes)}</title>
           </path>
@@ -1251,7 +1279,7 @@ function SunburstHierarchy({ folders }: { folders: FolderStats[] }) {
   );
 }
 
-function TimelineScatter({ files }: { files: ScanState["largestFiles"] }) {
+function TimelineScatter({ files, onSelectFile }: { files: ScanState["largestFiles"]; onSelectFile: (file: ScanState["largestFiles"][number]) => void }) {
   const points = files
     .filter((file) => (file.category === "photos" || file.category === "videos") && file.modified > 0)
     .sort((a, b) => a.modified - b.modified)
@@ -1286,11 +1314,13 @@ function TimelineScatter({ files }: { files: ScanState["largestFiles"] }) {
           const size = 7 + Math.min(13, Math.sqrt(file.bytes / maxBytes) * 13);
           const lane = file.category === "photos" ? 34 : 66;
           return (
-            <span
+            <button
               className={`timeline-dot ${file.category}`}
               key={file.path}
+              onClick={() => onSelectFile(file)}
               style={{ left: `${left}%`, top: `${lane}%`, width: size, height: size }}
               title={`${lastSegment(file.path)} - ${formatDate(Math.floor(file.modified / 1000))} - ${formatBytes(file.bytes)}`}
+              type="button"
             />
           );
         })}
