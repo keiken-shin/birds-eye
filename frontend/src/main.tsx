@@ -1488,6 +1488,7 @@ function TimelineScatter({
 }) {
   const [mediaFilter, setMediaFilter] = useState<CategoryKey | "all">("all");
   const timelineDragRef = useRef<{ x: number; start: number; end: number } | null>(null);
+  const timelineDidPanRef = useRef(false);
   const timelineFiles = useMemo(() => {
     const timelineCategories: CategoryKey[] = ["photos", "videos", "music", "documents"];
     return files
@@ -1579,8 +1580,9 @@ function TimelineScatter({
           className={`timeline-scatter ${canPan ? "can-pan" : ""} ${isPanning ? "panning" : ""}`}
           aria-label="Media timeline scatter"
           onPointerDown={(event) => {
-            if (!canPan || (event.target as HTMLElement).closest("button")) return;
+            if (!canPan) return;
             timelineDragRef.current = { x: event.clientX, start: visibleStart, end: visibleEnd };
+            timelineDidPanRef.current = false;
             setIsPanning(true);
             event.currentTarget.setPointerCapture(event.pointerId);
           }}
@@ -1589,6 +1591,9 @@ function TimelineScatter({
             if (!drag) return;
             const width = Math.max(event.currentTarget.getBoundingClientRect().width, 1);
             const delta = ((event.clientX - drag.x) / width) * (drag.end - drag.start);
+            if (Math.abs(event.clientX - drag.x) > 4) {
+              timelineDidPanRef.current = true;
+            }
             setZoomRange(clampTimelineRange(drag.start - delta, drag.end - delta, minTime, maxTime));
           }}
           onWheel={(event) => {
@@ -1604,6 +1609,9 @@ function TimelineScatter({
             if (event.currentTarget.hasPointerCapture(event.pointerId)) {
               event.currentTarget.releasePointerCapture(event.pointerId);
             }
+            window.setTimeout(() => {
+              timelineDidPanRef.current = false;
+            }, 0);
           }}
           onPointerCancel={(event) => {
             if (!timelineDragRef.current) return;
@@ -1612,6 +1620,7 @@ function TimelineScatter({
             if (event.currentTarget.hasPointerCapture(event.pointerId)) {
               event.currentTarget.releasePointerCapture(event.pointerId);
             }
+            timelineDidPanRef.current = false;
           }}
         >
           {!hasEnoughPoints && (
@@ -1629,7 +1638,13 @@ function TimelineScatter({
                 <button
                   className="timeline-cluster"
                   key={`${cluster.start}-${cluster.end}-${cluster.files.length}`}
-                  onClick={() => setZoomRange(expandTimelineRange(cluster.start, cluster.end, minTime, maxTime))}
+                  onClick={(event) => {
+                    if (timelineDidPanRef.current) {
+                      event.preventDefault();
+                      return;
+                    }
+                    setZoomRange(expandTimelineRange(cluster.start, cluster.end, minTime, maxTime));
+                  }}
                   style={{ left: `${left}%`, top: "50%", width: size, height: size }}
                   title={`${formatCount(cluster.files.length)} files from ${formatDate(Math.floor(cluster.start / 1000))} to ${formatDate(Math.floor(cluster.end / 1000))}`}
                   type="button"
@@ -1648,7 +1663,11 @@ function TimelineScatter({
                 <button
                   className={`timeline-dot ${file.category} ${selectedFile?.path === file.path ? "active" : ""}`}
                   key={file.path}
-                  onClick={() => {
+                  onClick={(event) => {
+                    if (timelineDidPanRef.current) {
+                      event.preventDefault();
+                      return;
+                    }
                     setSelectedFile(file);
                     onSelectFile(file);
                   }}
