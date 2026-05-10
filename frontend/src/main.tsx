@@ -465,6 +465,12 @@ function App() {
               <span>{focusedFolder ? lastSegment(focusedFolder) : filteredFolders.length > 0 ? "Largest folders by selected category" : "Select a folder to begin"}</span>
             </div>
             {focusedFolder && (
+              <FocusedFolderSummary
+                folder={scan.folders.find((folder) => folder.path === focusedFolder) ?? null}
+                onReveal={(path) => void revealPath(path)}
+              />
+            )}
+            {focusedFolder && (
               <div className="breadcrumb-row">
                 <button type="button" onClick={() => setFocusedFolder(parentPath(focusedFolder))} title="Go up one folder">
                   <ChevronLeft size={16} />
@@ -1236,6 +1242,38 @@ function ActionHeatmap({ scan }: { scan: ScanState }) {
           })}
         </div>
       ))}
+    </div>
+  );
+}
+
+function FocusedFolderSummary({ folder, onReveal }: { folder: FolderStats | null; onReveal: (path: string) => void }) {
+  if (!folder) {
+    return null;
+  }
+
+  const topCategories = (Object.keys(folder.categories) as CategoryKey[])
+    .map((key) => ({ key, bytes: folder.categories[key] }))
+    .filter((entry) => entry.bytes > 0)
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, 3);
+
+  return (
+    <div className="focused-folder-summary">
+      <div>
+        <strong>{folder.path}</strong>
+        <span>{formatBytes(folder.bytes)} across {formatCount(folder.files)} files</span>
+      </div>
+      <div className="focused-category-chips">
+        {topCategories.map((entry) => (
+          <span key={entry.key}>
+            <i style={{ background: categories[entry.key].color }} />
+            {categories[entry.key].label}: {formatBytes(entry.bytes)}
+          </span>
+        ))}
+      </div>
+      <IconButton title="Open selected folder in Explorer" onClick={() => onReveal(folder.path)}>
+        <ExternalLink size={16} />
+      </IconButton>
     </div>
   );
 }

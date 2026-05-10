@@ -380,6 +380,62 @@ h2 {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.focused-folder-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, auto) auto;
+  gap: 12px;
+  align-items: center;
+  margin: -4px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.focused-folder-summary > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.focused-folder-summary strong,
+.focused-folder-summary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focused-folder-summary span {
+  color: #96a1b6;
+  font-size: 12px;
+}
+
+.focused-category-chips {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.focused-category-chips span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 180px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 5px 8px;
+}
+
+.focused-category-chips i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
 .treemap-tooltip {
   position: absolute;
   z-index: 4;
@@ -1177,8 +1233,13 @@ h2 {
   .action-row-grid,
   .search-filters,
   .stage-summary,
-  .staged-row {
+  .staged-row,
+  .focused-folder-summary {
     grid-template-columns: 1fr;
+  }
+
+  .focused-category-chips {
+    justify-content: flex-start;
   }
 
   .index-row {
