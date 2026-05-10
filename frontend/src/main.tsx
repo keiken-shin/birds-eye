@@ -3,6 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { createRoot } from "react-dom/client";
 import {
   ChevronLeft,
+  Check,
   CopyCheck,
   Database,
   Eye,
@@ -631,7 +632,7 @@ function App() {
           ) : (
             <ScrollableRows compact>
               {searchResults.map((file) => (
-                <div className="folder-row file-row action-row-grid" key={file.path}>
+                <div className="folder-row file-row duplicate-detail-row" key={file.path}>
                   <span>{file.path}</span>
                   <strong>{formatBytes(file.size)}</strong>
                   <small>{file.extension ?? "(none)"}</small>
@@ -769,6 +770,13 @@ function App() {
                   <span>{file.path}</span>
                   <strong>{formatBytes(file.size)}</strong>
                   <small>{file.modified_at ? formatDate(file.modified_at) : "-"}</small>
+                  <IconButton
+                    disabled={!canStageSelectedDuplicateKeep()}
+                    title="Keep this copy when staging duplicate cleanup"
+                    onClick={() => stageSelectedDuplicateKeep(file)}
+                  >
+                    <Check size={16} />
+                  </IconButton>
                   <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
                     <ExternalLink size={16} />
                   </IconButton>
@@ -972,6 +980,46 @@ function App() {
           operation,
         },
       ];
+    });
+  }
+
+  function canStageSelectedDuplicateKeep() {
+    const candidate = scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup);
+    return Boolean(candidate?.id && candidate.confidenceScore === 1 && duplicateFiles.length > 1);
+  }
+
+  function stageSelectedDuplicateKeep(keepFile: NativeDuplicateFile) {
+    const candidate = scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup);
+    if (!candidate || candidate.confidenceScore !== 1 || duplicateFiles.length <= 1) {
+      setRuntimeMessage("Choose an exact duplicate group before selecting the retained copy");
+      return;
+    }
+
+    const removePaths = duplicateFiles.filter((file) => file.path !== keepFile.path).map((file) => file.path);
+    const operation: StagedAction["operation"] = {
+      kind: "recycleFiles",
+      keepPath: keepFile.path,
+      removePaths,
+    };
+    const id = `duplicate-${candidate.id ?? candidate.size}`;
+
+    setStagedActions((current) => {
+      const nextAction: StagedAction = {
+        id,
+        label: "Exact duplicate cleanup candidate",
+        confidence: "Safe",
+        bytes: candidate.reclaimableBytes,
+        reason: `Group ${candidate.id ?? formatBytes(candidate.size)} has matching full-file hashes. You chose the retained copy.`,
+        suggestedAction: `Keep ${lastSegment(keepFile.path)} and move ${formatCount(removePaths.length)} duplicate copies to the Recycle Bin on commit.`,
+        evidence: [
+          `${formatCount(candidate.files)} files share the same ${formatBytes(candidate.size)} size.`,
+          "Full-file hashes match across this group.",
+          `Retained copy: ${keepFile.path}`,
+          `${formatBytes(candidate.reclaimableBytes)} is potentially reclaimable after keeping one copy.`,
+        ],
+        operation,
+      };
+      return [...current.filter((action) => action.id !== id), nextAction];
     });
   }
 

@@ -1382,6 +1382,10 @@ h2 {
   grid-template-columns: minmax(0, 1fr) 110px 90px auto;
 }
 
+.duplicate-detail-row {
+  grid-template-columns: minmax(0, 1fr) 110px 90px auto auto;
+}
+
 .icon-cta {
   display: inline-grid;
   place-items: center;

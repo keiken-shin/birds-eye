@@ -8,6 +8,7 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 - Before/after simulation now uses exact duplicate candidate reclaim totals, with folder-specific overlap data when available and proportional estimates as a fallback. It also lists the top simulated folder changes so the effect is visible even when treemap geometry changes are subtle.
 - Timeline is pinned for repair and hidden from the primary workflow. Do not build on it until its interaction model is redesigned and validated.
 - Exact duplicate groups can stage a Windows Recycle Bin commit that keeps the newest indexed copy and recycles the extra copies. Broader move/delete actions are still review-only.
+- Exact duplicate details now let the user choose the retained copy before staging a Recycle Bin commit.
 - Smart suggested moves now show top source folders and timestamp-derived year buckets before staging a review action. They remain non-destructive.
 - Sunburst hierarchy is intentionally behind a disclosure because the current version is not yet strong enough to be a primary cleanup surface.
 
@@ -16,7 +17,7 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 - [x] Replace scan polling with pushed Tauri scan events.
 - [x] Add richer indexed search filters: media kind, extension, min/max size, optional regex.
 - [ ] Add safe recycle-bin integration for staged cleanup commits.
-  First pass exists for exact duplicate groups on Windows only. It still needs retained-copy controls, cross-platform support, and index refresh after commit.
+  First pass exists for exact duplicate groups on Windows only. Retained-copy control exists in duplicate details; cross-platform support and index refresh after commit remain pending.
 - [ ] Keep every destructive or move operation staged first. No direct delete/move from visual surfaces.
 
 ## P0
