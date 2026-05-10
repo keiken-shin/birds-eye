@@ -19,6 +19,7 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 
 - [x] Duplicate overlap graph: folders as bubbles, shared duplicate edges weighted by reclaimable bytes or duplicate count.
 - [x] Action heatmap replacing text-only cleanup cards.
+  Heatmap cells can stage review actions; all file operations remain non-destructive.
 - [ ] Smart suggested moves panel for scattered media, grouped by dates and destination folders.
   First pass exists: scattered media categories can be staged into review destinations. Date grouping remains for EXIF/timestamp extraction.
 

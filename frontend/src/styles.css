@@ -855,10 +855,22 @@ h2 {
     ),
     rgba(0, 0, 0, 0.18);
   color: #f4f7fb;
+  cursor: pointer;
   font-size: 11px;
   font-weight: 750;
   white-space: nowrap;
   padding: 0 6px;
+}
+
+.heatmap-cell:hover:not(:disabled),
+.heatmap-cell:focus-visible:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.38);
+  outline: none;
+}
+
+.heatmap-cell:disabled {
+  cursor: default;
+  opacity: 0.52;
 }
 
 .suggested-moves {

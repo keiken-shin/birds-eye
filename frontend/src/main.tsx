@@ -528,7 +528,7 @@ function App() {
 
           <aside className="recommendations">
             <h2>Action Heatmap</h2>
-            <ActionHeatmap scan={scan} />
+            <ActionHeatmap scan={scan} onStageAction={stageHeatmapAction} />
             <SmartSuggestedMoves scan={scan} onStage={stageSuggestedMove} />
           </aside>
         </section>
@@ -899,6 +899,31 @@ function App() {
     });
   }
 
+  function stageHeatmapAction(folder: FolderStats, action: HeatmapActionCell) {
+    const id = `heatmap-${action.key}-${folder.path}`;
+    setStagedActions((current) => {
+      if (current.some((staged) => staged.id === id)) return current;
+      return [
+        ...current,
+        {
+          id,
+          label: `Review ${action.label.toLowerCase()} in ${lastSegment(folder.path)}`,
+          confidence: action.key === "duplicates" ? "Medium" : "Manual review",
+          bytes: action.bytes,
+          reason: `${formatBytes(action.bytes)} flagged under ${action.label.toLowerCase()} for this folder.`,
+          suggestedAction: action.key === "duplicates"
+            ? "Open duplicate candidates, choose retained copies, then stage exact groups individually."
+            : `Review ${folder.path} before deciding whether to move, archive, or delete anything.`,
+          evidence: [
+            `${folder.path} contains ${formatCount(folder.files)} indexed files.`,
+            `${action.label} is currently the strongest cleanup signal for this cell.`,
+            "This queues review only; no file operation is executed.",
+          ],
+        },
+      ];
+    });
+  }
+
   async function refreshSavedIndexes() {
     try {
       setSavedIndexes(await listNativeIndexes());
@@ -1054,6 +1079,12 @@ type SunburstSlice = {
   startAngle: number;
   endAngle: number;
   color: string;
+};
+
+type HeatmapActionCell = {
+  key: string;
+  label: string;
+  bytes: number;
 };
 
 function buildSunburstSlices(folders: FolderStats[]): SunburstSlice[] {
@@ -1229,7 +1260,7 @@ function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: Duplica
   );
 }
 
-function ActionHeatmap({ scan }: { scan: ScanState }) {
+function ActionHeatmap({ scan, onStageAction }: { scan: ScanState; onStageAction: (folder: FolderStats, action: HeatmapActionCell) => void }) {
   const duplicateBytesByFolder = new Map<string, number>();
   for (const overlap of scan.duplicateOverlaps) {
     const half = overlap.reclaimableBytes / 2;
@@ -1276,14 +1307,17 @@ function ActionHeatmap({ scan }: { scan: ScanState }) {
           {row.cells.map((cell) => {
             const intensity = cell.bytes / maxBytes;
             return (
-              <span
+              <button
                 className="heatmap-cell"
+                disabled={cell.bytes <= 0}
                 key={cell.key}
+                onClick={() => onStageAction(row.folder, cell)}
                 style={{ "--heat": intensity.toFixed(3) } as React.CSSProperties}
                 title={`${cell.label}: ${formatBytes(cell.bytes)} in ${row.folder.path}`}
+                type="button"
               >
                 {cell.bytes > 0 ? formatBytes(cell.bytes) : "-"}
-              </span>
+              </button>
             );
           })}
         </div>
