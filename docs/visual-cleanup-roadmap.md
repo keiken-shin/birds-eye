@@ -34,6 +34,7 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 
 - [ ] Lasso / paintbrush batch selection on visual blocks.
 - [ ] Before/after cleanup simulation slider.
+  First pass exists: duplicate-overlap simulation renders before/after treemaps with a confidence slider.
 - [ ] Keyboard-first power mode for treemap/search/filter navigation.
   First pass exists: `/` focuses search, `1-0` switch filters, `W/I` switch workspace/index, `Esc` clears folder focus.
 - [ ] Customizable layout: let users reorder, hide, and resize workbench panels.

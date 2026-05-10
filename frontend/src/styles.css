@@ -738,6 +738,43 @@ h2 {
   color: #96a1b6;
 }
 
+.simulation-slider {
+  display: grid;
+  gap: 8px;
+  margin: -4px 0 12px;
+}
+
+.simulation-slider span {
+  color: #96a1b6;
+  font-size: 12px;
+}
+
+.simulation-slider input {
+  width: 100%;
+  accent-color: #47d7c6;
+}
+
+.simulation-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.simulation-grid > div {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.simulation-grid strong {
+  color: #ffffff;
+}
+
+.simulation-grid .treemap-canvas-wrap,
+.simulation-grid .treemap-canvas {
+  min-height: 260px;
+}
+
 .empty-state.compact {
   min-height: 150px;
 }
@@ -1300,7 +1337,8 @@ h2 {
   .analysis-layout,
   .detail-grid,
   .overlap-graph,
-  .timeline-workbench {
+  .timeline-workbench,
+  .simulation-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -682,6 +682,8 @@ function App() {
           }}
         />
 
+        <BeforeAfterSimulation files={scan.largestFiles} folders={scan.folders} nativeRuntime={nativeRuntime} overlaps={scan.duplicateOverlaps} />
+
         <section className="folder-table">
           <div className="panel-header">
             <h2>Duplicate Candidates</h2>
@@ -1462,6 +1464,78 @@ function TimelineScatter({
           </div>
         </div>
         <MediaPreviewPanel file={selectedFile} nativeRuntime={nativeRuntime} />
+      </div>
+    </section>
+  );
+}
+
+function BeforeAfterSimulation({
+  files,
+  folders,
+  nativeRuntime,
+  overlaps,
+}: {
+  files: ScanState["largestFiles"];
+  folders: FolderStats[];
+  nativeRuntime: boolean;
+  overlaps: DuplicateOverlap[];
+}) {
+  const [simulationPercent, setSimulationPercent] = useState(100);
+  const duplicateBytesByFolder = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const overlap of overlaps) {
+      const half = overlap.reclaimableBytes / 2;
+      map.set(overlap.folderA, (map.get(overlap.folderA) ?? 0) + half);
+      map.set(overlap.folderB, (map.get(overlap.folderB) ?? 0) + half);
+    }
+    return map;
+  }, [overlaps]);
+
+  const reclaimableBytes = [...duplicateBytesByFolder.values()].reduce((sum, bytes) => sum + bytes, 0);
+  if (reclaimableBytes <= 0) {
+    return null;
+  }
+
+  const currentFolders = folders
+    .filter((folder) => folder.bytes > 0)
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, 24)
+    .map((folder) => ({ ...folder, displayBytes: folder.bytes }));
+  const simulatedFolders = currentFolders.map((folder) => {
+    const reduction = (duplicateBytesByFolder.get(folder.path) ?? 0) * (simulationPercent / 100);
+    return {
+      ...folder,
+      displayBytes: Math.max(1, folder.bytes - reduction),
+    };
+  });
+  const simulatedReclaimed = reclaimableBytes * (simulationPercent / 100);
+
+  return (
+    <section className="folder-table simulation-panel">
+      <div className="panel-header">
+        <h2>Before / After Simulation</h2>
+        <span>{formatBytes(simulatedReclaimed)} simulated reclaimed</span>
+      </div>
+      <label className="simulation-slider">
+        <span>{simulationPercent}% duplicate cleanup confidence</span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="5"
+          value={simulationPercent}
+          onChange={(event) => setSimulationPercent(Number(event.currentTarget.value))}
+        />
+      </label>
+      <div className="simulation-grid">
+        <div>
+          <strong>Before</strong>
+          <TreemapCanvas files={files} folders={currentFolders} nativeRuntime={nativeRuntime} />
+        </div>
+        <div>
+          <strong>After</strong>
+          <TreemapCanvas files={files} folders={simulatedFolders} nativeRuntime={nativeRuntime} />
+        </div>
       </div>
     </section>
   );
