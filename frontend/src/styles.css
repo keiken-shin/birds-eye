@@ -1344,6 +1344,15 @@ h2 {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.icon-cta:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.icon-cta:disabled:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .duplicate-row {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) 130px 96px auto;

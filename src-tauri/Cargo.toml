@@ -13,3 +13,4 @@ birds-eye = { path = ".." }
 serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
+winapi = { version = "0.3", features = ["shellapi"] }

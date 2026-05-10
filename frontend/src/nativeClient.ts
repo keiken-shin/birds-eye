@@ -154,3 +154,7 @@ export async function deleteNativeIndex(indexPath: string) {
 export async function revealNativePath(path: string) {
   await invoke("reveal_path", { path });
 }
+
+export async function recycleNativeFiles(paths: string[]) {
+  return invoke<{ moved: number }>("recycle_files", { paths });
+}

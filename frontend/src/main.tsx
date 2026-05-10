@@ -43,6 +43,7 @@ import {
   listenNativeJobEvents,
   queryNativeIndex,
   queryNativeDuplicateFiles,
+  recycleNativeFiles,
   revealNativePath,
   searchNativeIndex,
   startNativeScan,
@@ -64,6 +65,11 @@ type StagedAction = {
   reason: string;
   suggestedAction: string;
   evidence: string[];
+  operation?: {
+    kind: "recycleFiles";
+    keepPath: string;
+    removePaths: string[];
+  };
 };
 
 type MoveSuggestion = {
@@ -95,6 +101,7 @@ function App() {
   const [selectedDuplicateGroup, setSelectedDuplicateGroup] = useState<number | null>(null);
   const [savedIndexes, setSavedIndexes] = useState<NativeIndexEntry[]>([]);
   const [stagedActions, setStagedActions] = useState<StagedAction[]>([]);
+  const [committingActions, setCommittingActions] = useState(false);
   const [activePage, setActivePage] = useState<AppPage>("workspace");
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
@@ -127,6 +134,9 @@ function App() {
   const sortedFolders = useMemo(() => {
     return [...scan.folders].sort((a, b) => b.bytes - a.bytes);
   }, [scan.folders]);
+  const actionableStagedActions = useMemo(() => {
+    return stagedActions.filter((action) => action.operation?.kind === "recycleFiles" && action.operation.removePaths.length > 0);
+  }, [stagedActions]);
 
   const filteredFolders = useMemo(() => {
     const categoryFolders = filter === "all"
@@ -738,7 +748,7 @@ function App() {
                     {candidate.confidenceScore === 1 ? "Safe" : `${Math.round((candidate.confidenceScore ?? 0) * 100)}%`}
                   </small>
                   <span className="duplicate-actions">
-                    <IconButton title="Stage exact duplicate review" onClick={(event) => stageDuplicateAction(event, candidate)}>
+                    <IconButton title="Stage exact duplicate review" onClick={(event) => void stageDuplicateAction(event, candidate)}>
                       <CopyCheck size={16} />
                     </IconButton>
                   </span>
@@ -779,6 +789,14 @@ function App() {
                 </IconButton>
                 <IconButton title="Clear staged actions" onClick={() => setStagedActions([])}>
                   <X size={16} />
+                </IconButton>
+                <IconButton
+                  className="danger-text"
+                  disabled={!nativeRuntime || committingActions || actionableStagedActions.length === 0}
+                  title="Commit safe recycle actions"
+                  onClick={() => void commitStagedActions()}
+                >
+                  <Trash2 size={16} />
                 </IconButton>
               </div>
               <ScrollableRows compact>
@@ -893,11 +911,35 @@ function App() {
     }
   }
 
-  function stageDuplicateAction(event: React.MouseEvent, candidate: ScanState["duplicateCandidates"][number]) {
+  async function stageDuplicateAction(event: React.MouseEvent, candidate: ScanState["duplicateCandidates"][number]) {
     event.stopPropagation();
     const confidenceScore = candidate.confidenceScore ?? 0;
     const confidence = confidenceScore >= 1 ? "Safe" : confidenceScore >= 0.65 ? "Medium" : "Manual review";
     const id = `duplicate-${candidate.id ?? candidate.size}`;
+    let operation: StagedAction["operation"];
+
+    if (confidenceScore >= 1 && candidate.id && currentIndexPath) {
+      try {
+        const files = await queryNativeDuplicateFiles(currentIndexPath, candidate.id, Math.max(candidate.files, 1000));
+        setSelectedDuplicateGroup(candidate.id);
+        setDuplicateFiles(files.slice(0, 24));
+        const sorted = [...files].sort((a, b) => {
+          const modifiedDelta = (b.modified_at ?? 0) - (a.modified_at ?? 0);
+          return modifiedDelta || a.path.localeCompare(b.path);
+        });
+        const [keepFile, ...removeFiles] = sorted;
+        if (keepFile && removeFiles.length > 0) {
+          operation = {
+            kind: "recycleFiles",
+            keepPath: keepFile.path,
+            removePaths: removeFiles.map((file) => file.path),
+          };
+        }
+      } catch (error) {
+        setRuntimeMessage(error instanceof Error ? error.message : "Duplicate details failed");
+      }
+    }
+
     setStagedActions((current) => {
       if (current.some((action) => action.id === id)) return current;
       return [
@@ -910,17 +952,50 @@ function App() {
           reason: confidenceScore >= 1
             ? `Group ${candidate.id ?? formatBytes(candidate.size)} has matching full-file hashes. This is staged only.`
             : `Group ${candidate.id ?? formatBytes(candidate.size)} needs manual review before cleanup.`,
-          suggestedAction: confidenceScore >= 1
-            ? "Review copies, keep one, then commit duplicate cleanup when recycle-bin support is enabled."
-            : "Inspect matching candidates before choosing which copy should stay.",
+          suggestedAction: operation
+            ? `Keep ${lastSegment(operation.keepPath)} and move ${formatCount(operation.removePaths.length)} duplicate copies to the Recycle Bin on commit.`
+            : confidenceScore >= 1
+              ? "Review copies and choose retained files before committing cleanup."
+              : "Inspect matching candidates before choosing which copy should stay.",
           evidence: [
             `${formatCount(candidate.files)} files share the same ${formatBytes(candidate.size)} size.`,
             confidenceScore >= 1 ? "Full-file hashes match across this group." : "This group has not reached exact-hash confidence.",
             `${formatBytes(candidate.reclaimableBytes)} is potentially reclaimable after keeping one copy.`,
+            operation ? `Retained copy: ${operation.keepPath}` : "No file operation is attached to this staged review yet.",
           ],
+          operation,
         },
       ];
     });
+  }
+
+  async function commitStagedActions() {
+    if (!nativeRuntime) {
+      setRuntimeMessage("Recycle Bin commits are available in the desktop app");
+      return;
+    }
+
+    const recycleActions = actionableStagedActions;
+    const paths = [...new Set(recycleActions.flatMap((action) => action.operation?.removePaths ?? []))];
+    if (paths.length === 0) {
+      setRuntimeMessage("No safe recycle actions are ready to commit");
+      return;
+    }
+
+    const confirmed = window.confirm(`Move ${formatCount(paths.length)} duplicate files to the Recycle Bin? Kept copies stay in place.`);
+    if (!confirmed) return;
+
+    setCommittingActions(true);
+    try {
+      const result = await recycleNativeFiles(paths);
+      const committedIds = new Set(recycleActions.map((action) => action.id));
+      setStagedActions((current) => current.filter((action) => !committedIds.has(action.id)));
+      setRuntimeMessage(`Moved ${formatCount(result.moved)} duplicate files to the Recycle Bin. Rescan the folder to refresh the index.`);
+    } catch (error) {
+      setRuntimeMessage(error instanceof Error ? error.message : "Failed to recycle duplicate files");
+    } finally {
+      setCommittingActions(false);
+    }
   }
 
   function stageSuggestedMove(suggestion: MoveSuggestion) {
@@ -1933,16 +2008,18 @@ function SmartSuggestedMoves({ scan, onStage }: { scan: ScanState; onStage: (sug
 function IconButton({
   children,
   className = "",
+  disabled = false,
   title,
   onClick,
 }: {
   children: React.ReactNode;
   className?: string;
+  disabled?: boolean;
   title: string;
   onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
-    <button className={`icon-cta ${className}`} type="button" title={title} aria-label={title} onClick={onClick}>
+    <button className={`icon-cta ${className}`} type="button" title={title} aria-label={title} disabled={disabled} onClick={onClick}>
       {children}
     </button>
   );

@@ -21,6 +21,11 @@ struct AppState {
     jobs: Mutex<ScanJobManager>,
 }
 
+#[derive(Debug, Serialize)]
+struct RecycleFilesResponse {
+    moved: usize,
+}
+
 #[tauri::command]
 fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse, String> {
     birds_eye::native::api::scan_to_index(request)
@@ -106,6 +111,68 @@ fn reveal_path(path: PathBuf) -> Result<(), String> {
             .map_err(|error| format!("failed to open file manager: {error}"))?;
         Ok(())
     }
+}
+
+#[tauri::command]
+fn recycle_files(paths: Vec<PathBuf>) -> Result<RecycleFilesResponse, String> {
+    if paths.is_empty() {
+        return Ok(RecycleFilesResponse { moved: 0 });
+    }
+
+    for path in &paths {
+        if !path.exists() {
+            return Err(format!("file does not exist: {}", path.display()));
+        }
+        if path.is_dir() {
+            return Err(format!("refusing to recycle a directory from staged cleanup: {}", path.display()));
+        }
+    }
+
+    recycle_paths(&paths)?;
+    Ok(RecycleFilesResponse { moved: paths.len() })
+}
+
+#[cfg(target_os = "windows")]
+fn recycle_paths(paths: &[PathBuf]) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::null_mut;
+    use winapi::um::shellapi::{
+        SHFileOperationW, FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT,
+        SHFILEOPSTRUCTW,
+    };
+
+    let mut encoded_paths = Vec::new();
+    for path in paths {
+        encoded_paths.extend(path.as_os_str().encode_wide());
+        encoded_paths.push(0);
+    }
+    encoded_paths.push(0);
+
+    let mut operation = SHFILEOPSTRUCTW {
+        hwnd: null_mut(),
+        wFunc: FO_DELETE as u32,
+        pFrom: encoded_paths.as_ptr(),
+        pTo: null_mut(),
+        fFlags: FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT,
+        fAnyOperationsAborted: 0,
+        hNameMappings: null_mut(),
+        lpszProgressTitle: null_mut(),
+    };
+
+    let result = unsafe { SHFileOperationW(&mut operation) };
+    if result != 0 {
+        return Err(format!("Recycle Bin operation failed with code {result}"));
+    }
+    if operation.fAnyOperationsAborted != 0 {
+        return Err("Recycle Bin operation was aborted".to_owned());
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn recycle_paths(_paths: &[PathBuf]) -> Result<(), String> {
+    Err("safe recycle-bin cleanup is currently implemented for Windows only".to_owned())
 }
 
 #[tauri::command]
@@ -199,6 +266,7 @@ fn main() {
             list_indexes,
             delete_index,
             reveal_path,
+            recycle_files,
             start_scan_job,
             start_scan_job_for_root,
             cancel_scan_job,
