@@ -17,7 +17,7 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 - [x] Replace scan polling with pushed Tauri scan events.
 - [x] Add richer indexed search filters: media kind, extension, min/max size, optional regex.
 - [ ] Add safe recycle-bin integration for staged cleanup commits.
-  First pass exists for exact duplicate groups on Windows only. Retained-copy control exists in duplicate details; index refresh after commit now auto-runs when possible, but cross-platform support remains pending.
+  First pass exists for exact duplicate groups on Windows only. Retained-copy control exists in duplicate details; index refresh after commit now auto-runs when possible, and non-Windows commits are blocked in the UI while cross-platform support remains pending.
 - [ ] Keep every destructive or move operation staged first. No direct delete/move from visual surfaces.
 
 ## P0

@@ -108,6 +108,9 @@ function App() {
   const [activePage, setActivePage] = useState<AppPage>("workspace");
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
+  const isWindowsRuntime = useMemo(() => {
+    return typeof navigator !== "undefined" && navigator.userAgent.toLowerCase().includes("windows");
+  }, []);
 
   useEffect(() => {
     void isNativeRuntime().then((native) => {
@@ -1083,6 +1086,10 @@ function App() {
       setRuntimeMessage("Recycle Bin commits are available in the desktop app");
       return;
     }
+    if (!isWindowsRuntime) {
+      setRuntimeMessage("Recycle Bin commits are currently available on Windows only");
+      return;
+    }
 
     const recycleActions = actionableStagedActions;
     const paths = [...new Set(recycleActions.flatMap((action) => action.operation?.removePaths ?? []))];
@@ -1712,8 +1719,8 @@ function FocusedFolderSummary({ folder, onReveal }: { folder: FolderStats | null
         <ExternalLink size={16} />
       </IconButton>
     </div>
-  );
-}
+                  disabled={!nativeRuntime || !isWindowsRuntime || committingActions || actionableStagedActions.length === 0}
+                  title={isWindowsRuntime ? "Commit safe recycle actions" : "Recycle Bin commits are Windows-only"}
 
 function SunburstHierarchy({ folders, onSelectFolder }: { folders: FolderStats[]; onSelectFolder: (path: string) => void }) {
   const slices = useMemo(() => buildSunburstSlices(folders), [folders]);
