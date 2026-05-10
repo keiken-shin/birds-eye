@@ -2188,31 +2188,64 @@ function SmartSuggestedMoves({ scan, onStage }: { scan: ScanState; onStage: (sug
   return (
     <div className="suggested-moves" aria-label="Smart suggested moves">
       <h3>Suggested Moves</h3>
-      {suggestions.map((suggestion) => (
-        <div className="suggested-move" key={suggestion.category}>
-          <span style={{ background: categories[suggestion.category].color }} />
-          <div>
-            <strong>{categories[suggestion.category].label}</strong>
-            <small>{formatBytes(suggestion.bytes)} across {formatCount(suggestion.folderCount)} folders</small>
-            <small>{suggestion.destination}</small>
-            <div className="suggested-move-preview">
-              {suggestion.sourceFolders.slice(0, 3).map((folder) => (
-                <small key={folder.path} title={folder.path}>
-                  {lastSegment(folder.path)} · {formatBytes(folder.bytes)}
-                </small>
-              ))}
-              {suggestion.yearBuckets.slice(0, 3).map((bucket) => (
-                <small key={bucket.year}>
-                  {bucket.year} · {formatCount(bucket.files)}
-                </small>
-              ))}
+      {suggestions.map((suggestion) => {
+        const sourcePreview = suggestion.sourceFolders.slice(0, 3);
+        const remainingSources = Math.max(0, suggestion.sourceFolders.length - sourcePreview.length);
+        const yearPreview = suggestion.yearBuckets.slice(0, 3);
+        const remainingYears = Math.max(0, suggestion.yearBuckets.length - yearPreview.length);
+
+        return (
+          <div className="suggested-move" key={suggestion.category}>
+            <span style={{ background: categories[suggestion.category].color }} />
+            <div className="suggested-move-body">
+              <div className="suggested-move-header">
+                <div>
+                  <strong>{categories[suggestion.category].label}</strong>
+                  <small>{formatBytes(suggestion.bytes)} across {formatCount(suggestion.folderCount)} folders</small>
+                </div>
+                <small className="suggested-destination">Dest: {suggestion.destination}</small>
+              </div>
+              <div className="suggested-move-grid">
+                <div className="suggested-move-block">
+                  <small className="suggested-label">Top source folders</small>
+                  <div className="suggested-move-preview">
+                    {sourcePreview.map((folder) => (
+                      <small key={folder.path} title={folder.path}>
+                        {lastSegment(folder.path)} · {formatBytes(folder.bytes)}
+                      </small>
+                    ))}
+                    {remainingSources > 0 && (
+                      <small className="muted">+{formatCount(remainingSources)} more</small>
+                    )}
+                  </div>
+                </div>
+                <div className="suggested-move-block">
+                  <small className="suggested-label">Year buckets</small>
+                  <div className="suggested-move-preview">
+                    {yearPreview.length > 0 ? (
+                      <>
+                        {yearPreview.map((bucket) => (
+                          <small key={bucket.year}>
+                            {bucket.year} · {formatCount(bucket.files)}
+                          </small>
+                        ))}
+                        {remainingYears > 0 && (
+                          <small className="muted">+{formatCount(remainingYears)} more</small>
+                        )}
+                      </>
+                    ) : (
+                      <small className="muted">No date buckets yet</small>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
+            <IconButton title={`Stage ${categories[suggestion.category].label} move review`} onClick={() => onStage(suggestion)}>
+              <MoveRight size={16} />
+            </IconButton>
           </div>
-          <IconButton title={`Stage ${categories[suggestion.category].label} move review`} onClick={() => onStage(suggestion)}>
-            <MoveRight size={16} />
-          </IconButton>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

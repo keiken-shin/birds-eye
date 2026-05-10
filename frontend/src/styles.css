@@ -1052,8 +1052,8 @@ h2 {
 .suggested-move {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) 34px;
-  gap: 10px;
-  align-items: center;
+  gap: 12px;
+  align-items: start;
   min-height: 54px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
@@ -1068,9 +1068,9 @@ h2 {
   border-radius: 999px;
 }
 
-.suggested-move div {
+.suggested-move-body {
   display: grid;
-  gap: 2px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -1086,6 +1086,42 @@ h2 {
   color: #96a1b6;
 }
 
+.suggested-move-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.suggested-move-header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.suggested-destination {
+  color: #b7c1d3;
+  font-size: 12px;
+}
+
+.suggested-move-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.suggested-move-block {
+  display: grid;
+  gap: 6px;
+}
+
+.suggested-label {
+  color: #96a1b6;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .suggested-move-preview {
   display: flex;
   gap: 5px;
@@ -1099,6 +1135,11 @@ h2 {
   background: rgba(255, 255, 255, 0.07);
   color: #cbd5e1;
   padding: 3px 7px;
+}
+
+.suggested-move-preview small.muted {
+  background: rgba(255, 255, 255, 0.04);
+  color: #8a95a8;
 }
 
 .folder-table {
@@ -1826,6 +1867,12 @@ button.overlap-pair:focus-visible {
   .simulation-grid,
   .simulation-deltas,
   .duplicate-candidates {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .suggested-move-grid {
     grid-template-columns: 1fr;
   }
 }
