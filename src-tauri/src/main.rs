@@ -91,11 +91,24 @@ fn delete_index(app: tauri::AppHandle, index_path: PathBuf) -> Result<(), String
 fn reveal_path(path: PathBuf) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        fn normalize_explorer_path(path: PathBuf) -> PathBuf {
+            let raw = path.to_string_lossy();
+            if let Some(stripped) = raw.strip_prefix(r"\\?\UNC\") {
+                return PathBuf::from(format!(r"\\{}", stripped));
+            }
+            if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+                return PathBuf::from(stripped);
+            }
+            path
+        }
+
         let mut command = Command::new("explorer.exe");
-        if path.is_file() {
-            command.arg(format!("/select,{}", path.display()));
+        let resolved = normalize_explorer_path(path.canonicalize().unwrap_or(path));
+        let looks_like_file = resolved.is_file() || resolved.extension().is_some();
+        if looks_like_file {
+            command.arg("/select,").arg(resolved);
         } else {
-            command.arg(path);
+            command.arg(resolved);
         }
         command
             .spawn()
