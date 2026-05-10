@@ -594,6 +594,28 @@ h2 {
   color: #ffffff;
 }
 
+.timeline-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.timeline-filters button small {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+  color: #96a1b6;
+  font-size: 11px;
+}
+
+.timeline-filters button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .timeline-toolbar > button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
@@ -612,6 +634,7 @@ h2 {
 
 .timeline-scatter {
   position: relative;
+  display: block;
   min-height: 210px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -637,6 +660,34 @@ h2 {
 
 .timeline-scatter::after {
   top: 66%;
+}
+
+.timeline-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  color: #96a1b6;
+  text-align: center;
+  padding: 24px;
+}
+
+.timeline-empty strong {
+  color: #dce6f5;
+}
+
+.timeline-empty button {
+  justify-self: center;
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 800;
+  padding: 0 12px;
 }
 
 .timeline-dot {

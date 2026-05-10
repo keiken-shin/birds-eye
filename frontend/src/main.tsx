@@ -1407,13 +1407,29 @@ function TimelineScatter({
   onSelectFile: (file: ScanState["largestFiles"][number]) => void;
 }) {
   const [mediaFilter, setMediaFilter] = useState<CategoryKey | "all">("all");
-  const points = useMemo(() => {
+  const timelineFiles = useMemo(() => {
     const timelineCategories: CategoryKey[] = ["photos", "videos", "music", "documents"];
     return files
-      .filter((file) => timelineCategories.includes(file.category) && (mediaFilter === "all" || file.category === mediaFilter) && file.modified > 0)
+      .filter((file) => timelineCategories.includes(file.category) && file.modified > 0)
       .sort((a, b) => a.modified - b.modified)
       .slice(0, 600);
-  }, [files, mediaFilter]);
+  }, [files]);
+  const timelineCounts = useMemo(() => {
+    const counts = new Map<CategoryKey | "all", number>([
+      ["all", timelineFiles.length],
+      ["photos", 0],
+      ["videos", 0],
+      ["music", 0],
+      ["documents", 0],
+    ]);
+    for (const file of timelineFiles) {
+      counts.set(file.category, (counts.get(file.category) ?? 0) + 1);
+    }
+    return counts;
+  }, [timelineFiles]);
+  const points = useMemo(() => {
+    return timelineFiles.filter((file) => mediaFilter === "all" || file.category === mediaFilter);
+  }, [mediaFilter, timelineFiles]);
   const [zoomRange, setZoomRange] = useState<{ start: number; end: number } | null>(null);
   const [selectedFile, setSelectedFile] = useState<ScanState["largestFiles"][number] | null>(null);
 
@@ -1422,47 +1438,56 @@ function TimelineScatter({
     setSelectedFile(null);
   }, [points]);
 
-  if (points.length < 2) {
-    return (
-      <section className="folder-table timeline-panel">
-        <div className="panel-header">
-          <h2>Media Timeline</h2>
-          <span>Photos, videos, audio, docs</span>
-        </div>
-        <div className="empty-state compact">Photo and video timestamps will appear here after the next indexed scan.</div>
-      </section>
-    );
-  }
-
-  const minTime = points[0].modified;
-  const maxTime = points[points.length - 1].modified;
+  const hasEnoughPoints = points.length >= 2;
+  const fallbackStart = timelineFiles[0]?.modified ?? Date.now();
+  const fallbackEnd = timelineFiles[timelineFiles.length - 1]?.modified ?? fallbackStart;
+  const minTime = hasEnoughPoints ? points[0].modified : fallbackStart;
+  const maxTime = hasEnoughPoints ? points[points.length - 1].modified : fallbackEnd;
   const visibleStart = zoomRange?.start ?? minTime;
   const visibleEnd = zoomRange?.end ?? maxTime;
-  const visiblePoints = points.filter((file) => file.modified >= visibleStart && file.modified <= visibleEnd);
+  const visiblePoints = hasEnoughPoints ? points.filter((file) => file.modified >= visibleStart && file.modified <= visibleEnd) : [];
   const maxBytes = Math.max(...points.map((file) => file.bytes), 1);
   const span = Math.max(visibleEnd - visibleStart, 1);
-  const clusters = buildTimelineClusters(visiblePoints, visibleStart, visibleEnd);
+  const clusters = hasEnoughPoints ? buildTimelineClusters(visiblePoints, visibleStart, visibleEnd) : [];
   const shouldSplitClusters = span < 1000 * 60 * 60 * 24 * 45;
+  const filterLabel = mediaFilter === "all" ? "media files" : categories[mediaFilter].label.toLowerCase();
 
   return (
     <section className="folder-table timeline-panel">
       <div className="panel-header">
         <h2>Media Timeline</h2>
-        <span>{formatCount(visiblePoints.length)} of {formatCount(points.length)} media files</span>
+        <span>{formatCount(visiblePoints.length)} visible / {formatCount(timelineFiles.length)} timestamped</span>
       </div>
       <div className="timeline-toolbar">
         <div className="timeline-filters" aria-label="Timeline media filters">
           {(["all", "photos", "videos", "music", "documents"] as Array<CategoryKey | "all">).map((key) => (
-            <button className={mediaFilter === key ? "active" : ""} key={key} type="button" onClick={() => setMediaFilter(key)}>
+            <button
+              className={mediaFilter === key ? "active" : ""}
+              disabled={(timelineCounts.get(key) ?? 0) === 0}
+              key={key}
+              type="button"
+              onClick={() => {
+                setMediaFilter(key);
+                setZoomRange(null);
+              }}
+            >
               {key === "all" ? "All" : categories[key].label}
+              <small>{formatCount(timelineCounts.get(key) ?? 0)}</small>
             </button>
           ))}
         </div>
         <button type="button" onClick={() => setZoomRange(null)} disabled={!zoomRange}>Reset zoom</button>
-        <span>{formatDate(Math.floor(visibleStart / 1000))} to {formatDate(Math.floor(visibleEnd / 1000))}</span>
+        <span>{hasEnoughPoints ? `${formatDate(Math.floor(visibleStart / 1000))} to ${formatDate(Math.floor(visibleEnd / 1000))}` : `No timeline points for ${filterLabel}`}</span>
       </div>
       <div className="timeline-workbench">
         <div className="timeline-scatter" aria-label="Photo and video timeline scatter">
+          {!hasEnoughPoints && (
+            <div className="timeline-empty">
+              <strong>{timelineFiles.length === 0 ? "No timestamped media yet" : `Not enough ${filterLabel}`}</strong>
+              <span>{timelineFiles.length === 0 ? "Run or open an index with media files that have modified dates." : "Choose All or another media type to continue exploring."}</span>
+              {mediaFilter !== "all" && <button type="button" onClick={() => setMediaFilter("all")}>Show all media</button>}
+            </div>
+          )}
           {clusters.map((cluster) => {
             if (cluster.files.length > 3 && !shouldSplitClusters) {
               const left = ((cluster.center - visibleStart) / span) * 100;
