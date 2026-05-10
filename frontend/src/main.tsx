@@ -792,25 +792,49 @@ function App() {
           ) : savedIndexes.length === 0 ? (
             <div className="empty-state compact">Scanned folders will appear here for revisiting, rescanning, or removing their local index.</div>
           ) : (
-            <ScrollableRows compact>
-              {savedIndexes.map((entry) => (
-                <div className="index-row" key={entry.index_path}>
-                  <div>
-                    <strong>{entry.root_path ?? "Unknown root"}</strong>
-                    <span>{entry.last_status ?? "unknown"} - {formatBytes(entry.bytes_scanned)} - {formatCount(entry.files_scanned)} files</span>
-                  </div>
-                  <IconButton title="View saved index" onClick={() => void openSavedIndex(entry)}>
-                    <Eye size={16} />
-                  </IconButton>
-                  <IconButton title="Rescan folder" onClick={() => void rescanSavedIndex(entry)}>
-                    <RotateCw size={16} />
-                  </IconButton>
-                  <IconButton className="danger-text" title="Delete saved index" onClick={() => void removeSavedIndex(entry)}>
-                    <Trash2 size={16} />
-                  </IconButton>
+            <>
+              <div className="index-summary-grid">
+                <div>
+                  <span>Total indexed</span>
+                  <strong>{formatBytes(savedIndexes.reduce((sum, entry) => sum + entry.bytes_scanned, 0))}</strong>
                 </div>
-              ))}
-            </ScrollableRows>
+                <div>
+                  <span>Files tracked</span>
+                  <strong>{formatCount(savedIndexes.reduce((sum, entry) => sum + entry.files_scanned, 0))}</strong>
+                </div>
+                <div>
+                  <span>Latest scan</span>
+                  <strong>{formatIndexDate(savedIndexes[0]?.last_scanned_at)}</strong>
+                </div>
+              </div>
+              <ScrollableRows compact>
+                {savedIndexes.map((entry) => (
+                  <div className={`index-row ${currentIndexPath === entry.index_path ? "active" : ""}`} key={entry.index_path}>
+                    <div>
+                      <strong>{entry.root_path ?? "Unknown root"}</strong>
+                      <span>{entry.index_path}</span>
+                      <div className="index-meta">
+                        <small>{entry.last_status ?? "unknown"}</small>
+                        <small>{formatIndexDate(entry.last_scanned_at)}</small>
+                        <small>{formatBytes(entry.bytes_scanned)}</small>
+                        <small>{formatCount(entry.files_scanned)} files</small>
+                      </div>
+                    </div>
+                    <div className="index-actions">
+                      <IconButton title="View saved index" onClick={() => void openSavedIndex(entry)}>
+                        <Eye size={16} />
+                      </IconButton>
+                      <IconButton title="Rescan folder" onClick={() => void rescanSavedIndex(entry)}>
+                        <RotateCw size={16} />
+                      </IconButton>
+                      <IconButton className="danger-text" title="Delete saved index" onClick={() => void removeSavedIndex(entry)}>
+                        <Trash2 size={16} />
+                      </IconButton>
+                    </div>
+                  </div>
+                ))}
+              </ScrollableRows>
+            </>
           )}
         </section>
         )}
@@ -1781,6 +1805,11 @@ function getProgress(scan: ScanState) {
 
 function formatDate(epochSeconds: number) {
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(epochSeconds * 1000));
+}
+
+function formatIndexDate(epochSeconds: number | null | undefined) {
+  if (!epochSeconds) return "Never";
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(epochSeconds * 1000));
 }
 
 function parseMegabytes(value: string) {
