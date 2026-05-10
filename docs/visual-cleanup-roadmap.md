@@ -4,12 +4,12 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 
 ## Current Checkpoint
 
-- Duplicate candidates were simplified into summary metrics plus a decision table. The folder overlap graph still exists, but it is hidden as an experimental detail until it can explain the next cleanup decision better.
+- Duplicate candidates were simplified into summary metrics plus a decision table. The folder overlap graph now highlights top pairs and most affected folders, but it is hidden as an experimental detail until it can explain the next cleanup decision better.
 - Before/after simulation now uses exact duplicate candidate reclaim totals, with folder-specific overlap data when available and proportional estimates as a fallback. It also lists the top simulated folder changes so the effect is visible even when treemap geometry changes are subtle.
 - Timeline is pinned for repair and hidden from the primary workflow. Do not build on it until its interaction model is redesigned and validated.
 - Exact duplicate groups can stage a Windows Recycle Bin commit that keeps the newest indexed copy and recycles the extra copies. Broader move/delete actions are still review-only.
 - Exact duplicate details now let the user choose the retained copy before staging a Recycle Bin commit.
-- Smart suggested moves now show top source folders and timestamp-derived year buckets before staging a review action. They remain non-destructive.
+- Smart suggested moves now show top source folders, timestamp-derived year buckets, and a clearer destination preview before staging a review action. They remain non-destructive.
 - Sunburst hierarchy is intentionally behind a disclosure because the current version is not yet strong enough to be a primary cleanup surface.
 
 ## Foundation First
@@ -17,7 +17,7 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 - [x] Replace scan polling with pushed Tauri scan events.
 - [x] Add richer indexed search filters: media kind, extension, min/max size, optional regex.
 - [ ] Add safe recycle-bin integration for staged cleanup commits.
-  First pass exists for exact duplicate groups on Windows only. Retained-copy control exists in duplicate details; cross-platform support and index refresh after commit remain pending.
+  First pass exists for exact duplicate groups on Windows only. Retained-copy control exists in duplicate details; index refresh after commit now auto-runs when possible, but cross-platform support remains pending.
 - [ ] Keep every destructive or move operation staged first. No direct delete/move from visual surfaces.
 
 ## P0
@@ -29,11 +29,11 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 ## P1
 
 - [ ] Duplicate overlap graph: folders as bubbles, shared duplicate edges weighted by reclaimable bytes or duplicate count.
-  First pass exists, but it is now treated as an experimental detail behind a disclosure because the raw graph needs clearer decision support.
+  First pass exists; a second pass now surfaces top overlap pairs and most affected folders, but it is still treated as an experimental detail behind a disclosure.
 - [x] Action heatmap replacing text-only cleanup cards.
   Heatmap cells can stage review actions; all file operations remain non-destructive.
 - [ ] Smart suggested moves panel for scattered media, grouped by dates and destination folders.
-  Second pass exists: scattered media categories show source-folder previews and timestamp-derived year buckets before staging review destinations. EXIF grouping and executable move plans remain pending.
+  Second pass exists: scattered media categories show source-folder previews, destination hints, and timestamp-derived year buckets (with overflow counts) before staging review destinations. EXIF grouping and executable move plans remain pending.
 
 ## P2
 
