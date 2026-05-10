@@ -77,6 +77,8 @@ type MoveSuggestion = {
   folderCount: number;
   bytes: number;
   destination: string;
+  sourceFolders: Array<{ path: string; bytes: number; files: number }>;
+  yearBuckets: Array<{ year: string; files: number }>;
 };
 
 type AppPage = "workspace" | "index";
@@ -687,13 +689,17 @@ function App() {
           </div>
         </section>
 
-        <TimelineScatter
-          files={scan.largestFiles}
-          nativeRuntime={nativeRuntime}
-          onSelectFile={(file) => {
-            setSearchQuery(file.path);
-          }}
-        />
+        <details className="insight-disclosure pinned-feature">
+          <summary>Media timeline is pinned for repair</summary>
+          <p>The timeline is currently parked while the rest of the cleanup workflow moves forward.</p>
+          <TimelineScatter
+            files={scan.largestFiles}
+            nativeRuntime={nativeRuntime}
+            onSelectFile={(file) => {
+              setSearchQuery(file.path);
+            }}
+          />
+        </details>
 
         <BeforeAfterSimulation
           candidates={scan.duplicateCandidates}
@@ -1013,8 +1019,10 @@ function App() {
           suggestedAction: `Stage a move preview into ${suggestion.destination}; no files move until commit exists.`,
           evidence: [
             `${formatBytes(suggestion.bytes)} of ${categories[suggestion.category].label.toLowerCase()} are scattered across the scan.`,
-            `${formatCount(suggestion.folderCount)} folders contain this media type.`,
-            "Date-based grouping is still pending EXIF or timestamp extraction.",
+            `${formatCount(suggestion.folderCount)} folders contain this media type; biggest source is ${suggestion.sourceFolders[0]?.path ?? "unknown"}.`,
+            suggestion.yearBuckets.length > 0
+              ? `File timestamps suggest year buckets: ${suggestion.yearBuckets.map((bucket) => `${bucket.year} (${formatCount(bucket.files)})`).join(", ")}.`
+              : "Date-based grouping still needs richer metadata before it can be automated.",
           ],
         },
       ];
@@ -1984,11 +1992,19 @@ function SmartSuggestedMoves({ scan, onStage }: { scan: ScanState; onStage: (sug
         .filter((folder) => folder.categories[category] > 0)
         .sort((a, b) => b.categories[category] - a.categories[category]);
       const bytes = folders.reduce((sum, folder) => sum + folder.categories[category], 0);
+      const sourceFolders = folders.slice(0, 4).map((folder) => ({
+        path: folder.path,
+        bytes: folder.categories[category],
+        files: folder.files,
+      }));
+      const yearBuckets = buildSuggestionYearBuckets(scan.largestFiles, category);
       return {
         category,
         folderCount: folders.length,
         bytes,
-        destination: `${categories[category].label}/Review/`,
+        destination: yearBuckets.length > 0 ? `${categories[category].label}/By-Year/` : `${categories[category].label}/Review/`,
+        sourceFolders,
+        yearBuckets,
       };
     })
     .filter((suggestion) => suggestion.folderCount > 1 && suggestion.bytes > 0)
@@ -2009,6 +2025,18 @@ function SmartSuggestedMoves({ scan, onStage }: { scan: ScanState; onStage: (sug
             <strong>{categories[suggestion.category].label}</strong>
             <small>{formatBytes(suggestion.bytes)} across {formatCount(suggestion.folderCount)} folders</small>
             <small>{suggestion.destination}</small>
+            <div className="suggested-move-preview">
+              {suggestion.sourceFolders.slice(0, 3).map((folder) => (
+                <small key={folder.path} title={folder.path}>
+                  {lastSegment(folder.path)} · {formatBytes(folder.bytes)}
+                </small>
+              ))}
+              {suggestion.yearBuckets.slice(0, 3).map((bucket) => (
+                <small key={bucket.year}>
+                  {bucket.year} · {formatCount(bucket.files)}
+                </small>
+              ))}
+            </div>
           </div>
           <IconButton title={`Stage ${categories[suggestion.category].label} move review`} onClick={() => onStage(suggestion)}>
             <MoveRight size={16} />
@@ -2017,6 +2045,21 @@ function SmartSuggestedMoves({ scan, onStage }: { scan: ScanState; onStage: (sug
       ))}
     </div>
   );
+}
+
+function buildSuggestionYearBuckets(files: ScanState["largestFiles"], category: CategoryKey) {
+  const buckets = new Map<string, number>();
+  for (const file of files) {
+    if (file.category !== category || file.modified <= 0) continue;
+    const year = new Date(file.modified).getFullYear();
+    if (!Number.isFinite(year) || year < 1980) continue;
+    buckets.set(String(year), (buckets.get(String(year)) ?? 0) + 1);
+  }
+
+  return [...buckets.entries()]
+    .map(([year, count]) => ({ year, files: count }))
+    .sort((a, b) => Number(b.year) - Number(a.year))
+    .slice(0, 5);
 }
 
 function IconButton({

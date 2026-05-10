@@ -6,8 +6,9 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 
 - Duplicate candidates were simplified into summary metrics plus a decision table. The folder overlap graph still exists, but it is hidden as an experimental detail until it can explain the next cleanup decision better.
 - Before/after simulation now uses exact duplicate candidate reclaim totals, with folder-specific overlap data when available and proportional estimates as a fallback. It also lists the top simulated folder changes so the effect is visible even when treemap geometry changes are subtle.
-- Timeline has cluster zoom, media filters, selected-item preview, drag panning, wheel panning, and earlier/later controls. It still needs more testing against dense clusters and richer thumbnail generation.
+- Timeline is pinned for repair and hidden from the primary workflow. Do not build on it until its interaction model is redesigned and validated.
 - Exact duplicate groups can stage a Windows Recycle Bin commit that keeps the newest indexed copy and recycles the extra copies. Broader move/delete actions are still review-only.
+- Smart suggested moves now show top source folders and timestamp-derived year buckets before staging a review action. They remain non-destructive.
 - Sunburst hierarchy is intentionally behind a disclosure because the current version is not yet strong enough to be a primary cleanup surface.
 
 ## Foundation First
@@ -31,14 +32,14 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 - [x] Action heatmap replacing text-only cleanup cards.
   Heatmap cells can stage review actions; all file operations remain non-destructive.
 - [ ] Smart suggested moves panel for scattered media, grouped by dates and destination folders.
-  First pass exists: scattered media categories can be staged into review destinations. Date grouping remains for EXIF/timestamp extraction.
+  Second pass exists: scattered media categories show source-folder previews and timestamp-derived year buckets before staging review destinations. EXIF grouping and executable move plans remain pending.
 
 ## P2
 
 - [ ] Lazy thumbnail hover previews for visible/hovered photo/video folders with a small cache.
   First pass exists: treemap hover tooltips show lazy photo previews or media placeholders from indexed samples.
 - [ ] Timeline scatter for photos/videos by EXIF or file timestamp, colored by folder.
-  First pass exists with cluster zoom, panning, timeline media filters, and selected-media preview from indexed photos/videos/audio/docs. Still needs richer thumbnail generation and denser navigation polish.
+  Pinned. The current implementation is broken enough to stay out of the primary workflow until redesigned.
 - [ ] Depth-based sunburst chart for folder hierarchy.
   First pass exists behind a disclosure. Needs stronger interaction and clearer value before it should be considered complete.
 

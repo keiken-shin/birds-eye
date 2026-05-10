@@ -568,6 +568,16 @@ h2 {
   margin-bottom: 10px;
 }
 
+.pinned-feature {
+  margin-top: 18px;
+}
+
+.pinned-feature > p {
+  margin: 0 0 12px;
+  color: #96a1b6;
+  font-size: 13px;
+}
+
 .sunburst-panel svg {
   display: block;
   width: min(100%, 360px);
@@ -1074,6 +1084,21 @@ h2 {
 
 .suggested-move small {
   color: #96a1b6;
+}
+
+.suggested-move-preview {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 5px;
+}
+
+.suggested-move-preview small {
+  max-width: 120px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #cbd5e1;
+  padding: 3px 7px;
 }
 
 .folder-table {
