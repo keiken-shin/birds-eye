@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { createRoot } from "react-dom/client";
 import {
   ChevronLeft,
@@ -632,9 +633,9 @@ function App() {
 
         <TimelineScatter
           files={scan.largestFiles}
+          nativeRuntime={nativeRuntime}
           onSelectFile={(file) => {
             setSearchQuery(file.path);
-            void revealPath(file.path);
           }}
         />
 
@@ -1317,11 +1318,28 @@ function SunburstHierarchy({ folders, onSelectFolder }: { folders: FolderStats[]
   );
 }
 
-function TimelineScatter({ files, onSelectFile }: { files: ScanState["largestFiles"]; onSelectFile: (file: ScanState["largestFiles"][number]) => void }) {
-  const points = files
-    .filter((file) => (file.category === "photos" || file.category === "videos") && file.modified > 0)
-    .sort((a, b) => a.modified - b.modified)
-    .slice(0, 400);
+function TimelineScatter({
+  files,
+  nativeRuntime,
+  onSelectFile,
+}: {
+  files: ScanState["largestFiles"];
+  nativeRuntime: boolean;
+  onSelectFile: (file: ScanState["largestFiles"][number]) => void;
+}) {
+  const points = useMemo(() => {
+    return files
+      .filter((file) => (file.category === "photos" || file.category === "videos") && file.modified > 0)
+      .sort((a, b) => a.modified - b.modified)
+      .slice(0, 600);
+  }, [files]);
+  const [zoomRange, setZoomRange] = useState<{ start: number; end: number } | null>(null);
+  const [selectedFile, setSelectedFile] = useState<ScanState["largestFiles"][number] | null>(null);
+
+  useEffect(() => {
+    setZoomRange(null);
+    setSelectedFile(null);
+  }, [points]);
 
   if (points.length < 2) {
     return (
@@ -1337,38 +1355,141 @@ function TimelineScatter({ files, onSelectFile }: { files: ScanState["largestFil
 
   const minTime = points[0].modified;
   const maxTime = points[points.length - 1].modified;
+  const visibleStart = zoomRange?.start ?? minTime;
+  const visibleEnd = zoomRange?.end ?? maxTime;
+  const visiblePoints = points.filter((file) => file.modified >= visibleStart && file.modified <= visibleEnd);
   const maxBytes = Math.max(...points.map((file) => file.bytes), 1);
-  const span = Math.max(maxTime - minTime, 1);
+  const span = Math.max(visibleEnd - visibleStart, 1);
+  const clusters = buildTimelineClusters(visiblePoints, visibleStart, visibleEnd);
+  const shouldSplitClusters = span < 1000 * 60 * 60 * 24 * 45;
 
   return (
     <section className="folder-table timeline-panel">
       <div className="panel-header">
         <h2>Media Timeline</h2>
-        <span>{formatCount(points.length)} photos/videos</span>
+        <span>{formatCount(visiblePoints.length)} of {formatCount(points.length)} photos/videos</span>
       </div>
-      <div className="timeline-scatter" aria-label="Photo and video timeline scatter">
-        {points.map((file) => {
-          const left = ((file.modified - minTime) / span) * 100;
-          const size = 7 + Math.min(13, Math.sqrt(file.bytes / maxBytes) * 13);
-          const lane = file.category === "photos" ? 34 : 66;
-          return (
-            <button
-              className={`timeline-dot ${file.category}`}
-              key={file.path}
-              onClick={() => onSelectFile(file)}
-              style={{ left: `${left}%`, top: `${lane}%`, width: size, height: size }}
-              title={`${lastSegment(file.path)} - ${formatDate(Math.floor(file.modified / 1000))} - ${formatBytes(file.bytes)}`}
-              type="button"
-            />
-          );
-        })}
-        <div className="timeline-axis">
-          <span>{formatDate(Math.floor(minTime / 1000))}</span>
-          <span>{formatDate(Math.floor(maxTime / 1000))}</span>
+      <div className="timeline-toolbar">
+        <button type="button" onClick={() => setZoomRange(null)} disabled={!zoomRange}>Reset zoom</button>
+        <span>{formatDate(Math.floor(visibleStart / 1000))} to {formatDate(Math.floor(visibleEnd / 1000))}</span>
+      </div>
+      <div className="timeline-workbench">
+        <div className="timeline-scatter" aria-label="Photo and video timeline scatter">
+          {clusters.map((cluster) => {
+            if (cluster.files.length > 3 && !shouldSplitClusters) {
+              const left = ((cluster.center - visibleStart) / span) * 100;
+              const size = 30 + Math.min(34, Math.sqrt(cluster.files.length) * 8);
+              return (
+                <button
+                  className="timeline-cluster"
+                  key={`${cluster.start}-${cluster.end}-${cluster.files.length}`}
+                  onClick={() => setZoomRange(expandTimelineRange(cluster.start, cluster.end, minTime, maxTime))}
+                  style={{ left: `${left}%`, top: "50%", width: size, height: size }}
+                  title={`${formatCount(cluster.files.length)} files from ${formatDate(Math.floor(cluster.start / 1000))} to ${formatDate(Math.floor(cluster.end / 1000))}`}
+                  type="button"
+                >
+                  {formatCount(cluster.files.length)}
+                </button>
+              );
+            }
+
+            return cluster.files.map((file, index) => {
+              const left = ((file.modified - visibleStart) / span) * 100;
+              const size = 7 + Math.min(13, Math.sqrt(file.bytes / maxBytes) * 13);
+              const baseLane = file.category === "photos" ? 34 : 66;
+              const lane = baseLane + ((index % 5) - 2) * 4;
+              return (
+                <button
+                  className={`timeline-dot ${file.category} ${selectedFile?.path === file.path ? "active" : ""}`}
+                  key={file.path}
+                  onClick={() => {
+                    setSelectedFile(file);
+                    onSelectFile(file);
+                  }}
+                  style={{ left: `${left}%`, top: `${lane}%`, width: size, height: size }}
+                  title={`${lastSegment(file.path)} - ${formatDate(Math.floor(file.modified / 1000))} - ${formatBytes(file.bytes)}`}
+                  type="button"
+                />
+              );
+            });
+          })}
+          <div className="timeline-axis">
+            <span>{formatDate(Math.floor(visibleStart / 1000))}</span>
+            <span>{formatDate(Math.floor(visibleEnd / 1000))}</span>
+          </div>
         </div>
+        <MediaPreviewPanel file={selectedFile} nativeRuntime={nativeRuntime} />
       </div>
     </section>
   );
+}
+
+function MediaPreviewPanel({ file, nativeRuntime }: { file: ScanState["largestFiles"][number] | null; nativeRuntime: boolean }) {
+  if (!file) {
+    return (
+      <aside className="media-preview-panel empty">
+        <strong>Select a dot</strong>
+        <span>Zoom clusters until individual media files are visible, then select one to preview.</span>
+      </aside>
+    );
+  }
+
+  const canRenderPhoto = nativeRuntime && file.category === "photos";
+  const canRenderVideo = nativeRuntime && file.category === "videos";
+
+  return (
+    <aside className="media-preview-panel">
+      <div className="media-preview-frame">
+        {canRenderPhoto && <img src={convertFileSrc(file.path)} alt="" loading="lazy" />}
+        {canRenderVideo && <video src={convertFileSrc(file.path)} controls preload="metadata" />}
+        {!canRenderPhoto && !canRenderVideo && <span>{categories[file.category].label}</span>}
+      </div>
+      <strong>{lastSegment(file.path)}</strong>
+      <span>{formatDate(Math.floor(file.modified / 1000))} - {formatBytes(file.bytes)}</span>
+      <small>{file.path}</small>
+    </aside>
+  );
+}
+
+type TimelineCluster = {
+  start: number;
+  end: number;
+  center: number;
+  files: ScanState["largestFiles"];
+};
+
+function buildTimelineClusters(files: ScanState["largestFiles"], start: number, end: number): TimelineCluster[] {
+  const bucketCount = 44;
+  const span = Math.max(end - start, 1);
+  const buckets = new Map<number, ScanState["largestFiles"]>();
+
+  for (const file of files) {
+    const bucket = Math.min(bucketCount - 1, Math.max(0, Math.floor(((file.modified - start) / span) * bucketCount)));
+    buckets.set(bucket, [...(buckets.get(bucket) ?? []), file]);
+  }
+
+  return [...buckets.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, bucketFiles]) => {
+      const sorted = [...bucketFiles].sort((a, b) => a.modified - b.modified);
+      const clusterStart = sorted[0].modified;
+      const clusterEnd = sorted[sorted.length - 1].modified;
+      return {
+        start: clusterStart,
+        end: clusterEnd,
+        center: sorted.reduce((sum, file) => sum + file.modified, 0) / sorted.length,
+        files: sorted,
+      };
+    });
+}
+
+function expandTimelineRange(start: number, end: number, minTime: number, maxTime: number) {
+  const span = Math.max(end - start, 1000 * 60 * 60 * 24);
+  const padding = span * 0.35;
+  return {
+    start: Math.max(minTime, start - padding),
+    end: Math.min(maxTime, end + padding),
+  };
 }
 
 function SmartSuggestedMoves({ scan, onStage }: { scan: ScanState; onStage: (suggestion: MoveSuggestion) => void }) {
