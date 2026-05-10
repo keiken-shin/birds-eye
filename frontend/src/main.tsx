@@ -140,6 +140,9 @@ function App() {
   const actionableStagedActions = useMemo(() => {
     return stagedActions.filter((action) => action.operation?.kind === "recycleFiles" && action.operation.removePaths.length > 0);
   }, [stagedActions]);
+  const selectedDuplicateCandidate = useMemo(() => {
+    return scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup) ?? null;
+  }, [scan.duplicateCandidates, selectedDuplicateGroup]);
 
   const filteredFolders = useMemo(() => {
     const categoryFolders = filter === "all"
@@ -725,63 +728,115 @@ function App() {
           {scan.duplicateCandidates.length === 0 ? (
             <div className="empty-state compact">Files with identical sizes will appear here as duplicate candidates.</div>
           ) : (
-            <ScrollableRows compact>
-              <div className="duplicate-list-header" aria-hidden="true">
-                <span>Group</span>
-                <span>Reclaim</span>
-                <span>Confidence</span>
-                <span>Review</span>
-              </div>
-              {scan.duplicateCandidates.map((candidate) => (
-                <div
-                  className={`duplicate-row ${selectedDuplicateGroup === candidate.id ? "active" : ""}`}
-                  key={candidate.id ?? candidate.size}
-                  onClick={() => void selectDuplicateCandidate(candidate)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      void selectDuplicateCandidate(candidate);
-                    }
-                  }}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <div>
-                    <strong>{candidate.confidenceScore === 1 ? "Exact duplicate group" : "Review duplicate group"}</strong>
-                    <span>{formatCount(candidate.files)} copies, {formatBytes(candidate.size)} each</span>
+            <div className="duplicate-candidates">
+              <div className="duplicate-candidate-list">
+                <ScrollableRows compact>
+                  <div className="duplicate-list-header" aria-hidden="true">
+                    <span>Group</span>
+                    <span>Reclaim</span>
+                    <span>Confidence</span>
+                    <span>Review</span>
                   </div>
-                  <strong>{formatBytes(candidate.reclaimableBytes)}</strong>
-                  <small className={`confidence-pill ${candidate.confidenceScore === 1 ? "safe" : "medium"}`}>
-                    {candidate.confidenceScore === 1 ? "Safe" : `${Math.round((candidate.confidenceScore ?? 0) * 100)}%`}
-                  </small>
-                  <span className="duplicate-actions">
-                    <IconButton title="Stage exact duplicate review" onClick={(event) => void stageDuplicateAction(event, candidate)}>
-                      <CopyCheck size={16} />
-                    </IconButton>
-                  </span>
-                </div>
-              ))}
-            </ScrollableRows>
-          )}
-          {duplicateFiles.length > 0 && (
-            <div className="duplicate-file-list">
-              {duplicateFiles.map((file) => (
-                <div className="folder-row file-row action-row-grid" key={file.path}>
-                  <span>{file.path}</span>
-                  <strong>{formatBytes(file.size)}</strong>
-                  <small>{file.modified_at ? formatDate(file.modified_at) : "-"}</small>
-                  <IconButton
-                    disabled={!canStageSelectedDuplicateKeep()}
-                    title="Keep this copy when staging duplicate cleanup"
-                    onClick={() => stageSelectedDuplicateKeep(file)}
-                  >
-                    <Check size={16} />
-                  </IconButton>
-                  <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
-                    <ExternalLink size={16} />
-                  </IconButton>
-                </div>
-              ))}
+                  {scan.duplicateCandidates.map((candidate) => (
+                    <div
+                      className={`duplicate-row ${selectedDuplicateGroup === candidate.id ? "active" : ""}`}
+                      key={candidate.id ?? candidate.size}
+                      onClick={() => void selectDuplicateCandidate(candidate)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          void selectDuplicateCandidate(candidate);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <div>
+                        <strong>{candidate.confidenceScore === 1 ? "Exact duplicate group" : "Review duplicate group"}</strong>
+                        <span>{formatCount(candidate.files)} copies, {formatBytes(candidate.size)} each</span>
+                      </div>
+                      <strong>{formatBytes(candidate.reclaimableBytes)}</strong>
+                      <small className={`confidence-pill ${candidate.confidenceScore === 1 ? "safe" : "medium"}`}>
+                        {candidate.confidenceScore === 1 ? "Safe" : `${Math.round((candidate.confidenceScore ?? 0) * 100)}%`}
+                      </small>
+                      <span className="duplicate-actions">
+                        <IconButton title="Stage exact duplicate review" onClick={(event) => void stageDuplicateAction(candidate, event)}>
+                          <CopyCheck size={16} />
+                        </IconButton>
+                      </span>
+                    </div>
+                  ))}
+                </ScrollableRows>
+              </div>
+              <div className="duplicate-detail-panel">
+                {selectedDuplicateCandidate ? (
+                  <>
+                    <div className="duplicate-detail-header">
+                      <div>
+                        <strong>{selectedDuplicateCandidate.confidenceScore === 1 ? "Exact duplicate group" : "Review duplicate group"}</strong>
+                        <span>{formatCount(selectedDuplicateCandidate.files)} copies, {formatBytes(selectedDuplicateCandidate.size)} each</span>
+                      </div>
+                      <div className="duplicate-detail-actions">
+                        <small className={`confidence-pill ${selectedDuplicateCandidate.confidenceScore === 1 ? "safe" : "medium"}`}>
+                          {selectedDuplicateCandidate.confidenceScore === 1 ? "Safe" : `${Math.round((selectedDuplicateCandidate.confidenceScore ?? 0) * 100)}%`}
+                        </small>
+                        <IconButton title="Stage this duplicate review" onClick={() => void stageDuplicateAction(selectedDuplicateCandidate)}>
+                          <CopyCheck size={16} />
+                        </IconButton>
+                      </div>
+                    </div>
+                    <div className="duplicate-detail-metrics">
+                      <div>
+                        <span>Reclaimable</span>
+                        <strong>{formatBytes(selectedDuplicateCandidate.reclaimableBytes)}</strong>
+                      </div>
+                      <div>
+                        <span>Group id</span>
+                        <strong>{selectedDuplicateCandidate.id ?? formatBytes(selectedDuplicateCandidate.size)}</strong>
+                      </div>
+                    </div>
+                    <div className="duplicate-detail-files">
+                      <div className="duplicate-detail-list-header" aria-hidden="true">
+                        <span>File</span>
+                        <span>Size</span>
+                        <span>Modified</span>
+                        <span>Keep</span>
+                        <span>Open</span>
+                      </div>
+                      {duplicateFiles.length === 0 ? (
+                        <div className="empty-state compact">Select this group again to load file details.</div>
+                      ) : (
+                        <ScrollableRows compact>
+                          {duplicateFiles.map((file) => (
+                            <div className="folder-row file-row duplicate-detail-row" key={file.path}>
+                              <span>{file.path}</span>
+                              <strong>{formatBytes(file.size)}</strong>
+                              <small>{file.modified_at ? formatDate(file.modified_at) : "-"}</small>
+                              <IconButton
+                                disabled={!canStageSelectedDuplicateKeep()}
+                                title="Keep this copy when staging duplicate cleanup"
+                                onClick={() => stageSelectedDuplicateKeep(file)}
+                              >
+                                <Check size={16} />
+                              </IconButton>
+                              <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
+                                <ExternalLink size={16} />
+                              </IconButton>
+                            </div>
+                          ))}
+                        </ScrollableRows>
+                      )}
+                      {selectedDuplicateCandidate.files > duplicateFiles.length && (
+                        <span className="duplicate-detail-footnote">
+                          Showing {formatCount(duplicateFiles.length)} of {formatCount(selectedDuplicateCandidate.files)} files.
+                        </span>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="empty-state compact">Select a duplicate group to review its files.</div>
+                )}
+              </div>
             </div>
           )}
         </section>
@@ -925,8 +980,8 @@ function App() {
     }
   }
 
-  async function stageDuplicateAction(event: React.MouseEvent, candidate: ScanState["duplicateCandidates"][number]) {
-    event.stopPropagation();
+  async function stageDuplicateAction(candidate: ScanState["duplicateCandidates"][number], event?: React.MouseEvent) {
+    event?.stopPropagation();
     const confidenceScore = candidate.confidenceScore ?? 0;
     const confidence = confidenceScore >= 1 ? "Safe" : confidenceScore >= 0.65 ? "Medium" : "Manual review";
     const id = `duplicate-${candidate.id ?? candidate.size}`;
@@ -1363,10 +1418,26 @@ function polarPoint(cx: number, cy: number, radius: number, angle: number) {
 }
 
 function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: DuplicateOverlap[]; onSelectFolder: (path: string) => void }) {
-  const topOverlaps = overlaps.slice(0, 8);
+  const topOverlaps = [...overlaps]
+    .sort((a, b) => b.reclaimableBytes - a.reclaimableBytes)
+    .slice(0, 8);
   if (topOverlaps.length === 0) {
     return null;
   }
+
+  const folderStats = new Map<string, { bytes: number; overlaps: number }>();
+  for (const overlap of overlaps) {
+    for (const path of [overlap.folderA, overlap.folderB]) {
+      const entry = folderStats.get(path) ?? { bytes: 0, overlaps: 0 };
+      entry.bytes += overlap.reclaimableBytes;
+      entry.overlaps += 1;
+      folderStats.set(path, entry);
+    }
+  }
+  const topFolders = [...folderStats.entries()]
+    .sort((a, b) => b[1].bytes - a[1].bytes)
+    .slice(0, 5)
+    .map(([path, stats]) => ({ path, ...stats }));
 
   const folderWeights = new Map<string, number>();
   for (const overlap of topOverlaps) {
@@ -1434,13 +1505,50 @@ function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: Duplica
         </svg>
       </div>
       <div className="overlap-list">
-        {topOverlaps.slice(0, 4).map((overlap) => (
-          <button className="overlap-pair" key={`${overlap.folderA}-${overlap.folderB}`} type="button" onClick={() => onSelectFolder(overlap.folderA)}>
-            <strong>{formatBytes(overlap.reclaimableBytes)}</strong>
-            <span>{lastSegment(overlap.folderA)} <span aria-hidden="true">/</span> {lastSegment(overlap.folderB)}</span>
-            <small>{formatCount(overlap.sharedGroups)} groups, {formatCount(overlap.sharedFiles)} files</small>
-          </button>
-        ))}
+        <div className="overlap-section">
+          <h4>Top overlap pairs</h4>
+          {topOverlaps.slice(0, 4).map((overlap) => (
+            <div className="overlap-pair" key={`${overlap.folderA}-${overlap.folderB}`}>
+              <strong>{formatBytes(overlap.reclaimableBytes)}</strong>
+              <span className="overlap-pair-label">
+                <button
+                  className="overlap-target"
+                  type="button"
+                  title={overlap.folderA}
+                  onClick={() => onSelectFolder(overlap.folderA)}
+                >
+                  {lastSegment(overlap.folderA)}
+                </button>
+                <span aria-hidden="true">/</span>
+                <button
+                  className="overlap-target"
+                  type="button"
+                  title={overlap.folderB}
+                  onClick={() => onSelectFolder(overlap.folderB)}
+                >
+                  {lastSegment(overlap.folderB)}
+                </button>
+              </span>
+              <small>{formatCount(overlap.sharedGroups)} groups, {formatCount(overlap.sharedFiles)} files</small>
+            </div>
+          ))}
+        </div>
+        <div className="overlap-section">
+          <h4>Most affected folders</h4>
+          {topFolders.map((folder) => (
+            <button
+              className="overlap-pair overlap-folder"
+              key={folder.path}
+              type="button"
+              title={folder.path}
+              onClick={() => onSelectFolder(folder.path)}
+            >
+              <strong>{formatBytes(folder.bytes)}</strong>
+              <span>{lastSegment(folder.path)}</span>
+              <small>{formatCount(folder.overlaps)} overlaps</small>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
