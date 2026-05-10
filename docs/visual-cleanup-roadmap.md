@@ -42,7 +42,7 @@ This branch tracks the next Birds Eye product push: faster scan feedback, richer
 - [ ] Timeline scatter for photos/videos by EXIF or file timestamp, colored by folder.
   Pinned. The current implementation is broken enough to stay out of the primary workflow until redesigned.
 - [ ] Depth-based sunburst chart for folder hierarchy.
-  First pass exists behind a disclosure. Needs stronger interaction and clearer value before it should be considered complete.
+  First pass exists behind a disclosure. Now shows hover details (path, bytes, files, depth) to improve clarity, but it still needs stronger interaction before it should be considered complete.
 
 ## P3
 

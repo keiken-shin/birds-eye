@@ -1328,6 +1328,7 @@ function confidenceClass(confidence: StagedAction["confidence"]) {
 type SunburstSlice = {
   path: string;
   bytes: number;
+  files: number;
   depth: number;
   innerRadius: number;
   outerRadius: number;
@@ -1379,6 +1380,7 @@ function appendSunburstBranch(
   slices.push({
     path: folder.path,
     bytes: folder.bytes,
+    files: folder.files,
     depth,
     innerRadius,
     outerRadius,
@@ -1715,6 +1717,7 @@ function FocusedFolderSummary({ folder, onReveal }: { folder: FolderStats | null
 
 function SunburstHierarchy({ folders, onSelectFolder }: { folders: FolderStats[]; onSelectFolder: (path: string) => void }) {
   const slices = useMemo(() => buildSunburstSlices(folders), [folders]);
+  const [activeSlice, setActiveSlice] = useState<SunburstSlice | null>(null);
   if (slices.length === 0) {
     return null;
   }
@@ -1725,13 +1728,33 @@ function SunburstHierarchy({ folders, onSelectFolder }: { folders: FolderStats[]
         <h2>Hierarchy Rings</h2>
         <span>Depth by folder size</span>
       </div>
-      <svg viewBox="0 0 220 220" role="img" aria-label="Folder hierarchy sunburst chart">
+      <div className="sunburst-detail" aria-live="polite">
+        {activeSlice ? (
+          <>
+            <strong>{lastSegment(activeSlice.path)}</strong>
+            <span className="sunburst-path">{activeSlice.path}</span>
+            <div className="sunburst-metrics">
+              <small>{formatBytes(activeSlice.bytes)}</small>
+              <small>{formatCount(activeSlice.files)} files</small>
+              <small>Depth {formatCount(activeSlice.depth + 1)}</small>
+            </div>
+          </>
+        ) : (
+          <>
+            <strong>Hover a ring</strong>
+            <span className="sunburst-path">Click a segment to focus the folder in the treemap.</span>
+          </>
+        )}
+      </div>
+      <svg viewBox="0 0 220 220" role="img" aria-label="Folder hierarchy sunburst chart" onMouseLeave={() => setActiveSlice(null)}>
         {slices.map((slice) => (
           <path
             d={describeArc(110, 110, slice.innerRadius, slice.outerRadius, slice.startAngle, slice.endAngle)}
             fill={slice.color}
             key={`${slice.path}-${slice.depth}-${slice.startAngle}`}
             onClick={() => onSelectFolder(slice.path)}
+            onMouseEnter={() => setActiveSlice(slice)}
+            onFocus={() => setActiveSlice(slice)}
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();

@@ -547,6 +547,38 @@ h2 {
   background: rgba(0, 0, 0, 0.18);
 }
 
+.sunburst-detail {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.sunburst-detail strong {
+  color: #ffffff;
+}
+
+.sunburst-path {
+  color: #96a1b6;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sunburst-metrics {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sunburst-metrics small {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
 .insight-disclosure {
   margin-top: 14px;
 }
