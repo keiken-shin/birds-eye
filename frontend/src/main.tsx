@@ -523,7 +523,10 @@ function App() {
               </div>
             )}
             <Treemap files={scan.largestFiles} folders={filteredFolders} nativeRuntime={nativeRuntime} onSelect={(folder) => setFocusedFolder(folder.path)} />
-            <SunburstHierarchy folders={scan.folders} onSelectFolder={(path) => setFocusedFolder(path)} />
+            <details className="insight-disclosure">
+              <summary>Hierarchy rings</summary>
+              <SunburstHierarchy folders={scan.folders} onSelectFolder={(path) => setFocusedFolder(path)} />
+            </details>
           </div>
 
           <aside className="recommendations">
@@ -682,19 +685,36 @@ function App() {
           }}
         />
 
-        <BeforeAfterSimulation files={scan.largestFiles} folders={scan.folders} nativeRuntime={nativeRuntime} overlaps={scan.duplicateOverlaps} />
+        <BeforeAfterSimulation
+          candidates={scan.duplicateCandidates}
+          files={scan.largestFiles}
+          folders={scan.folders}
+          nativeRuntime={nativeRuntime}
+          overlaps={scan.duplicateOverlaps}
+        />
 
         <section className="folder-table">
           <div className="panel-header">
             <h2>Duplicate Candidates</h2>
             <span><CopyCheck size={14} /> Size + partial + full hash</span>
           </div>
-          <p className="section-note">Duplicate groups start by identical file size, then matching candidates are refined with partial hashes and full-file hashes. A 100% confidence group means matching full hashes.</p>
-          <DuplicateOverlapGraph overlaps={scan.duplicateOverlaps} onSelectFolder={(path) => setFocusedFolder(path)} />
+          <DuplicateSummary candidates={scan.duplicateCandidates} overlaps={scan.duplicateOverlaps} />
+          {scan.duplicateOverlaps.length > 0 && (
+            <details className="insight-disclosure">
+              <summary>Folder overlap map</summary>
+              <DuplicateOverlapGraph overlaps={scan.duplicateOverlaps} onSelectFolder={(path) => setFocusedFolder(path)} />
+            </details>
+          )}
           {scan.duplicateCandidates.length === 0 ? (
             <div className="empty-state compact">Files with identical sizes will appear here as duplicate candidates.</div>
           ) : (
             <ScrollableRows compact>
+              <div className="duplicate-list-header" aria-hidden="true">
+                <span>Group</span>
+                <span>Reclaim</span>
+                <span>Confidence</span>
+                <span>Review</span>
+              </div>
               {scan.duplicateCandidates.map((candidate) => (
                 <div
                   className={`duplicate-row ${selectedDuplicateGroup === candidate.id ? "active" : ""}`}
@@ -710,10 +730,13 @@ function App() {
                   tabIndex={0}
                 >
                   <div>
-                    <strong>{formatBytes(candidate.reclaimableBytes)} reclaimable</strong>
-                    <span>{formatCount(candidate.files)} files at {formatBytes(candidate.size)} each</span>
+                    <strong>{candidate.confidenceScore === 1 ? "Exact duplicate group" : "Review duplicate group"}</strong>
+                    <span>{formatCount(candidate.files)} copies, {formatBytes(candidate.size)} each</span>
                   </div>
-                  <small>{candidate.samples.join(" | ")}</small>
+                  <strong>{formatBytes(candidate.reclaimableBytes)}</strong>
+                  <small className={`confidence-pill ${candidate.confidenceScore === 1 ? "safe" : "medium"}`}>
+                    {candidate.confidenceScore === 1 ? "Safe" : `${Math.round((candidate.confidenceScore ?? 0) * 100)}%`}
+                  </small>
                   <span className="duplicate-actions">
                     <IconButton title="Stage exact duplicate review" onClick={(event) => stageDuplicateAction(event, candidate)}>
                       <CopyCheck size={16} />
@@ -1284,6 +1307,39 @@ function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: Duplica
   );
 }
 
+function DuplicateSummary({
+  candidates,
+  overlaps,
+}: {
+  candidates: ScanState["duplicateCandidates"];
+  overlaps: DuplicateOverlap[];
+}) {
+  const reclaimable = candidates.reduce((sum, candidate) => sum + candidate.reclaimableBytes, 0);
+  const exactGroups = candidates.filter((candidate) => candidate.confidenceScore === 1).length;
+  const copies = candidates.reduce((sum, candidate) => sum + candidate.files, 0);
+
+  return (
+    <div className="duplicate-summary">
+      <div>
+        <span>Potential reclaim</span>
+        <strong>{formatBytes(reclaimable)}</strong>
+      </div>
+      <div>
+        <span>Exact groups</span>
+        <strong>{formatCount(exactGroups)}</strong>
+      </div>
+      <div>
+        <span>Duplicate copies</span>
+        <strong>{formatCount(copies)}</strong>
+      </div>
+      <p>
+        Start with groups marked Safe. Each row is one duplicate set: keep one copy, review the listed files, then stage the group into the Review Queue.
+        {overlaps.length > 0 ? " The folder overlap map is available for spotting folders that share many duplicate files." : ""}
+      </p>
+    </div>
+  );
+}
+
 function ActionHeatmap({ scan, onStageAction }: { scan: ScanState; onStageAction: (folder: FolderStats, action: HeatmapActionCell) => void }) {
   const duplicateBytesByFolder = new Map<string, number>();
   for (const overlap of scan.duplicateOverlaps) {
@@ -1535,14 +1591,27 @@ function TimelineScatter({
             const delta = ((event.clientX - drag.x) / width) * (drag.end - drag.start);
             setZoomRange(clampTimelineRange(drag.start - delta, drag.end - delta, minTime, maxTime));
           }}
-          onPointerUp={(event) => {
-            timelineDragRef.current = null;
-            setIsPanning(false);
-            event.currentTarget.releasePointerCapture(event.pointerId);
+          onWheel={(event) => {
+            if (!canPan) return;
+            event.preventDefault();
+            const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+            panTimeline(delta > 0 ? 0.18 : -0.18);
           }}
-          onPointerCancel={() => {
+          onPointerUp={(event) => {
+            if (!timelineDragRef.current) return;
             timelineDragRef.current = null;
             setIsPanning(false);
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+          }}
+          onPointerCancel={(event) => {
+            if (!timelineDragRef.current) return;
+            timelineDragRef.current = null;
+            setIsPanning(false);
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
           }}
         >
           {!hasEnoughPoints && (
@@ -1602,18 +1671,20 @@ function TimelineScatter({
 }
 
 function BeforeAfterSimulation({
+  candidates,
   files,
   folders,
   nativeRuntime,
   overlaps,
 }: {
+  candidates: ScanState["duplicateCandidates"];
   files: ScanState["largestFiles"];
   folders: FolderStats[];
   nativeRuntime: boolean;
   overlaps: DuplicateOverlap[];
 }) {
   const [simulationPercent, setSimulationPercent] = useState(100);
-  const duplicateBytesByFolder = useMemo(() => {
+  const overlapBytesByFolder = useMemo(() => {
     const map = new Map<string, number>();
     for (const overlap of overlaps) {
       const half = overlap.reclaimableBytes / 2;
@@ -1622,8 +1693,9 @@ function BeforeAfterSimulation({
     }
     return map;
   }, [overlaps]);
-
-  const reclaimableBytes = [...duplicateBytesByFolder.values()].reduce((sum, bytes) => sum + bytes, 0);
+  const candidateReclaimableBytes = candidates.reduce((sum, candidate) => sum + candidate.reclaimableBytes, 0);
+  const overlapReclaimableBytes = [...overlapBytesByFolder.values()].reduce((sum, bytes) => sum + bytes, 0);
+  const reclaimableBytes = Math.max(candidateReclaimableBytes, overlapReclaimableBytes);
   if (reclaimableBytes <= 0) {
     return null;
   }
@@ -1633,14 +1705,27 @@ function BeforeAfterSimulation({
     .sort((a, b) => b.bytes - a.bytes)
     .slice(0, 24)
     .map((folder) => ({ ...folder, displayBytes: folder.bytes }));
+  const currentTotalBytes = currentFolders.reduce((sum, folder) => sum + folder.bytes, 0);
   const simulatedFolders = currentFolders.map((folder) => {
-    const reduction = (duplicateBytesByFolder.get(folder.path) ?? 0) * (simulationPercent / 100);
+    const overlapReduction = overlapBytesByFolder.get(folder.path) ?? 0;
+    const proportionalReduction = currentTotalBytes > 0 ? reclaimableBytes * (folder.bytes / currentTotalBytes) : 0;
+    const rawReduction = overlapReduction > 0 ? overlapReduction : proportionalReduction;
+    const reduction = rawReduction * (simulationPercent / 100);
     return {
       ...folder,
       displayBytes: Math.max(1, folder.bytes - reduction),
     };
   });
   const simulatedReclaimed = reclaimableBytes * (simulationPercent / 100);
+  const simulationChanges = currentFolders
+    .map((folder, index) => ({
+      bytes: Math.max(0, folder.displayBytes - (simulatedFolders[index]?.displayBytes ?? folder.displayBytes)),
+      label: lastSegment(folder.path),
+      path: folder.path,
+    }))
+    .filter((change) => change.bytes > 0)
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, 5);
 
   return (
     <section className="folder-table simulation-panel">
@@ -1649,7 +1734,7 @@ function BeforeAfterSimulation({
         <span>{formatBytes(simulatedReclaimed)} simulated reclaimed</span>
       </div>
       <label className="simulation-slider">
-        <span>{simulationPercent}% duplicate cleanup confidence</span>
+        <span>{simulationPercent}% of safe duplicate reclaim simulated. {overlapReclaimableBytes > 0 ? "Folder-specific overlap data is used where available." : "No folder overlap data yet, so reclaim is distributed by folder size."}</span>
         <input
           type="range"
           min="0"
@@ -1669,6 +1754,16 @@ function BeforeAfterSimulation({
           <TreemapCanvas files={files} folders={simulatedFolders} nativeRuntime={nativeRuntime} />
         </div>
       </div>
+      {simulationChanges.length > 0 && (
+        <div className="simulation-deltas">
+          {simulationChanges.map((change) => (
+            <div key={change.path}>
+              <span>{change.label}</span>
+              <strong>-{formatBytes(change.bytes)}</strong>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
