@@ -1372,12 +1372,14 @@ function TimelineScatter({
   nativeRuntime: boolean;
   onSelectFile: (file: ScanState["largestFiles"][number]) => void;
 }) {
+  const [mediaFilter, setMediaFilter] = useState<CategoryKey | "all">("all");
   const points = useMemo(() => {
+    const timelineCategories: CategoryKey[] = ["photos", "videos", "music", "documents"];
     return files
-      .filter((file) => (file.category === "photos" || file.category === "videos") && file.modified > 0)
+      .filter((file) => timelineCategories.includes(file.category) && (mediaFilter === "all" || file.category === mediaFilter) && file.modified > 0)
       .sort((a, b) => a.modified - b.modified)
       .slice(0, 600);
-  }, [files]);
+  }, [files, mediaFilter]);
   const [zoomRange, setZoomRange] = useState<{ start: number; end: number } | null>(null);
   const [selectedFile, setSelectedFile] = useState<ScanState["largestFiles"][number] | null>(null);
 
@@ -1391,7 +1393,7 @@ function TimelineScatter({
       <section className="folder-table timeline-panel">
         <div className="panel-header">
           <h2>Media Timeline</h2>
-          <span>Photos and videos</span>
+          <span>Photos, videos, audio, docs</span>
         </div>
         <div className="empty-state compact">Photo and video timestamps will appear here after the next indexed scan.</div>
       </section>
@@ -1412,9 +1414,16 @@ function TimelineScatter({
     <section className="folder-table timeline-panel">
       <div className="panel-header">
         <h2>Media Timeline</h2>
-        <span>{formatCount(visiblePoints.length)} of {formatCount(points.length)} photos/videos</span>
+        <span>{formatCount(visiblePoints.length)} of {formatCount(points.length)} media files</span>
       </div>
       <div className="timeline-toolbar">
+        <div className="timeline-filters" aria-label="Timeline media filters">
+          {(["all", "photos", "videos", "music", "documents"] as Array<CategoryKey | "all">).map((key) => (
+            <button className={mediaFilter === key ? "active" : ""} key={key} type="button" onClick={() => setMediaFilter(key)}>
+              {key === "all" ? "All" : categories[key].label}
+            </button>
+          ))}
+        </div>
         <button type="button" onClick={() => setZoomRange(null)} disabled={!zoomRange}>Reset zoom</button>
         <span>{formatDate(Math.floor(visibleStart / 1000))} to {formatDate(Math.floor(visibleEnd / 1000))}</span>
       </div>
@@ -1441,8 +1450,8 @@ function TimelineScatter({
             return cluster.files.map((file, index) => {
               const left = ((file.modified - visibleStart) / span) * 100;
               const size = 7 + Math.min(13, Math.sqrt(file.bytes / maxBytes) * 13);
-              const baseLane = file.category === "photos" ? 34 : 66;
-              const lane = baseLane + ((index % 5) - 2) * 4;
+              const baseLane = timelineLane(file.category);
+              const lane = baseLane + ((index % 5) - 2) * 3;
               return (
                 <button
                   className={`timeline-dot ${file.category} ${selectedFile?.path === file.path ? "active" : ""}`}
@@ -1553,19 +1562,29 @@ function MediaPreviewPanel({ file, nativeRuntime }: { file: ScanState["largestFi
 
   const canRenderPhoto = nativeRuntime && file.category === "photos";
   const canRenderVideo = nativeRuntime && file.category === "videos";
+  const canRenderAudio = nativeRuntime && file.category === "music";
 
   return (
     <aside className="media-preview-panel">
       <div className="media-preview-frame">
         {canRenderPhoto && <img src={convertFileSrc(file.path)} alt="" loading="lazy" />}
         {canRenderVideo && <video src={convertFileSrc(file.path)} controls preload="metadata" />}
-        {!canRenderPhoto && !canRenderVideo && <span>{categories[file.category].label}</span>}
+        {canRenderAudio && <audio src={convertFileSrc(file.path)} controls preload="metadata" />}
+        {!canRenderPhoto && !canRenderVideo && !canRenderAudio && <span>{categories[file.category].label}</span>}
       </div>
       <strong>{lastSegment(file.path)}</strong>
       <span>{formatDate(Math.floor(file.modified / 1000))} - {formatBytes(file.bytes)}</span>
       <small>{file.path}</small>
     </aside>
   );
+}
+
+function timelineLane(category: CategoryKey) {
+  if (category === "photos") return 25;
+  if (category === "videos") return 45;
+  if (category === "music") return 65;
+  if (category === "documents") return 82;
+  return 50;
 }
 
 type TimelineCluster = {
