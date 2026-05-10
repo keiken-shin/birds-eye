@@ -119,6 +119,7 @@ pub struct FolderMediaSummaryDto {
 pub struct IndexOverviewDto {
     pub folders: Vec<FolderSummaryDto>,
     pub files: Vec<FileSummaryDto>,
+    pub timeline_files: Vec<FileSummaryDto>,
     pub extensions: Vec<ExtensionSummaryDto>,
     pub duplicate_groups: Vec<DuplicateGroupSummaryDto>,
     pub duplicate_overlaps: Vec<DuplicateOverlapSummaryDto>,
@@ -183,6 +184,18 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
             .collect(),
         files: writer
             .largest_files(request.limit)
+            .map_err(|error| format!("{error:?}"))?
+            .into_iter()
+            .map(|file| FileSummaryDto {
+                path: file.path,
+                size: file.size,
+                extension: file.extension,
+                media_kind: file.media_kind,
+                modified_at: file.modified_at,
+            })
+            .collect(),
+        timeline_files: writer
+            .timeline_files(request.limit.min(500))
             .map_err(|error| format!("{error:?}"))?
             .into_iter()
             .map(|file| FileSummaryDto {

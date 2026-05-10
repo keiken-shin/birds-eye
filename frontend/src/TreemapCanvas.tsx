@@ -47,7 +47,7 @@ export function TreemapCanvas({
 
     const observer = new ResizeObserver(([entry]) => {
       const width = Math.max(320, Math.floor(entry.contentRect.width));
-      setSize({ width, height: Math.max(360, Math.floor(width * 0.45)) });
+      setSize({ width, height: Math.min(760, Math.max(420, Math.floor(width * 0.48))) });
     });
     observer.observe(wrap);
     return () => observer.disconnect();
@@ -99,13 +99,37 @@ export function TreemapCanvas({
         ref={canvasRef}
       />
       {hover && (
-        <div className="treemap-tooltip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
+        <div className="treemap-tooltip" style={getTooltipPosition(hover.x, hover.y, size.width, size.height)}>
           <strong>{hover.folder.path}</strong>
           <span>{formatBytes(hover.folder.displayBytes)}</span>
           <span>{hover.folder.files.toLocaleString()} files</span>
+          <FolderCategoryMix folder={hover.folder} />
           <FolderFilmstrip files={files} folder={hover.folder.path} nativeRuntime={nativeRuntime} />
         </div>
       )}
+    </div>
+  );
+}
+
+function FolderCategoryMix({ folder }: { folder: TreemapFolder }) {
+  const entries = (Object.keys(categories) as CategoryKey[])
+    .map((key) => ({ key, bytes: folder.categories[key] }))
+    .filter((entry) => entry.bytes > 0)
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, 4);
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="tooltip-category-mix">
+      {entries.map((entry) => (
+        <span key={entry.key}>
+          <i style={{ background: categories[entry.key].color }} />
+          {categories[entry.key].label} {formatBytes(entry.bytes)}
+        </span>
+      ))}
     </div>
   );
 }
@@ -114,6 +138,7 @@ function FolderFilmstrip({ files, folder, nativeRuntime }: { files: FileStats[];
   const samples = useMemo(() => {
     return files
       .filter((file) => (file.category === "photos" || file.category === "videos") && isPathInsideFolder(file.path, folder))
+      .sort((a, b) => b.modified - a.modified)
       .slice(0, 4);
   }, [files, folder]);
 
@@ -128,12 +153,19 @@ function FolderFilmstrip({ files, folder, nativeRuntime }: { files: FileStats[];
           {nativeRuntime && file.category === "photos" ? (
             <img src={toAssetUrl(file.path)} alt="" loading="lazy" />
           ) : (
-            <span>{file.category === "videos" ? "Video" : "Photo"}</span>
+            <span title={lastSegment(file.path)}>{lastSegment(file.path)}</span>
           )}
         </div>
       ))}
     </div>
   );
+}
+
+function getTooltipPosition(x: number, y: number, width: number, height: number) {
+  return {
+    left: x > width - 360 ? Math.max(8, x - 334) : x + 14,
+    top: y > height - 190 ? Math.max(8, y - 174) : y + 14,
+  };
 }
 
 function toAssetUrl(path: string) {

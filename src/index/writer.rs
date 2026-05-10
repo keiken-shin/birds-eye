@@ -329,6 +329,34 @@ impl IndexWriter {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    pub fn timeline_files(&self, per_kind_limit: usize) -> Result<Vec<FileSummary>, IndexError> {
+        let mut files = Vec::new();
+        let mut statement = self.connection.prepare(
+            "SELECT path, size, extension, media_kind, modified_at
+             FROM files
+             WHERE deleted_at IS NULL AND media_kind = ?1 AND modified_at IS NOT NULL
+             ORDER BY modified_at DESC
+             LIMIT ?2",
+        )?;
+
+        for media_kind in ["photo", "video", "music", "document"] {
+            let rows = statement.query_map(params![media_kind, per_kind_limit as i64], |row| {
+                Ok(FileSummary {
+                    path: row.get(0)?,
+                    size: row.get(1)?,
+                    extension: row.get(2)?,
+                    media_kind: row.get(3)?,
+                    modified_at: row.get(4)?,
+                })
+            })?;
+            files.extend(rows.collect::<Result<Vec<_>, _>>()?);
+        }
+
+        files.sort_by(|a, b| a.modified_at.cmp(&b.modified_at));
+        Ok(files)
+    }
+
+
     pub fn duplicate_overlaps(&self, limit: usize) -> Result<Vec<DuplicateOverlapSummary>, IndexError> {
         let mut statement = self.connection.prepare(
             "WITH group_folders AS (
@@ -850,13 +878,16 @@ fn system_time_to_unix(time: Option<SystemTime>) -> Option<i64> {
 
 fn classify_media_kind(extension: Option<&str>) -> &'static str {
     match extension.unwrap_or_default() {
-        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "heic" | "raw" => "photo",
-        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "m4v" => "video",
-        "mp3" | "flac" | "wav" | "aac" | "ogg" | "m4a" => "music",
-        "zip" | "rar" | "7z" | "tar" | "gz" | "xz" => "archive",
-        "pdf" | "doc" | "docx" | "xls" | "xlsx" | "txt" | "md" => "document",
-        "rs" | "js" | "ts" | "tsx" | "jsx" | "py" | "go" | "java" | "html" | "css" => "code",
-        "exe" | "msi" | "dmg" | "pkg" | "deb" | "rpm" => "installer",
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tif" | "tiff" | "heic" | "heif"
+        | "raw" | "cr2" | "nef" | "arw" => "photo",
+        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "m4v" | "ts" => "video",
+        "mp3" | "flac" | "wav" | "aac" | "ogg" | "m4a" | "wma" => "music",
+        "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" => "archive",
+        "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "txt" | "md" | "csv"
+        | "epub" => "document",
+        "rs" | "js" | "tsx" | "jsx" | "py" | "go" | "java" | "cs" | "cpp" | "c"
+        | "html" | "css" | "json" => "code",
+        "exe" | "msi" | "dmg" | "pkg" | "deb" | "rpm" | "appimage" => "installer",
         "safetensors" | "ckpt" | "pt" | "pth" | "onnx" | "gguf" => "model",
         _ => "other",
     }

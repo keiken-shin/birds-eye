@@ -1115,7 +1115,7 @@ function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): Sc
     bytes: folder.total_bytes,
     categories: folderCategoryMap.get(folder.path) ?? emptyFolderCategories(),
   }));
-  const largestFiles = overview.files.map((file) => ({
+  const largestFiles = mergeNativeFiles([...(overview.files ?? []), ...(overview.timeline_files ?? [])]).map((file) => ({
     path: file.path,
     name: lastSegment(file.path),
     folder: file.path.includes("\\") ? file.path.slice(0, file.path.lastIndexOf("\\")) : file.path.slice(0, file.path.lastIndexOf("/")),
@@ -1161,6 +1161,14 @@ function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): Sc
     duplicateOverlaps,
     categories: categoryTotals,
   };
+}
+
+function mergeNativeFiles(files: NativeIndexOverview["files"]) {
+  const byPath = new Map<string, NativeIndexOverview["files"][number]>();
+  for (const file of files) {
+    byPath.set(file.path, file);
+  }
+  return [...byPath.values()].sort((a, b) => b.size - a.size);
 }
 
 function categoryFromMediaKind(kind: string): CategoryKey {
@@ -1318,8 +1326,8 @@ function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: Duplica
       return {
         path,
         bytes,
-        x: 50 + Math.cos(angle) * 32,
-        y: 50 + Math.sin(angle) * 32,
+        x: 50 + Math.cos(angle) * 27,
+        y: 50 + Math.sin(angle) * 27,
       };
     });
   const folderByPath = new Map(folders.map((folder) => [folder.path, folder]));
@@ -1346,7 +1354,7 @@ function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: Duplica
             );
           })}
           {folders.map((folder) => {
-            const radius = 7 + Math.min(11, Math.sqrt(folder.bytes / Math.max(maxBytes, 1)) * 9);
+            const radius = 7 + Math.min(9, Math.sqrt(folder.bytes / Math.max(maxBytes, 1)) * 7);
             return (
               <g
                 className="overlap-node"
@@ -1362,7 +1370,7 @@ function DuplicateOverlapGraph({ overlaps, onSelectFolder }: { overlaps: Duplica
                 tabIndex={0}
               >
                 <circle cx={folder.x} cy={folder.y} r={radius} />
-                <text x={folder.x} y={folder.y + radius + 5}>{lastSegment(folder.path)}</text>
+                <text x={folder.x} y={folder.y + 1.5}>{lastSegment(folder.path)}</text>
                 <title>{folder.path}</title>
               </g>
             );
@@ -1599,8 +1607,11 @@ function TimelineScatter({
   const hasEnoughPoints = points.length >= 2;
   const fallbackStart = timelineFiles[0]?.modified ?? Date.now();
   const fallbackEnd = timelineFiles[timelineFiles.length - 1]?.modified ?? fallbackStart;
-  const minTime = hasEnoughPoints ? points[0].modified : fallbackStart;
-  const maxTime = hasEnoughPoints ? points[points.length - 1].modified : fallbackEnd;
+  const rawMinTime = hasEnoughPoints ? points[0].modified : fallbackStart;
+  const rawMaxTime = hasEnoughPoints ? points[points.length - 1].modified : fallbackEnd;
+  const timelineEdgeBuffer = Math.max((rawMaxTime - rawMinTime) * 0.04, 1000 * 60 * 60 * 24 * 7);
+  const minTime = rawMinTime - timelineEdgeBuffer;
+  const maxTime = rawMaxTime + timelineEdgeBuffer;
   const visibleStart = zoomRange?.start ?? minTime;
   const visibleEnd = zoomRange?.end ?? maxTime;
   const visiblePoints = hasEnoughPoints ? points.filter((file) => file.modified >= visibleStart && file.modified <= visibleEnd) : [];
@@ -1679,14 +1690,15 @@ function TimelineScatter({
           }}
           onPointerUp={(event) => {
             if (!timelineDragRef.current) return;
+            const didPan = timelineDidPanRef.current;
             timelineDragRef.current = null;
             setIsPanning(false);
             if (event.currentTarget.hasPointerCapture(event.pointerId)) {
               event.currentTarget.releasePointerCapture(event.pointerId);
             }
-            window.setTimeout(() => {
+            if (!didPan) {
               timelineDidPanRef.current = false;
-            }, 0);
+            }
           }}
           onPointerCancel={(event) => {
             if (!timelineDragRef.current) return;
@@ -1716,6 +1728,7 @@ function TimelineScatter({
                   onClick={(event) => {
                     if (timelineDidPanRef.current) {
                       event.preventDefault();
+                      timelineDidPanRef.current = false;
                       return;
                     }
                     setZoomRange(expandTimelineRange(cluster.start, cluster.end, minTime, maxTime));
@@ -1741,6 +1754,7 @@ function TimelineScatter({
                   onClick={(event) => {
                     if (timelineDidPanRef.current) {
                       event.preventDefault();
+                      timelineDidPanRef.current = false;
                       return;
                     }
                     setSelectedFile(file);
