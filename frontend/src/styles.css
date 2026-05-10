@@ -304,6 +304,44 @@ h2 {
 .detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+.layout-controls {
+  margin-top: 12px;
+}
+.layout-controls summary {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #dce6f5;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0 12px;
+}
+.layout-controls[open] summary {
+  margin-bottom: 10px;
+}
+.layout-toggles {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.layout-toggles button {
+  min-height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dce6f5;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 12px;
+}
+.layout-toggles button.active {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.12);
+}
   gap: 18px;
 }
 

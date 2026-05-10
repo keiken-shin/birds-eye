@@ -110,6 +110,10 @@ function App() {
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showSuggestedMoves, setShowSuggestedMoves] = useState(true);
+  const [showDetailGrid, setShowDetailGrid] = useState(true);
+  const [showSimulation, setShowSimulation] = useState(true);
+  const [showDuplicates, setShowDuplicates] = useState(true);
+  const [showReviewQueue, setShowReviewQueue] = useState(true);
   const isWindowsRuntime = useMemo(() => {
     return typeof navigator !== "undefined" && navigator.userAgent.toLowerCase().includes("windows");
   }, []);
@@ -522,6 +526,24 @@ function App() {
           ))}
         </section>
 
+        <details className="layout-controls">
+          <summary>Layout controls</summary>
+          <div className="layout-toggles" role="group" aria-label="Workbench panel visibility">
+            <button className={showDetailGrid ? "active" : ""} type="button" onClick={() => setShowDetailGrid((current) => !current)}>
+              Detail grids
+            </button>
+            <button className={showSimulation ? "active" : ""} type="button" onClick={() => setShowSimulation((current) => !current)}>
+              Simulation
+            </button>
+            <button className={showDuplicates ? "active" : ""} type="button" onClick={() => setShowDuplicates((current) => !current)}>
+              Duplicates
+            </button>
+            <button className={showReviewQueue ? "active" : ""} type="button" onClick={() => setShowReviewQueue((current) => !current)}>
+              Review queue
+            </button>
+          </div>
+        </details>
+
         <section className="analysis-layout" id="treemap">
           <div className="treemap-panel">
             <div className="panel-header">
@@ -672,50 +694,52 @@ function App() {
           )}
         </section>
 
-        <section className="detail-grid">
-          <div className="folder-table">
-            <div className="panel-header">
-              <h2>Largest Files</h2>
-              <span>{formatCount(scan.largestFiles.length)} tracked</span>
+        {showDetailGrid && (
+          <section className="detail-grid">
+            <div className="folder-table">
+              <div className="panel-header">
+                <h2>Largest Files</h2>
+                <span>{formatCount(scan.largestFiles.length)} tracked</span>
+              </div>
+              {scan.largestFiles.length === 0 ? (
+                <div className="empty-state compact">Largest files appear during the next scan.</div>
+              ) : (
+                <ScrollableRows compact>
+                  {scan.largestFiles.map((file) => (
+                    <div className="folder-row file-row action-row-grid" key={file.path}>
+                      <span>{file.path}</span>
+                      <strong>{formatBytes(file.bytes)}</strong>
+                      <small>{file.extension}</small>
+                      <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
+                        <ExternalLink size={16} />
+                      </IconButton>
+                    </div>
+                  ))}
+                </ScrollableRows>
+              )}
             </div>
-            {scan.largestFiles.length === 0 ? (
-              <div className="empty-state compact">Largest files appear during the next scan.</div>
-            ) : (
-              <ScrollableRows compact>
-                {scan.largestFiles.map((file) => (
-                  <div className="folder-row file-row action-row-grid" key={file.path}>
-                    <span>{file.path}</span>
-                    <strong>{formatBytes(file.bytes)}</strong>
-                    <small>{file.extension}</small>
-                    <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
-                      <ExternalLink size={16} />
-                    </IconButton>
-                  </div>
-                ))}
-              </ScrollableRows>
-            )}
-          </div>
 
-          <div className="folder-table">
-            <div className="panel-header">
-              <h2>Extensions</h2>
-              <span>{formatCount(scan.extensions.length)} groups</span>
+            <div className="folder-table">
+              <div className="panel-header">
+                <h2>Extensions</h2>
+                <span>{formatCount(scan.extensions.length)} groups</span>
+              </div>
+              {scan.extensions.length === 0 ? (
+                <div className="empty-state compact">Extension totals appear during the next scan.</div>
+              ) : (
+                <ScrollableRows compact>
+                  {scan.extensions.map((extension) => (
+                    <div className="folder-row extension-row" key={extension.extension}>
+                      <span>.{extension.extension}</span>
+                      <strong>{formatBytes(extension.bytes)}</strong>
+                      <small>{formatCount(extension.files)} files</small>
+                    </div>
+                  ))}
+                </ScrollableRows>
+              )}
             </div>
-            {scan.extensions.length === 0 ? (
-              <div className="empty-state compact">Extension totals appear during the next scan.</div>
-            ) : (
-              <ScrollableRows compact>
-                {scan.extensions.map((extension) => (
-                  <div className="folder-row extension-row" key={extension.extension}>
-                    <span>.{extension.extension}</span>
-                    <strong>{formatBytes(extension.bytes)}</strong>
-                    <small>{formatCount(extension.files)} files</small>
-                  </div>
-                ))}
-              </ScrollableRows>
-            )}
-          </div>
-        </section>
+          </section>
+        )}
 
         <details className="insight-disclosure pinned-feature">
           <summary>Media timeline is pinned for repair</summary>
@@ -793,191 +817,197 @@ function App() {
                 </ScrollableRows>
               </div>
               <div className="duplicate-detail-panel">
-                {selectedDuplicateCandidate ? (
-                  <>
-                    <div className="duplicate-detail-header">
-                      <div>
-                        <strong>{selectedDuplicateCandidate.confidenceScore === 1 ? "Exact duplicate group" : "Review duplicate group"}</strong>
-                        <span>{formatCount(selectedDuplicateCandidate.files)} copies, {formatBytes(selectedDuplicateCandidate.size)} each</span>
-                      </div>
-                      <div className="duplicate-detail-actions">
-                        <small className={`confidence-pill ${selectedDuplicateCandidate.confidenceScore === 1 ? "safe" : "medium"}`}>
-                          {selectedDuplicateCandidate.confidenceScore === 1 ? "Safe" : `${Math.round((selectedDuplicateCandidate.confidenceScore ?? 0) * 100)}%`}
-                        </small>
-                        <IconButton title="Stage this duplicate review" onClick={() => void stageDuplicateAction(selectedDuplicateCandidate)}>
-                          <CopyCheck size={16} />
-                        </IconButton>
-                      </div>
+                {showSimulation && (
+                  <BeforeAfterSimulation
+                    candidates={scan.duplicateCandidates}
+                    files={scan.largestFiles}
+                    folders={scan.folders}
+                    nativeRuntime={nativeRuntime}
+                    overlaps={scan.duplicateOverlaps}
+                  />
+                )}
+
+                {showDuplicates && (
+                  <section className="folder-table">
+                    <div className="panel-header">
+                      <h2>Duplicate Candidates</h2>
+                      <span><CopyCheck size={14} /> Size + partial + full hash</span>
                     </div>
-                    <div className="duplicate-detail-metrics">
-                      <div>
-                        <span>Reclaimable</span>
-                        <strong>{formatBytes(selectedDuplicateCandidate.reclaimableBytes)}</strong>
-                      </div>
-                      <div>
-                        <span>Group id</span>
-                        <strong>{selectedDuplicateCandidate.id ?? formatBytes(selectedDuplicateCandidate.size)}</strong>
-                      </div>
-                    </div>
-                    <div className="duplicate-detail-files">
-                      <div className="duplicate-detail-list-header" aria-hidden="true">
-                        <span>File</span>
-                        <span>Size</span>
-                        <span>Modified</span>
-                        <span>Keep</span>
-                        <span>Open</span>
-                      </div>
-                      {duplicateFiles.length === 0 ? (
-                        <div className="empty-state compact">Select this group again to load file details.</div>
-                      ) : (
-                        <ScrollableRows compact>
-                          {duplicateFiles.map((file) => (
-                            <div className="folder-row file-row duplicate-detail-row" key={file.path}>
-                              <span>{file.path}</span>
-                              <strong>{formatBytes(file.size)}</strong>
-                              <small>{file.modified_at ? formatDate(file.modified_at) : "-"}</small>
-                              <IconButton
-                                disabled={!canStageSelectedDuplicateKeep()}
-                                title="Keep this copy when staging duplicate cleanup"
-                                onClick={() => stageSelectedDuplicateKeep(file)}
+                    <DuplicateSummary candidates={scan.duplicateCandidates} overlaps={scan.duplicateOverlaps} />
+                    {scan.duplicateOverlaps.length > 0 && (
+                      <details className="insight-disclosure">
+                        <summary>Folder overlap map</summary>
+                        <DuplicateOverlapGraph overlaps={scan.duplicateOverlaps} onSelectFolder={(path) => setFocusedFolder(path)} />
+                      </details>
+                    )}
+                    {scan.duplicateCandidates.length === 0 ? (
+                      <div className="empty-state compact">Files with identical sizes will appear here as duplicate candidates.</div>
+                    ) : (
+                      <div className="duplicate-candidates">
+                        <div className="duplicate-candidate-list">
+                          <ScrollableRows compact>
+                            <div className="duplicate-list-header" aria-hidden="true">
+                              <span>Group</span>
+                              <span>Reclaim</span>
+                              <span>Confidence</span>
+                              <span>Review</span>
+                            </div>
+                            {scan.duplicateCandidates.map((candidate) => (
+                              <div
+                                className={`duplicate-row ${selectedDuplicateGroup === candidate.id ? "active" : ""}`}
+                                key={candidate.id ?? candidate.size}
+                                onClick={() => void selectDuplicateCandidate(candidate)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    void selectDuplicateCandidate(candidate);
+                                  }
+                                }}
+                                role="button"
+                                tabIndex={0}
                               >
-                                <Check size={16} />
-                              </IconButton>
-                              <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
-                                <ExternalLink size={16} />
-                              </IconButton>
+                                <div>
+                                  <strong>{candidate.confidenceScore === 1 ? "Exact duplicate group" : "Review duplicate group"}</strong>
+                                  <span>{formatCount(candidate.files)} copies, {formatBytes(candidate.size)} each</span>
+                                </div>
+                                <strong>{formatBytes(candidate.reclaimableBytes)}</strong>
+                                <small className={`confidence-pill ${candidate.confidenceScore === 1 ? "safe" : "medium"}`}>
+                                  {candidate.confidenceScore === 1 ? "Safe" : `${Math.round((candidate.confidenceScore ?? 0) * 100)}%`}
+                                </small>
+                                <span className="duplicate-actions">
+                                  <IconButton title="Stage exact duplicate review" onClick={(event) => void stageDuplicateAction(candidate, event)}>
+                                    <CopyCheck size={16} />
+                                  </IconButton>
+                                </span>
+                              </div>
+                            ))}
+                          </ScrollableRows>
+                        </div>
+                        <div className="duplicate-detail-panel">
+                          {selectedDuplicateCandidate ? (
+                            <>
+                              <div className="duplicate-detail-header">
+                                <div>
+                                  <strong>{selectedDuplicateCandidate.confidenceScore === 1 ? "Exact duplicate group" : "Review duplicate group"}</strong>
+                                  <span>{formatCount(selectedDuplicateCandidate.files)} copies, {formatBytes(selectedDuplicateCandidate.size)} each</span>
+                                </div>
+                                <div className="duplicate-detail-actions">
+                                  <small className={`confidence-pill ${selectedDuplicateCandidate.confidenceScore === 1 ? "safe" : "medium"}`}>
+                                    {selectedDuplicateCandidate.confidenceScore === 1 ? "Safe" : `${Math.round((selectedDuplicateCandidate.confidenceScore ?? 0) * 100)}%`}
+                                  </small>
+                                  <IconButton title="Stage this duplicate review" onClick={() => void stageDuplicateAction(selectedDuplicateCandidate)}>
+                                    <CopyCheck size={16} />
+                                  </IconButton>
+                                </div>
+                              </div>
+                              <div className="duplicate-detail-metrics">
+                                <div>
+                                  <span>Reclaimable</span>
+                                  <strong>{formatBytes(selectedDuplicateCandidate.reclaimableBytes)}</strong>
+                                </div>
+                                <div>
+                                  <span>Group id</span>
+                                  <strong>{selectedDuplicateCandidate.id ?? formatBytes(selectedDuplicateCandidate.size)}</strong>
+                                </div>
+                              </div>
+                              <div className="duplicate-detail-files">
+                                <div className="duplicate-detail-list-header" aria-hidden="true">
+                                  <span>File</span>
+                                  <span>Size</span>
+                                  <span>Modified</span>
+                                  <span>Keep</span>
+                                  <span>Open</span>
+                                </div>
+                                {duplicateFiles.length === 0 ? (
+                                  <div className="empty-state compact">Select this group again to load file details.</div>
+                                ) : (
+                                  <ScrollableRows compact>
+                                    {duplicateFiles.map((file) => (
+                                      <div className="folder-row file-row duplicate-detail-row" key={file.path}>
+                                        <span>{file.path}</span>
+                                        <strong>{formatBytes(file.size)}</strong>
+                                        <small>{file.modified_at ? formatDate(file.modified_at) : "-"}</small>
+                                        <IconButton
+                                          disabled={!canStageSelectedDuplicateKeep()}
+                                          title="Keep this copy when staging duplicate cleanup"
+                                          onClick={() => stageSelectedDuplicateKeep(file)}
+                                        >
+                                          <Check size={16} />
+                                        </IconButton>
+                                        <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
+                                          <ExternalLink size={16} />
+                                        </IconButton>
+                                      </div>
+                                    ))}
+                                  </ScrollableRows>
+                                )}
+                                {selectedDuplicateCandidate.files > duplicateFiles.length && (
+                                  <span className="duplicate-detail-footnote">
+                                    Showing {formatCount(duplicateFiles.length)} of {formatCount(selectedDuplicateCandidate.files)} files.
+                                  </span>
+                                )}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="empty-state compact">Select a duplicate group to review its files.</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                )}
+
+                {showReviewQueue && (
+                  <section className="folder-table">
+                    <div className="panel-header">
+                      <h2>Review Queue</h2>
+                      <span>{formatCount(stagedActions.length)} staged reviews</span>
+                    </div>
+                    {stagedActions.length === 0 ? (
+                      <div className="empty-state compact">No staged reviews. Add duplicate groups here first; no files are changed from this queue.</div>
+                    ) : (
+                      <>
+                        <div className="stage-summary">
+                          <strong>{formatBytes(stagedActions.reduce((sum, action) => sum + action.bytes, 0))}</strong>
+                          <span>reclaimable if committed later</span>
+                          <IconButton title="Undo last staged action" onClick={() => setStagedActions((current) => current.slice(0, -1))}>
+                            <Undo2 size={16} />
+                          </IconButton>
+                          <IconButton title="Clear staged actions" onClick={() => setStagedActions([])}>
+                            <X size={16} />
+                          </IconButton>
+                          <IconButton
+                            className="danger-text"
+                            disabled={!nativeRuntime || !isWindowsRuntime || committingActions || actionableStagedActions.length === 0}
+                            title={isWindowsRuntime ? "Commit safe recycle actions" : "Recycle Bin commits are Windows-only"}
+                            onClick={() => void commitStagedActions()}
+                          >
+                            <Trash2 size={16} />
+                          </IconButton>
+                        </div>
+                        <ScrollableRows compact>
+                          {stagedActions.map((action) => (
+                            <div className="staged-row" key={action.id}>
+                              <div className="staged-main">
+                                <strong>{action.label}</strong>
+                                <span>{action.reason}</span>
+                                <div className="why-panel">
+                                  <small>Why this suggestion?</small>
+                                  {action.evidence.map((item) => (
+                                    <span key={item}>{item}</span>
+                                  ))}
+                                  <strong>{action.suggestedAction}</strong>
+                                </div>
+                              </div>
+                              <small className={`confidence-pill ${confidenceClass(action.confidence)}`}>{action.confidence}</small>
+                              <strong>{formatBytes(action.bytes)}</strong>
                             </div>
                           ))}
                         </ScrollableRows>
-                      )}
-                      {selectedDuplicateCandidate.files > duplicateFiles.length && (
-                        <span className="duplicate-detail-footnote">
-                          Showing {formatCount(duplicateFiles.length)} of {formatCount(selectedDuplicateCandidate.files)} files.
-                        </span>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div className="empty-state compact">Select a duplicate group to review its files.</div>
+                      </>
+                    )}
+                  </section>
                 )}
-              </div>
-            </div>
-          )}
-        </section>
-
-        <section className="folder-table">
-          <div className="panel-header">
-            <h2>Review Queue</h2>
-            <span>{formatCount(stagedActions.length)} staged reviews</span>
-          </div>
-          {stagedActions.length === 0 ? (
-            <div className="empty-state compact">No staged reviews. Add duplicate groups here first; no files are changed from this queue.</div>
-          ) : (
-            <>
-              <div className="stage-summary">
-                <strong>{formatBytes(stagedActions.reduce((sum, action) => sum + action.bytes, 0))}</strong>
-                <span>reclaimable if committed later</span>
-                <IconButton title="Undo last staged action" onClick={() => setStagedActions((current) => current.slice(0, -1))}>
-                  <Undo2 size={16} />
-                </IconButton>
-                <IconButton title="Clear staged actions" onClick={() => setStagedActions([])}>
-                  <X size={16} />
-                </IconButton>
-                <IconButton
-                  className="danger-text"
-                  disabled={!nativeRuntime || committingActions || actionableStagedActions.length === 0}
-                  title="Commit safe recycle actions"
-                  onClick={() => void commitStagedActions()}
-                >
-                  <Trash2 size={16} />
-                </IconButton>
-              </div>
-              <ScrollableRows compact>
-                {stagedActions.map((action) => (
-                  <div className="staged-row" key={action.id}>
-                    <div className="staged-main">
-                      <strong>{action.label}</strong>
-                      <span>{action.reason}</span>
-                      <div className="why-panel">
-                        <small>Why this suggestion?</small>
-                        {action.evidence.map((item) => (
-                          <span key={item}>{item}</span>
-                        ))}
-                        <strong>{action.suggestedAction}</strong>
-                      </div>
-                    </div>
-                    <small className={`confidence-pill ${confidenceClass(action.confidence)}`}>{action.confidence}</small>
-                    <strong>{formatBytes(action.bytes)}</strong>
-                  </div>
-                ))}
-              </ScrollableRows>
-            </>
-          )}
-        </section>
-        </>
-        ) : (
-        <section className="folder-table" id="index-library">
-          <div className="panel-header">
-            <h2>Index Library</h2>
-            <span><Database size={14} /> {nativeRuntime ? `${formatCount(savedIndexes.length)} local indexes` : "Desktop app only"}</span>
-          </div>
-          {!nativeRuntime ? (
-            <div className="empty-state compact">Local indexes are available in the desktop app.</div>
-          ) : savedIndexes.length === 0 ? (
-            <div className="empty-state compact">Scanned folders will appear here for revisiting, rescanning, or removing their local index.</div>
-          ) : (
-            <>
-              <div className="index-summary-grid">
-                <div>
-                  <span>Total indexed</span>
-                  <strong>{formatBytes(savedIndexes.reduce((sum, entry) => sum + entry.bytes_scanned, 0))}</strong>
-                </div>
-                <div>
-                  <span>Files tracked</span>
-                  <strong>{formatCount(savedIndexes.reduce((sum, entry) => sum + entry.files_scanned, 0))}</strong>
-                </div>
-                <div>
-                  <span>Latest scan</span>
-                  <strong>{formatIndexDate(savedIndexes[0]?.last_scanned_at)}</strong>
-                </div>
-              </div>
-              <ScrollableRows compact>
-                {savedIndexes.map((entry) => (
-                  <div className={`index-row ${currentIndexPath === entry.index_path ? "active" : ""}`} key={entry.index_path}>
-                    <div>
-                      <strong>{entry.root_path ?? "Unknown root"}</strong>
-                      <span>{entry.index_path}</span>
-                      <div className="index-meta">
-                        <small>{entry.last_status ?? "unknown"}</small>
-                        <small>{formatIndexDate(entry.last_scanned_at)}</small>
-                        <small>{formatBytes(entry.bytes_scanned)}</small>
-                        <small>{formatCount(entry.files_scanned)} files</small>
-                      </div>
-                    </div>
-                    <div className="index-actions">
-                      <IconButton title="View saved index" onClick={() => void openSavedIndex(entry)}>
-                        <Eye size={16} />
-                      </IconButton>
-                      <IconButton title="Rescan folder" onClick={() => void rescanSavedIndex(entry)}>
-                        <RotateCw size={16} />
-                      </IconButton>
-                      <IconButton className="danger-text" title="Delete saved index" onClick={() => void removeSavedIndex(entry)}>
-                        <Trash2 size={16} />
-                      </IconButton>
-                    </div>
-                  </div>
-                ))}
-              </ScrollableRows>
-            </>
-          )}
-        </section>
-        )}
-      </section>
-    </main>
-  );
-
-  async function selectDuplicateCandidate(candidate: ScanState["duplicateCandidates"][number]) {
-    setSelectedDuplicateGroup(candidate.id ?? null);
     setDuplicateFiles([]);
     if (!candidate.id || !currentIndexPath) {
       return;
