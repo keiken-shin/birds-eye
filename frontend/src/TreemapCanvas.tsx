@@ -33,6 +33,8 @@ export function TreemapCanvas({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const rectsRef = useRef<Rect[]>([]);
+  const filmstripCacheRef = useRef(new Map<string, FileStats[]>());
+  const filmstripCacheLimit = 18;
   const [size, setSize] = useState({ width: 800, height: 428 });
   const [hover, setHover] = useState<HoverState | null>(null);
 
@@ -67,6 +69,33 @@ export function TreemapCanvas({
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     drawTreemap(context, rects, size.width, size.height);
   }, [rects, size.height, size.width]);
+
+  useEffect(() => {
+    filmstripCacheRef.current.clear();
+  }, [files]);
+
+  const hoveredPath = hover?.folder.path ?? null;
+  const filmstripSamples = useMemo(() => {
+    if (!hoveredPath) return [];
+    const cache = filmstripCacheRef.current;
+    const cached = cache.get(hoveredPath);
+    if (cached) {
+      cache.delete(hoveredPath);
+      cache.set(hoveredPath, cached);
+      return cached;
+    }
+
+    const samples = files
+      .filter((file) => (file.category === "photos" || file.category === "videos") && isPathInsideFolder(file.path, hoveredPath))
+      .sort((a, b) => b.modified - a.modified)
+      .slice(0, 4);
+    cache.set(hoveredPath, samples);
+    if (cache.size > filmstripCacheLimit) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey) cache.delete(oldestKey);
+    }
+    return samples;
+  }, [files, hoveredPath]);
 
   if (folders.length === 0) {
     return <div className="treemap-empty">No indexed folders yet</div>;
@@ -104,7 +133,7 @@ export function TreemapCanvas({
           <span>{formatBytes(hover.folder.displayBytes)}</span>
           <span>{hover.folder.files.toLocaleString()} files</span>
           <FolderCategoryMix folder={hover.folder} />
-          <FolderFilmstrip files={files} folder={hover.folder.path} nativeRuntime={nativeRuntime} />
+          <FolderFilmstrip samples={filmstripSamples} nativeRuntime={nativeRuntime} />
         </div>
       )}
     </div>
@@ -134,14 +163,7 @@ function FolderCategoryMix({ folder }: { folder: TreemapFolder }) {
   );
 }
 
-function FolderFilmstrip({ files, folder, nativeRuntime }: { files: FileStats[]; folder: string; nativeRuntime: boolean }) {
-  const samples = useMemo(() => {
-    return files
-      .filter((file) => (file.category === "photos" || file.category === "videos") && isPathInsideFolder(file.path, folder))
-      .sort((a, b) => b.modified - a.modified)
-      .slice(0, 4);
-  }, [files, folder]);
-
+function FolderFilmstrip({ samples, nativeRuntime }: { samples: FileStats[]; nativeRuntime: boolean }) {
   if (samples.length === 0) {
     return null;
   }
