@@ -96,4 +96,3 @@ pub enum ScanEvent {
     Finished(ScanReport),
     Cancelled(ScanStats),
 }
-

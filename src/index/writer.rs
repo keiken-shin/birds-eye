@@ -2,7 +2,7 @@ use crate::index::schema::ALL_MIGRATIONS;
 use crate::scanner::{FileRecord, FolderRecord, ScanEvent, ScanStats};
 use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -108,6 +108,12 @@ pub struct FolderMediaSummary {
     pub total_bytes: i64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PathRefreshSummary {
+    pub refreshed: usize,
+    pub deleted: usize,
+}
+
 impl IndexWriter {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, IndexError> {
         let connection = Connection::open(path)?;
@@ -159,6 +165,52 @@ impl IndexWriter {
         &self.connection
     }
 
+    pub fn refresh_paths(&mut self, paths: &[PathBuf]) -> Result<PathRefreshSummary, IndexError> {
+        let mut summary = PathRefreshSummary::default();
+        let refreshed_at = now_millis();
+        self.active_scan_started_at = Some(refreshed_at);
+
+        for path in paths {
+            match fs::metadata(path) {
+                Ok(metadata) if metadata.is_file() => {
+                    let record = FileRecord {
+                        parent: path.parent().unwrap_or(path).to_path_buf(),
+                        name: path
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path_to_string(path)),
+                        extension: path
+                            .extension()
+                            .and_then(|extension| extension.to_str())
+                            .map(|extension| extension.to_ascii_lowercase()),
+                        path: path.to_path_buf(),
+                        size: metadata.len(),
+                        modified: metadata.modified().ok(),
+                        accessed: metadata.accessed().ok(),
+                        created: metadata.created().ok(),
+                    };
+                    self.index_file(&record)?;
+                    summary.refreshed += 1;
+                }
+                _ => {
+                    let changed = self.connection.execute(
+                        "UPDATE files SET deleted_at = ?1 WHERE path = ?2 AND deleted_at IS NULL",
+                        params![refreshed_at, path_to_string(path)],
+                    )?;
+                    summary.deleted += changed;
+                }
+            }
+        }
+
+        self.recompute_folder_rollups()?;
+        self.rebuild_extension_stats()?;
+        self.update_partial_hashes_for_duplicate_candidates()?;
+        self.update_full_hashes_for_partial_matches()?;
+        self.rebuild_duplicate_size_groups()?;
+        self.active_scan_started_at = None;
+        Ok(summary)
+    }
+
     pub fn largest_folders(&self, limit: usize) -> Result<Vec<FolderSummary>, IndexError> {
         let mut statement = self.connection.prepare(
             "SELECT path, total_files, total_bytes
@@ -197,7 +249,11 @@ impl IndexWriter {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    pub fn search_files(&self, query: &str, limit: usize) -> Result<Vec<FileSearchResult>, IndexError> {
+    pub fn search_files(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<FileSearchResult>, IndexError> {
         self.search_files_with_filters(
             FileSearchFilters {
                 query: query.to_owned(),
@@ -235,12 +291,23 @@ impl IndexWriter {
             values.push(Value::Text(format!("%{escaped_query}%")));
         }
 
-        if let Some(extension) = filters.extension.filter(|extension| !extension.trim().is_empty()) {
+        if let Some(extension) = filters
+            .extension
+            .filter(|extension| !extension.trim().is_empty())
+        {
             sql.push_str(" AND extension = ?");
-            values.push(Value::Text(extension.trim().trim_start_matches('.').to_ascii_lowercase()));
+            values.push(Value::Text(
+                extension
+                    .trim()
+                    .trim_start_matches('.')
+                    .to_ascii_lowercase(),
+            ));
         }
 
-        if let Some(media_kind) = filters.media_kind.filter(|media_kind| !media_kind.trim().is_empty()) {
+        if let Some(media_kind) = filters
+            .media_kind
+            .filter(|media_kind| !media_kind.trim().is_empty())
+        {
             sql.push_str(" AND media_kind = ?");
             values.push(Value::Text(media_kind));
         }
@@ -310,7 +377,11 @@ impl IndexWriter {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    pub fn duplicate_group_files(&self, group_id: i64, limit: usize) -> Result<Vec<DuplicateFileSummary>, IndexError> {
+    pub fn duplicate_group_files(
+        &self,
+        group_id: i64,
+        limit: usize,
+    ) -> Result<Vec<DuplicateFileSummary>, IndexError> {
         let mut statement = self.connection.prepare(
             "SELECT files.path, files.size, files.modified_at
              FROM duplicate_group_files dgf
@@ -356,8 +427,10 @@ impl IndexWriter {
         Ok(files)
     }
 
-
-    pub fn duplicate_overlaps(&self, limit: usize) -> Result<Vec<DuplicateOverlapSummary>, IndexError> {
+    pub fn duplicate_overlaps(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<DuplicateOverlapSummary>, IndexError> {
         let mut statement = self.connection.prepare(
             "WITH group_folders AS (
                SELECT dgf.group_id, files.folder_id, folders.path AS folder_path, COUNT(*) AS file_count
@@ -415,7 +488,10 @@ impl IndexWriter {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    pub fn folder_media_summaries(&self, limit: usize) -> Result<Vec<FolderMediaSummary>, IndexError> {
+    pub fn folder_media_summaries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<FolderMediaSummary>, IndexError> {
         let mut statement = self.connection.prepare(
             "SELECT f.path, files.media_kind, COALESCE(SUM(files.size), 0) AS total_bytes
              FROM files
@@ -496,7 +572,12 @@ impl IndexWriter {
              WHERE deleted_at IS NULL
                AND indexed_at < ?2
                AND (path = ?3 OR path LIKE ?4)",
-            params![now_millis(), started_at, root_text, format!("{root_prefix}%")],
+            params![
+                now_millis(),
+                started_at,
+                root_text,
+                format!("{root_prefix}%")
+            ],
         )?;
         Ok(())
     }
@@ -885,8 +966,8 @@ fn classify_media_kind(extension: Option<&str>) -> &'static str {
         "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" => "archive",
         "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "txt" | "md" | "csv"
         | "epub" => "document",
-        "rs" | "js" | "tsx" | "jsx" | "py" | "go" | "java" | "cs" | "cpp" | "c"
-        | "html" | "css" | "json" => "code",
+        "rs" | "js" | "tsx" | "jsx" | "py" | "go" | "java" | "cs" | "cpp" | "c" | "html"
+        | "css" | "json" => "code",
         "exe" | "msi" | "dmg" | "pkg" | "deb" | "rpm" | "appimage" => "installer",
         "safetensors" | "ckpt" | "pt" | "pth" | "onnx" | "gguf" => "model",
         _ => "other",
@@ -989,15 +1070,21 @@ mod tests {
             .expect("failed to count files");
         let session_status: String = writer
             .connection()
-            .query_row("SELECT status FROM scan_sessions LIMIT 1", [], |row| row.get(0))
+            .query_row("SELECT status FROM scan_sessions LIMIT 1", [], |row| {
+                row.get(0)
+            })
             .expect("failed to read session");
         let timeline_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM timeline_history", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM timeline_history", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count timeline rows");
         let duplicate_group_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate groups");
         let root_total_bytes: i64 = writer
             .connection()
@@ -1040,7 +1127,9 @@ mod tests {
 
         let duplicate_group_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate groups");
         let duplicate_group_id: i64 = writer
             .connection()
@@ -1048,19 +1137,31 @@ mod tests {
             .expect("failed to read duplicate group id");
         let duplicate_file_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_group_files", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_group_files", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate files");
         let reclaimable_bytes: i64 = writer
             .connection()
-            .query_row("SELECT reclaimable_bytes FROM duplicate_groups", [], |row| row.get(0))
+            .query_row(
+                "SELECT reclaimable_bytes FROM duplicate_groups",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to read reclaimable bytes");
         let confidence: f64 = writer
             .connection()
-            .query_row("SELECT confidence FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT confidence FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to read confidence");
         let full_hashes: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM files WHERE full_hash IS NOT NULL", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE full_hash IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to count full hashes");
 
         assert_eq!(duplicate_group_count, 1);
@@ -1099,11 +1200,17 @@ mod tests {
 
         let duplicate_group_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate groups");
         let full_hashes: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM files WHERE full_hash IS NOT NULL", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE full_hash IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to count full hashes");
 
         assert_eq!(duplicate_group_count, 0);
@@ -1123,11 +1230,17 @@ mod tests {
 
         let duplicate_group_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate groups");
         let hashed_files: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM files WHERE partial_hash IS NOT NULL", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE partial_hash IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to count hashed files");
 
         assert_eq!(duplicate_group_count, 0);
@@ -1152,19 +1265,33 @@ mod tests {
 
         let active_files: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM files WHERE deleted_at IS NULL", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to count active files");
         let deleted_files: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM files WHERE deleted_at IS NOT NULL", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE deleted_at IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to count deleted files");
         let duplicate_groups: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate groups");
         let extension_file_count: i64 = writer
             .connection()
-            .query_row("SELECT file_count FROM extension_stats WHERE extension = 'bin'", [], |row| row.get(0))
+            .query_row(
+                "SELECT file_count FROM extension_stats WHERE extension = 'bin'",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to read extension stats");
         let root_total_bytes: i64 = writer
             .connection()
@@ -1213,10 +1340,20 @@ mod tests {
 
         assert_eq!(folders.first().map(|folder| folder.total_bytes), Some(160));
         assert_eq!(files.first().map(|file| file.size), Some(128));
-        assert_eq!(extensions.first().map(|extension| extension.extension.as_str()), Some("mp4"));
+        assert_eq!(
+            extensions
+                .first()
+                .map(|extension| extension.extension.as_str()),
+            Some("mp4")
+        );
         assert!(duplicates.is_empty());
-        assert_eq!(media.first().map(|summary| summary.media_kind.as_str()), Some("video"));
-        assert!(folder_media.iter().any(|summary| summary.media_kind == "video"));
+        assert_eq!(
+            media.first().map(|summary| summary.media_kind.as_str()),
+            Some("video")
+        );
+        assert!(folder_media
+            .iter()
+            .any(|summary| summary.media_kind == "video"));
         cleanup(&root);
     }
 
@@ -1235,8 +1372,14 @@ mod tests {
         let by_path = writer.search_files("photos", 10).expect("search by path");
         let empty = writer.search_files("   ", 10).expect("empty search");
 
-        assert_eq!(by_name.first().map(|file| file.name.as_str()), Some("vacation.raw"));
-        assert_eq!(by_name.first().map(|file| file.media_kind.as_str()), Some("photo"));
+        assert_eq!(
+            by_name.first().map(|file| file.name.as_str()),
+            Some("vacation.raw")
+        );
+        assert_eq!(
+            by_name.first().map(|file| file.media_kind.as_str()),
+            Some("photo")
+        );
         assert_eq!(by_path.len(), 1);
         assert!(empty.is_empty());
         cleanup(&root);

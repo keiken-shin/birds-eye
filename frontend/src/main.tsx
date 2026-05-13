@@ -51,6 +51,7 @@ import {
   queryNativeIndex,
   queryNativeDuplicateFiles,
   recycleNativeFiles,
+  refreshNativeIndexPaths,
   revealNativePath,
   searchNativeIndex,
   startNativeScan,
@@ -1228,9 +1229,10 @@ function App() {
       setSelectedDuplicateGroup(null);
       if (currentIndexPath) {
         try {
+          const refresh = await refreshNativeIndexPaths(currentIndexPath, paths);
           const overview = await queryNativeIndex(currentIndexPath, 1000);
           setScan((current) => mergeNativeOverview(current, overview));
-          setRuntimeMessage(`Moved ${formatCount(result.moved)} duplicate files to the Recycle Bin. Index refreshed.`);
+          setRuntimeMessage(`Moved ${formatCount(result.moved)} duplicate files to the Recycle Bin. Refreshed ${formatCount(refresh.deleted + refresh.refreshed)} changed index paths.`);
         } catch (error) {
           setRuntimeMessage(error instanceof Error
             ? error.message

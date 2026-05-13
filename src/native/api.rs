@@ -18,6 +18,12 @@ pub struct ScanToIndexResponse {
     pub bytes_scanned: u64,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct RefreshIndexPathsResponse {
+    pub refreshed: usize,
+    pub deleted: usize,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct IndexQueryRequest {
     pub index_path: PathBuf,
@@ -41,6 +47,12 @@ pub struct DuplicateGroupFilesRequest {
     pub index_path: PathBuf,
     pub group_id: i64,
     pub limit: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RefreshIndexPathsRequest {
+    pub index_path: PathBuf,
+    pub paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -271,7 +283,11 @@ pub fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultD
     } else {
         None
     };
-    let query = if use_regex { String::new() } else { request.query };
+    let query = if use_regex {
+        String::new()
+    } else {
+        request.query
+    };
     let limit = if use_regex {
         request.limit.saturating_mul(50).max(request.limit)
     } else {
@@ -326,6 +342,20 @@ pub fn duplicate_group_files(
         .collect::<Vec<_>>();
 
     Ok(results)
+}
+
+pub fn refresh_index_paths(
+    request: RefreshIndexPathsRequest,
+) -> Result<RefreshIndexPathsResponse, String> {
+    let mut writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    let summary = writer
+        .refresh_paths(&request.paths)
+        .map_err(|error| format!("{error:?}"))?;
+
+    Ok(RefreshIndexPathsResponse {
+        refreshed: summary.refreshed,
+        deleted: summary.deleted,
+    })
 }
 
 pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
@@ -467,7 +497,10 @@ mod tests {
         .expect("filtered regex search command failed");
 
         assert_eq!(results.len(), 1);
-        assert_eq!(results.first().map(|file| file.name.as_str()), Some("clip-2024.mp4"));
+        assert_eq!(
+            results.first().map(|file| file.name.as_str()),
+            Some("clip-2024.mp4")
+        );
         cleanup(&root);
     }
 
@@ -506,6 +539,49 @@ mod tests {
         cleanup(&root);
     }
 
+    #[test]
+    fn command_shaped_refresh_index_paths_removes_deleted_duplicate() {
+        let root = test_root("native-refresh-paths");
+        let index_path = root.join("index.sqlite");
+        let data = root.join("data");
+        let keep = data.join("keep.bin");
+        let remove = data.join("remove.bin");
+        fs::create_dir_all(&data).expect("failed to create folders");
+        write_file(&keep, &[1; 48]);
+        write_file(&remove, &[1; 48]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: data.clone(),
+            index_path: index_path.clone(),
+        })
+        .expect("scan command failed");
+        fs::remove_file(&remove).expect("failed to remove duplicate");
+
+        let refresh = refresh_index_paths(RefreshIndexPathsRequest {
+            index_path: index_path.clone(),
+            paths: vec![remove],
+        })
+        .expect("refresh paths command failed");
+        let overview = query_index_overview(IndexQueryRequest {
+            index_path,
+            limit: 5,
+        })
+        .expect("query command failed");
+
+        assert_eq!(refresh.deleted, 1);
+        assert_eq!(overview.files.len(), 1);
+        assert_eq!(
+            overview.files.first().map(|file| file.path.as_str()),
+            Some(path_to_str(&keep))
+        );
+        assert!(overview.duplicate_groups.is_empty());
+        assert_eq!(
+            overview.folders.first().map(|folder| folder.total_bytes),
+            Some(48)
+        );
+        cleanup(&root);
+    }
+
     fn test_root(name: &str) -> PathBuf {
         let root = std::env::current_dir()
             .expect("failed to get current dir")
@@ -532,5 +608,9 @@ mod tests {
         if root.exists() {
             fs::remove_dir_all(root).expect("failed to remove test folder");
         }
+    }
+
+    fn path_to_str(path: &std::path::Path) -> &str {
+        path.to_str().expect("test paths should be valid utf-8")
     }
 }

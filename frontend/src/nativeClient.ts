@@ -144,6 +144,15 @@ export async function queryNativeDuplicateFiles(indexPath: string, groupId: numb
   });
 }
 
+export async function refreshNativeIndexPaths(indexPath: string, paths: string[]) {
+  return invoke<{ refreshed: number; deleted: number }>("refresh_index_paths", {
+    request: {
+      index_path: indexPath,
+      paths,
+    },
+  });
+}
+
 export async function listNativeIndexes() {
   return invoke<NativeIndexEntry[]>("list_indexes");
 }

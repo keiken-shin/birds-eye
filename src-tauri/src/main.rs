@@ -1,9 +1,10 @@
 use birds_eye::native::api::{
-    index_metadata,
+    index_metadata, refresh_index_paths as refresh_native_index_paths,
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
     search_files as search_index_files, DuplicateFileSummaryDto, DuplicateGroupFilesRequest,
-    FileSearchResultDto, IndexMetadataDto, IndexOverviewDto, IndexQueryRequest, ScanToIndexRequest,
-    ScanToIndexResponse, SearchFilesRequest,
+    FileSearchResultDto, IndexMetadataDto, IndexOverviewDto, IndexQueryRequest,
+    RefreshIndexPathsRequest, RefreshIndexPathsResponse, ScanToIndexRequest, ScanToIndexResponse,
+    SearchFilesRequest,
 };
 use birds_eye::native::{
     JobEventDto, JobStatusDto, ScanJobManager, StartScanJobRequest, StartScanJobResponse,
@@ -46,6 +47,13 @@ fn duplicate_group_files(
     request: DuplicateGroupFilesRequest,
 ) -> Result<Vec<DuplicateFileSummaryDto>, String> {
     query_duplicate_group_files(request)
+}
+
+#[tauri::command]
+fn refresh_index_paths(
+    request: RefreshIndexPathsRequest,
+) -> Result<RefreshIndexPathsResponse, String> {
+    refresh_native_index_paths(request)
 }
 
 #[tauri::command]
@@ -276,6 +284,7 @@ fn main() {
             query_index,
             search_files,
             duplicate_group_files,
+            refresh_index_paths,
             list_indexes,
             delete_index,
             reveal_path,
