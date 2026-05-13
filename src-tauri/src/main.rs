@@ -1,10 +1,11 @@
 use birds_eye::native::api::{
     index_metadata, refresh_index_paths as refresh_native_index_paths,
+    validate_cleanup_files as validate_native_cleanup_files,
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
     search_files as search_index_files, DuplicateFileSummaryDto, DuplicateGroupFilesRequest,
     FileSearchResultDto, IndexMetadataDto, IndexOverviewDto, IndexQueryRequest,
     RefreshIndexPathsRequest, RefreshIndexPathsResponse, ScanToIndexRequest, ScanToIndexResponse,
-    SearchFilesRequest,
+    SearchFilesRequest, ValidateCleanupFilesRequest, ValidateCleanupFilesResponse,
 };
 use birds_eye::native::{
     JobEventDto, JobStatusDto, ScanJobManager, StartScanJobRequest, StartScanJobResponse,
@@ -54,6 +55,13 @@ fn refresh_index_paths(
     request: RefreshIndexPathsRequest,
 ) -> Result<RefreshIndexPathsResponse, String> {
     refresh_native_index_paths(request)
+}
+
+#[tauri::command]
+fn validate_cleanup_files(
+    request: ValidateCleanupFilesRequest,
+) -> Result<ValidateCleanupFilesResponse, String> {
+    validate_native_cleanup_files(request)
 }
 
 #[tauri::command]
@@ -285,6 +293,7 @@ fn main() {
             search_files,
             duplicate_group_files,
             refresh_index_paths,
+            validate_cleanup_files,
             list_indexes,
             delete_index,
             reveal_path,

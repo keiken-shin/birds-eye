@@ -74,15 +74,25 @@ pub struct DuplicateGroupSummary {
     pub id: i64,
     pub size: i64,
     pub file_count: i64,
+    pub folder_count: i64,
+    pub dominant_media_kind: String,
     pub reclaimable_bytes: i64,
     pub confidence: f64,
+    pub cleanup_score: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DuplicateFileSummary {
+    pub id: i64,
     pub path: String,
+    pub name: String,
+    pub folder_path: String,
     pub size: i64,
     pub modified_at: Option<i64>,
+    pub extension: Option<String>,
+    pub media_kind: String,
+    pub hash_match_type: String,
+    pub confidence: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -358,11 +368,52 @@ impl IndexWriter {
 
     pub fn duplicate_groups(&self, limit: usize) -> Result<Vec<DuplicateGroupSummary>, IndexError> {
         let mut statement = self.connection.prepare(
-            "SELECT dg.id, dg.size, COUNT(dgf.file_id), dg.reclaimable_bytes, dg.confidence
-             FROM duplicate_groups dg
-             JOIN duplicate_group_files dgf ON dgf.group_id = dg.id
-             GROUP BY dg.id
-             ORDER BY dg.reclaimable_bytes DESC
+            "WITH group_stats AS (
+               SELECT
+                 dg.id,
+                 dg.size,
+                 COUNT(dgf.file_id) AS file_count,
+                 COUNT(DISTINCT files.folder_id) AS folder_count,
+                 COALESCE((
+                   SELECT f2.media_kind
+                   FROM duplicate_group_files dgf2
+                   JOIN files f2 ON f2.id = dgf2.file_id
+                   WHERE dgf2.group_id = dg.id AND f2.deleted_at IS NULL
+                   GROUP BY f2.media_kind
+                   ORDER BY COUNT(*) DESC, SUM(f2.size) DESC, f2.media_kind
+                   LIMIT 1
+                 ), 'other') AS dominant_media_kind,
+                 dg.reclaimable_bytes,
+                 dg.confidence
+               FROM duplicate_groups dg
+               JOIN duplicate_group_files dgf ON dgf.group_id = dg.id
+               JOIN files ON files.id = dgf.file_id
+               WHERE files.deleted_at IS NULL
+               GROUP BY dg.id
+             )
+             SELECT
+               id,
+               size,
+               file_count,
+               folder_count,
+               dominant_media_kind,
+               reclaimable_bytes,
+               confidence,
+               CAST(reclaimable_bytes AS REAL)
+                 * CASE
+                     WHEN confidence >= 1.0 THEN 1.25
+                     WHEN confidence >= 0.65 THEN 1.05
+                     ELSE 0.75
+                   END
+                 * CASE dominant_media_kind
+                     WHEN 'video' THEN 1.15
+                     WHEN 'photo' THEN 1.08
+                     WHEN 'music' THEN 1.04
+                     ELSE 1.0
+                   END
+                 + (CAST(folder_count AS REAL) * CAST(size AS REAL) * 0.05) AS cleanup_score
+             FROM group_stats
+             ORDER BY cleanup_score DESC, reclaimable_bytes DESC
              LIMIT ?1",
         )?;
         let rows = statement.query_map(params![limit as i64], |row| {
@@ -370,8 +421,11 @@ impl IndexWriter {
                 id: row.get(0)?,
                 size: row.get(1)?,
                 file_count: row.get(2)?,
-                reclaimable_bytes: row.get(3)?,
-                confidence: row.get(4)?,
+                folder_count: row.get(3)?,
+                dominant_media_kind: row.get(4)?,
+                reclaimable_bytes: row.get(5)?,
+                confidence: row.get(6)?,
+                cleanup_score: row.get(7)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -383,18 +437,40 @@ impl IndexWriter {
         limit: usize,
     ) -> Result<Vec<DuplicateFileSummary>, IndexError> {
         let mut statement = self.connection.prepare(
-            "SELECT files.path, files.size, files.modified_at
+            "SELECT files.id,
+                    files.path,
+                    files.name,
+                    folders.path,
+                    files.size,
+                    files.modified_at,
+                    files.extension,
+                    files.media_kind,
+                    CASE
+                      WHEN dg.full_hash IS NOT NULL THEN 'full hash'
+                      WHEN dg.partial_hash IS NOT NULL THEN 'partial hash'
+                      ELSE 'size'
+                    END AS hash_match_type,
+                    dg.confidence
              FROM duplicate_group_files dgf
              JOIN files ON files.id = dgf.file_id
+             JOIN folders ON folders.id = files.folder_id
+             JOIN duplicate_groups dg ON dg.id = dgf.group_id
              WHERE dgf.group_id = ?1 AND files.deleted_at IS NULL
              ORDER BY files.path
              LIMIT ?2",
         )?;
         let rows = statement.query_map(params![group_id, limit as i64], |row| {
             Ok(DuplicateFileSummary {
-                path: row.get(0)?,
-                size: row.get(1)?,
-                modified_at: row.get(2)?,
+                id: row.get(0)?,
+                path: row.get(1)?,
+                name: row.get(2)?,
+                folder_path: row.get(3)?,
+                size: row.get(4)?,
+                modified_at: row.get(5)?,
+                extension: row.get(6)?,
+                media_kind: row.get(7)?,
+                hash_match_type: row.get(8)?,
+                confidence: row.get(9)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)

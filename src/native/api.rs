@@ -3,7 +3,9 @@ use crate::scanner::{ScanEvent, ScanOptions, Scanner};
 use regex::Regex;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::PathBuf;
+use std::time::UNIX_EPOCH;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScanToIndexRequest {
@@ -55,6 +57,31 @@ pub struct RefreshIndexPathsRequest {
     pub paths: Vec<PathBuf>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct CleanupFileExpectation {
+    pub path: PathBuf,
+    pub size: i64,
+    pub modified_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ValidateCleanupFilesRequest {
+    pub files: Vec<CleanupFileExpectation>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CleanupFileValidationResult {
+    pub path: PathBuf,
+    pub status: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ValidateCleanupFilesResponse {
+    pub can_commit: bool,
+    pub results: Vec<CleanupFileValidationResult>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct FolderSummaryDto {
     pub path: String,
@@ -93,15 +120,25 @@ pub struct DuplicateGroupSummaryDto {
     pub id: i64,
     pub size: i64,
     pub file_count: i64,
+    pub folder_count: i64,
+    pub dominant_media_kind: String,
     pub reclaimable_bytes: i64,
     pub confidence: f64,
+    pub cleanup_score: f64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct DuplicateFileSummaryDto {
+    pub id: i64,
     pub path: String,
+    pub name: String,
+    pub folder_path: String,
     pub size: i64,
     pub modified_at: Option<i64>,
+    pub extension: Option<String>,
+    pub media_kind: String,
+    pub hash_match_type: String,
+    pub confidence: f64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -236,8 +273,11 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
                 id: group.id,
                 size: group.size,
                 file_count: group.file_count,
+                folder_count: group.folder_count,
+                dominant_media_kind: group.dominant_media_kind,
                 reclaimable_bytes: group.reclaimable_bytes,
                 confidence: group.confidence,
+                cleanup_score: group.cleanup_score,
             })
             .collect(),
         duplicate_overlaps: writer
@@ -335,9 +375,16 @@ pub fn duplicate_group_files(
         .map_err(|error| format!("{error:?}"))?
         .into_iter()
         .map(|file| DuplicateFileSummaryDto {
+            id: file.id,
             path: file.path,
+            name: file.name,
+            folder_path: file.folder_path,
             size: file.size,
             modified_at: file.modified_at,
+            extension: file.extension,
+            media_kind: file.media_kind,
+            hash_match_type: file.hash_match_type,
+            confidence: file.confidence,
         })
         .collect::<Vec<_>>();
 
@@ -356,6 +403,58 @@ pub fn refresh_index_paths(
         refreshed: summary.refreshed,
         deleted: summary.deleted,
     })
+}
+
+pub fn validate_cleanup_files(
+    request: ValidateCleanupFilesRequest,
+) -> Result<ValidateCleanupFilesResponse, String> {
+    let results = request
+        .files
+        .into_iter()
+        .map(validate_cleanup_file)
+        .collect::<Vec<_>>();
+    let can_commit = results.iter().all(|result| result.status == "valid");
+
+    Ok(ValidateCleanupFilesResponse {
+        can_commit,
+        results,
+    })
+}
+
+fn validate_cleanup_file(expectation: CleanupFileExpectation) -> CleanupFileValidationResult {
+    let stale = |reason: &str| CleanupFileValidationResult {
+        path: expectation.path.clone(),
+        status: "stale".to_owned(),
+        reason: Some(reason.to_owned()),
+    };
+
+    let metadata = match fs::metadata(&expectation.path) {
+        Ok(metadata) => metadata,
+        Err(_) => return stale("file no longer exists"),
+    };
+
+    if !metadata.is_file() {
+        return stale("path is no longer a file");
+    }
+
+    if metadata.len() as i64 != expectation.size {
+        return stale("size changed since scan");
+    }
+
+    let current_modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs() as i64);
+    if expectation.modified_at.is_some() && current_modified != expectation.modified_at {
+        return stale("modified timestamp changed since scan");
+    }
+
+    CleanupFileValidationResult {
+        path: expectation.path,
+        status: "valid".to_owned(),
+        reason: None,
+    }
 }
 
 pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
@@ -423,6 +522,13 @@ mod tests {
         assert_eq!(response.files_scanned, 2);
         assert_eq!(overview.files.len(), 2);
         assert_eq!(overview.duplicate_groups.len(), 1);
+        let duplicate_group = overview
+            .duplicate_groups
+            .first()
+            .expect("duplicate group summary");
+        assert_eq!(duplicate_group.folder_count, 1);
+        assert_eq!(duplicate_group.dominant_media_kind, "other");
+        assert!(duplicate_group.cleanup_score > duplicate_group.reclaimable_bytes as f64);
         assert_eq!(
             overview
                 .media
@@ -508,12 +614,14 @@ mod tests {
     fn command_shaped_duplicate_group_files() {
         let root = test_root("native-duplicate-files");
         let index_path = root.join("index.sqlite");
-        fs::create_dir_all(root.join("data")).expect("failed to create folders");
-        write_file(&root.join("data").join("one.bin"), &[1; 48]);
-        write_file(&root.join("data").join("two.bin"), &[1; 48]);
+        let data = root.join("data");
+        let photos = data.join("PhoneBackup_2022");
+        fs::create_dir_all(&photos).expect("failed to create folders");
+        write_file(&photos.join("one.jpg"), &[1; 48]);
+        write_file(&photos.join("two.jpg"), &[1; 48]);
 
         scan_to_index(ScanToIndexRequest {
-            root: root.join("data"),
+            root: data.clone(),
             index_path: index_path.clone(),
         })
         .expect("scan command failed");
@@ -536,6 +644,14 @@ mod tests {
         .expect("duplicate group files command failed");
 
         assert_eq!(files.len(), 2);
+        let first = files.first().expect("first duplicate file");
+        assert!(first.id > 0);
+        assert_eq!(first.name, "one.jpg");
+        assert_eq!(first.folder_path, path_to_str(&photos));
+        assert_eq!(first.extension.as_deref(), Some("jpg"));
+        assert_eq!(first.media_kind, "photo");
+        assert_eq!(first.hash_match_type, "full hash");
+        assert_eq!(first.confidence, 1.0);
         cleanup(&root);
     }
 
@@ -582,6 +698,50 @@ mod tests {
         cleanup(&root);
     }
 
+    #[test]
+    fn validates_cleanup_files_before_commit() {
+        let root = test_root("native-precommit-validation");
+        fs::create_dir_all(&root).expect("failed to create folders");
+        let stable = root.join("stable.bin");
+        let changed = root.join("changed.bin");
+        let missing = root.join("missing.bin");
+        write_file(&stable, &[1; 16]);
+        write_file(&changed, &[2; 24]);
+
+        let stable_modified = file_modified_seconds(&stable);
+        let changed_modified = file_modified_seconds(&changed);
+        fs::remove_file(&missing).ok();
+
+        let response = validate_cleanup_files(ValidateCleanupFilesRequest {
+            files: vec![
+                CleanupFileExpectation {
+                    path: stable.clone(),
+                    size: 16,
+                    modified_at: stable_modified,
+                },
+                CleanupFileExpectation {
+                    path: changed.clone(),
+                    size: 16,
+                    modified_at: changed_modified,
+                },
+                CleanupFileExpectation {
+                    path: missing.clone(),
+                    size: 12,
+                    modified_at: None,
+                },
+            ],
+        })
+        .expect("validation failed");
+
+        assert!(!response.can_commit);
+        assert_eq!(response.results[0].status, "valid");
+        assert_eq!(response.results[1].status, "stale");
+        assert_eq!(response.results[1].reason.as_deref(), Some("size changed since scan"));
+        assert_eq!(response.results[2].status, "stale");
+        assert_eq!(response.results[2].reason.as_deref(), Some("file no longer exists"));
+        cleanup(&root);
+    }
+
     fn test_root(name: &str) -> PathBuf {
         let root = std::env::current_dir()
             .expect("failed to get current dir")
@@ -612,5 +772,13 @@ mod tests {
 
     fn path_to_str(path: &std::path::Path) -> &str {
         path.to_str().expect("test paths should be valid utf-8")
+    }
+
+    fn file_modified_seconds(path: &std::path::Path) -> Option<i64> {
+        path.metadata()
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs() as i64)
     }
 }
