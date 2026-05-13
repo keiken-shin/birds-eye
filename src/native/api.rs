@@ -58,6 +58,21 @@ pub struct RefreshIndexPathsRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct RefreshDuplicateGroupRequest {
+    pub index_path: PathBuf,
+    pub group_id: i64,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct RefreshDuplicateGroupResponse {
+    pub refreshed: usize,
+    pub deleted: usize,
+    pub group: Option<DuplicateGroupSummaryDto>,
+    pub files: Vec<DuplicateFileSummaryDto>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct CleanupFileExpectation {
     pub path: PathBuf,
     pub size: i64,
@@ -269,16 +284,7 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
             .duplicate_groups(request.limit)
             .map_err(|error| format!("{error:?}"))?
             .into_iter()
-            .map(|group| DuplicateGroupSummaryDto {
-                id: group.id,
-                size: group.size,
-                file_count: group.file_count,
-                folder_count: group.folder_count,
-                dominant_media_kind: group.dominant_media_kind,
-                reclaimable_bytes: group.reclaimable_bytes,
-                confidence: group.confidence,
-                cleanup_score: group.cleanup_score,
-            })
+            .map(duplicate_group_to_dto)
             .collect(),
         duplicate_overlaps: writer
             .duplicate_overlaps(request.limit)
@@ -374,21 +380,62 @@ pub fn duplicate_group_files(
         .duplicate_group_files(request.group_id, request.limit)
         .map_err(|error| format!("{error:?}"))?
         .into_iter()
-        .map(|file| DuplicateFileSummaryDto {
-            id: file.id,
-            path: file.path,
-            name: file.name,
-            folder_path: file.folder_path,
-            size: file.size,
-            modified_at: file.modified_at,
-            extension: file.extension,
-            media_kind: file.media_kind,
-            hash_match_type: file.hash_match_type,
-            confidence: file.confidence,
-        })
+        .map(duplicate_file_to_dto)
         .collect::<Vec<_>>();
 
     Ok(results)
+}
+
+pub fn refresh_duplicate_group(
+    request: RefreshDuplicateGroupRequest,
+) -> Result<RefreshDuplicateGroupResponse, String> {
+    let mut writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    let original_files = writer
+        .duplicate_group_files(request.group_id, 10_000)
+        .map_err(|error| format!("{error:?}"))?;
+    let original_paths = original_files
+        .iter()
+        .map(|file| PathBuf::from(&file.path))
+        .collect::<Vec<_>>();
+    let summary = writer
+        .refresh_paths(&original_paths)
+        .map_err(|error| format!("{error:?}"))?;
+    let original_path_set = original_files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<std::collections::HashSet<_>>();
+
+    let mut best_group = None;
+    let mut best_files = Vec::new();
+    let mut best_overlap = 0;
+    for group in writer
+        .duplicate_groups(10_000)
+        .map_err(|error| format!("{error:?}"))?
+    {
+        let files = writer
+            .duplicate_group_files(group.id, request.limit.max(original_files.len()))
+            .map_err(|error| format!("{error:?}"))?;
+        let overlap = files
+            .iter()
+            .filter(|file| original_path_set.contains(file.path.as_str()))
+            .count();
+        if overlap > best_overlap {
+            best_overlap = overlap;
+            best_group = Some(group);
+            best_files = files;
+        }
+    }
+
+    Ok(RefreshDuplicateGroupResponse {
+        refreshed: summary.refreshed,
+        deleted: summary.deleted,
+        group: best_group.map(duplicate_group_to_dto),
+        files: best_files
+            .into_iter()
+            .take(request.limit)
+            .map(duplicate_file_to_dto)
+            .collect(),
+    })
 }
 
 pub fn refresh_index_paths(
@@ -403,6 +450,34 @@ pub fn refresh_index_paths(
         refreshed: summary.refreshed,
         deleted: summary.deleted,
     })
+}
+
+fn duplicate_file_to_dto(file: crate::index::DuplicateFileSummary) -> DuplicateFileSummaryDto {
+    DuplicateFileSummaryDto {
+        id: file.id,
+        path: file.path,
+        name: file.name,
+        folder_path: file.folder_path,
+        size: file.size,
+        modified_at: file.modified_at,
+        extension: file.extension,
+        media_kind: file.media_kind,
+        hash_match_type: file.hash_match_type,
+        confidence: file.confidence,
+    }
+}
+
+fn duplicate_group_to_dto(group: crate::index::DuplicateGroupSummary) -> DuplicateGroupSummaryDto {
+    DuplicateGroupSummaryDto {
+        id: group.id,
+        size: group.size,
+        file_count: group.file_count,
+        folder_count: group.folder_count,
+        dominant_media_kind: group.dominant_media_kind,
+        reclaimable_bytes: group.reclaimable_bytes,
+        confidence: group.confidence,
+        cleanup_score: group.cleanup_score,
+    }
 }
 
 pub fn validate_cleanup_files(
@@ -695,6 +770,48 @@ mod tests {
             overview.folders.first().map(|folder| folder.total_bytes),
             Some(48)
         );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn command_shaped_refresh_duplicate_group_marks_missing_copy() {
+        let root = test_root("native-refresh-duplicate-group");
+        let index_path = root.join("index.sqlite");
+        let data = root.join("data");
+        let keep = data.join("keep.bin");
+        let remove = data.join("remove.bin");
+        fs::create_dir_all(&data).expect("failed to create folders");
+        write_file(&keep, &[1; 48]);
+        write_file(&remove, &[1; 48]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: data.clone(),
+            index_path: index_path.clone(),
+        })
+        .expect("scan command failed");
+        let overview = query_index_overview(IndexQueryRequest {
+            index_path: index_path.clone(),
+            limit: 10,
+        })
+        .expect("query command failed");
+        let group_id = overview
+            .duplicate_groups
+            .first()
+            .expect("duplicate group")
+            .id;
+
+        fs::remove_file(&remove).expect("failed to remove duplicate");
+        let refresh = refresh_duplicate_group(RefreshDuplicateGroupRequest {
+            index_path,
+            group_id,
+            limit: 10,
+        })
+        .expect("refresh duplicate group failed");
+
+        assert_eq!(refresh.deleted, 1);
+        assert_eq!(refresh.refreshed, 1);
+        assert!(refresh.group.is_none());
+        assert!(refresh.files.is_empty());
         cleanup(&root);
     }
 

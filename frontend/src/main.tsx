@@ -52,6 +52,7 @@ import {
   queryNativeIndex,
   queryNativeDuplicateFiles,
   recycleNativeFiles,
+  refreshNativeDuplicateGroup,
   refreshNativeIndexPaths,
   revealNativePath,
   searchNativeIndex,
@@ -996,6 +997,9 @@ function App() {
                           <IconButton title="Stage this duplicate review" onClick={() => void stageDuplicateAction(selectedDuplicateCandidate)}>
                             <CopyCheck size={16} />
                           </IconButton>
+                          <IconButton title="Refresh duplicate group" onClick={() => void refreshSelectedDuplicateGroup()}>
+                            <RotateCw size={16} />
+                          </IconButton>
                         </div>
                       </div>
                       <div className="duplicate-detail-metrics">
@@ -1279,6 +1283,32 @@ function App() {
       await revealNativePath(path);
     } catch (error) {
       setRuntimeMessage(error instanceof Error ? error.message : "Failed to open path");
+    }
+  }
+
+  async function refreshSelectedDuplicateGroup() {
+    const candidate = scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup);
+    if (!candidate?.id || !currentIndexPath) {
+      setRuntimeMessage("Choose a saved duplicate group before refreshing it");
+      return;
+    }
+
+    try {
+      const refresh = await refreshNativeDuplicateGroup(currentIndexPath, candidate.id, Math.max(candidate.files, 24));
+      const overview = await queryNativeIndex(currentIndexPath, 1000);
+      setScan((current) => mergeNativeOverview(current, overview));
+      if (refresh.group) {
+        setSelectedDuplicateGroup(refresh.group.id);
+        setDuplicateFiles(refresh.files);
+        rememberRetainedDuplicatePath(refresh.group.id, refresh.files);
+        setRuntimeMessage(`Refreshed duplicate group: ${formatCount(refresh.refreshed)} checked, ${formatCount(refresh.deleted)} missing`);
+      } else {
+        setSelectedDuplicateGroup(null);
+        setDuplicateFiles([]);
+        setRuntimeMessage(`Duplicate group no longer exists after refresh. ${formatCount(refresh.deleted)} missing copy marked stale.`);
+      }
+    } catch (error) {
+      setRuntimeMessage(error instanceof Error ? error.message : "Failed to refresh duplicate group");
     }
   }
 

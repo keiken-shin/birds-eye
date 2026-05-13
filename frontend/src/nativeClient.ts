@@ -163,6 +163,21 @@ export async function refreshNativeIndexPaths(indexPath: string, paths: string[]
   });
 }
 
+export async function refreshNativeDuplicateGroup(indexPath: string, groupId: number, limit: number) {
+  return invoke<{
+    refreshed: number;
+    deleted: number;
+    group: NativeIndexOverview["duplicate_groups"][number] | null;
+    files: NativeDuplicateFile[];
+  }>("refresh_duplicate_group", {
+    request: {
+      index_path: indexPath,
+      group_id: groupId,
+      limit,
+    },
+  });
+}
+
 export async function validateNativeCleanupFiles(files: Array<{ path: string; size: number; modifiedAt: number | null }>) {
   return invoke<{
     can_commit: boolean;
