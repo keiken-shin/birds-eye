@@ -56,6 +56,7 @@ import {
   revealNativePath,
   searchNativeIndex,
   startNativeScan,
+  validateNativeCleanupFiles,
   type NativeDuplicateFile,
   type NativeIndexEntry,
   type NativeIndexOverview,
@@ -78,6 +79,11 @@ type StagedAction = {
     kind: "recycleFiles";
     keepPath: string;
     removePaths: string[];
+    duplicateGroupId?: number;
+    keepFileId?: number;
+    removeFileIds?: number[];
+    expectedFiles?: Array<{ path: string; size: number; modifiedAt: number | null }>;
+    rollbackHint?: string;
   };
 };
 
@@ -91,15 +97,21 @@ type MoveSuggestion = {
 };
 
 type PreviewableFile = {
+  id?: number;
   path: string;
   name: string;
+  folderPath: string;
   size: number;
   extension: string;
   category: CategoryKey;
+  mediaKind: string;
   modifiedAt: number | null;
+  hashMatchType?: string;
+  confidence?: number;
 };
 
 type AppPage = "workspace" | "index";
+type DuplicateSortKey = "cleanup" | "reclaimable" | "files" | "folders" | "confidence";
 
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -119,6 +131,7 @@ function App() {
   const [focusedFolder, setFocusedFolder] = useState<string | null>(null);
   const [duplicateFiles, setDuplicateFiles] = useState<NativeDuplicateFile[]>([]);
   const [selectedDuplicateGroup, setSelectedDuplicateGroup] = useState<number | null>(null);
+  const [retainedDuplicatePaths, setRetainedDuplicatePaths] = useState<Record<number, string>>({});
   const [savedIndexes, setSavedIndexes] = useState<NativeIndexEntry[]>([]);
   const [stagedActions, setStagedActions] = useState<StagedAction[]>([]);
   const [committingActions, setCommittingActions] = useState(false);
@@ -134,6 +147,7 @@ function App() {
   const [showDuplicates, setShowDuplicates] = useState(true);
   const [showReviewQueue, setShowReviewQueue] = useState(true);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const [duplicateSort, setDuplicateSort] = useState<DuplicateSortKey>("cleanup");
   const isWindowsRuntime = useMemo(() => {
     return typeof navigator !== "undefined" && navigator.userAgent.toLowerCase().includes("windows");
   }, []);
@@ -172,18 +186,38 @@ function App() {
   const selectedDuplicateCandidate = useMemo(() => {
     return scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup) ?? null;
   }, [scan.duplicateCandidates, selectedDuplicateGroup]);
+  const sortedDuplicateCandidates = useMemo(() => {
+    return [...scan.duplicateCandidates].sort((a, b) => {
+      if (duplicateSort === "reclaimable") return b.reclaimableBytes - a.reclaimableBytes;
+      if (duplicateSort === "files") return b.files - a.files || b.reclaimableBytes - a.reclaimableBytes;
+      if (duplicateSort === "folders") return (b.folderCount ?? 0) - (a.folderCount ?? 0) || b.reclaimableBytes - a.reclaimableBytes;
+      if (duplicateSort === "confidence") return (b.confidenceScore ?? 0) - (a.confidenceScore ?? 0) || b.reclaimableBytes - a.reclaimableBytes;
+      return (b.cleanupScore ?? b.reclaimableBytes) - (a.cleanupScore ?? a.reclaimableBytes);
+    });
+  }, [duplicateSort, scan.duplicateCandidates]);
   const duplicatePreviewFiles = useMemo(() => {
     return duplicateFiles.map((file): PreviewableFile => {
-      const extension = getExtension(lastSegment(file.path));
+      const extension = file.extension ?? getExtension(file.name);
       return {
+        id: file.id,
         path: file.path,
-        name: lastSegment(file.path),
+        name: file.name,
+        folderPath: file.folder_path,
         size: file.size,
         extension,
-        category: classifyFile(file.path),
+        category: categoryFromMediaKind(file.media_kind),
+        mediaKind: file.media_kind,
         modifiedAt: file.modified_at,
+        hashMatchType: file.hash_match_type,
+        confidence: file.confidence,
       };
     });
+  }, [duplicateFiles]);
+  const duplicateFolderRelationship = useMemo(() => {
+    return buildDuplicateFolderRelationship(duplicateFiles);
+  }, [duplicateFiles]);
+  const duplicateKeepSuggestion = useMemo(() => {
+    return suggestDuplicateKeepFile(duplicateFiles);
   }, [duplicateFiles]);
 
   const filteredFolders = useMemo(() => {
@@ -874,6 +908,16 @@ function App() {
               <span><CopyCheck size={14} /> Size + partial + full hash</span>
             </div>
             <DuplicateSummary candidates={scan.duplicateCandidates} overlaps={scan.duplicateOverlaps} />
+            <div className="duplicate-sort-control">
+              <span>Sort groups</span>
+              <select value={duplicateSort} onChange={(event) => setDuplicateSort(event.currentTarget.value as DuplicateSortKey)}>
+                <option value="cleanup">Cleanup score</option>
+                <option value="reclaimable">Reclaimable bytes</option>
+                <option value="files">File count</option>
+                <option value="folders">Folder count</option>
+                <option value="confidence">Confidence</option>
+              </select>
+            </div>
             {scan.duplicateOverlaps.length > 0 && (
               <details className="insight-disclosure">
                 <summary>Folder overlap map</summary>
@@ -892,7 +936,7 @@ function App() {
                       <span>Confidence</span>
                       <span>Review</span>
                     </div>
-                    {scan.duplicateCandidates.map((candidate) => (
+                    {sortedDuplicateCandidates.map((candidate) => (
                       <div
                         className={`duplicate-row ${selectedDuplicateGroup === candidate.id ? "active" : ""}`}
                         key={candidate.id ?? candidate.size}
@@ -908,7 +952,9 @@ function App() {
                       >
                         <div>
                           <strong>{candidate.confidenceScore === 1 ? "Exact duplicate group" : "Review duplicate group"}</strong>
-                          <span>{formatCount(candidate.files)} copies, {formatBytes(candidate.size)} each</span>
+                          <span>
+                            {formatCount(candidate.files)} copies, {formatCount(candidate.folderCount ?? 1)} folders, {mediaKindLabel(candidate.dominantMediaKind)} - {formatBytes(candidate.size)} each
+                          </span>
                         </div>
                         <strong>{formatBytes(candidate.reclaimableBytes)}</strong>
                         <small className={`confidence-pill ${candidate.confidenceScore === 1 ? "safe" : "medium"}`}>
@@ -949,7 +995,62 @@ function App() {
                           <span>Group id</span>
                           <strong>{selectedDuplicateCandidate.id ?? formatBytes(selectedDuplicateCandidate.size)}</strong>
                         </div>
+                        <div>
+                          <span>Folders</span>
+                          <strong>{formatCount(selectedDuplicateCandidate.folderCount ?? 1)}</strong>
+                        </div>
+                        <div>
+                          <span>Media type</span>
+                          <strong>{mediaKindLabel(selectedDuplicateCandidate.dominantMediaKind)}</strong>
+                        </div>
                       </div>
+                      {duplicateFolderRelationship && (
+                        <div className="duplicate-folder-summary">
+                          <div>
+                            <strong>This duplicate appears in {formatCount(duplicateFolderRelationship.folderCount)} folders.</strong>
+                            <span>{duplicateFolderRelationship.message}</span>
+                          </div>
+                          <div className="duplicate-folder-pairs">
+                            <div>
+                              <span>Likely source</span>
+                              <strong title={duplicateFolderRelationship.likelySource.path}>{lastSegment(duplicateFolderRelationship.likelySource.path)}</strong>
+                              <small>{formatCount(duplicateFolderRelationship.likelySource.files)} copies - {formatBytes(duplicateFolderRelationship.likelySource.bytes)}</small>
+                            </div>
+                            <div>
+                              <span>Likely duplicate</span>
+                              <strong title={duplicateFolderRelationship.likelyDuplicate.path}>{lastSegment(duplicateFolderRelationship.likelyDuplicate.path)}</strong>
+                              <small>{formatCount(duplicateFolderRelationship.likelyDuplicate.files)} copies - {formatBytes(duplicateFolderRelationship.likelyDuplicate.bytes)}</small>
+                            </div>
+                          </div>
+                          <div className="duplicate-folder-breakdown">
+                            {duplicateFolderRelationship.folders.map((folder) => (
+                              <div key={folder.path}>
+                                <span title={folder.path}>{folder.path}</span>
+                                <strong>{formatCount(folder.files)} copies</strong>
+                                <small>{formatBytes(folder.bytes)}</small>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {duplicateKeepSuggestion && (
+                        <div className="duplicate-keep-suggestion">
+                          <div>
+                            <span>Suggested keep</span>
+                            <strong title={duplicateKeepSuggestion.file.path}>{duplicateKeepSuggestion.file.path}</strong>
+                            <small>{duplicateKeepSuggestion.reason}</small>
+                          </div>
+                          <IconButton
+                            title="Use suggested retained copy"
+                            onClick={() => chooseDuplicateRetainedCopy({
+                              path: duplicateKeepSuggestion.file.path,
+                              name: duplicateKeepSuggestion.file.name,
+                            })}
+                          >
+                            <Check size={16} />
+                          </IconButton>
+                        </div>
+                      )}
                       <div className="duplicate-detail-files">
                         {duplicatePreviewFiles.length === 0 ? (
                           <div className="empty-state compact">Select this group again to load file details.</div>
@@ -958,17 +1059,40 @@ function App() {
                             files={duplicatePreviewFiles}
                             nativeRuntime={nativeRuntime}
                             emptyLabel="Select a duplicate copy"
-                            renderFileActions={(file) => (
+                            statusForFile={(file) => duplicateFileStatus(file)}
+                            renderFileActions={(file, preview) => (
                               <>
+                                <IconButton title="Preview this copy" onClick={(event) => {
+                                  event.stopPropagation();
+                                  preview();
+                                }}>
+                                  <Eye size={16} />
+                                </IconButton>
                                 <IconButton
-                                  disabled={!canStageSelectedDuplicateKeep()}
-                                  title="Keep this copy when staging duplicate cleanup"
-                                  onClick={() => stageSelectedDuplicateKeep(file)}
+                                  disabled={!canChooseSelectedDuplicateKeep()}
+                                  title="Keep this copy"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    chooseDuplicateRetainedCopy(file);
+                                  }}
                                 >
                                   <Check size={16} />
                                 </IconButton>
-                                <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
+                                <IconButton title="Reveal in Explorer" onClick={(event) => {
+                                  event.stopPropagation();
+                                  void revealPath(file.path);
+                                }}>
                                   <ExternalLink size={16} />
+                                </IconButton>
+                                <IconButton
+                                  disabled={!canStageSelectedDuplicateKeep()}
+                                  title="Stage deletion of other copies"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    stageSelectedDuplicateKeep(file);
+                                  }}
+                                >
+                                  <CopyCheck size={16} />
                                 </IconButton>
                               </>
                             )}
@@ -1031,6 +1155,13 @@ function App() {
                           ))}
                           <strong>{action.suggestedAction}</strong>
                         </div>
+                        {action.operation?.kind === "recycleFiles" && (
+                          <div className="staged-operation-meta">
+                            <span>Group {action.operation.duplicateGroupId ?? "n/a"}</span>
+                            <span>Keep file {action.operation.keepFileId ?? "n/a"}</span>
+                            <span>Recycle {formatCount(action.operation.removeFileIds?.length ?? action.operation.removePaths.length)} files</span>
+                          </div>
+                        )}
                       </div>
                       <small className={`confidence-pill ${confidenceClass(action.confidence)}`}>{action.confidence}</small>
                       <strong>{formatBytes(action.bytes)}</strong>
@@ -1111,8 +1242,9 @@ function App() {
     }
 
     try {
-      const files = await queryNativeDuplicateFiles(currentIndexPath, candidate.id, 24);
+      const files = await queryNativeDuplicateFiles(currentIndexPath, candidate.id, Math.max(candidate.files, 24));
       setDuplicateFiles(files);
+      rememberRetainedDuplicatePath(candidate.id, files);
     } catch (error) {
       setRuntimeMessage(error instanceof Error ? error.message : "Duplicate details failed");
     }
@@ -1143,17 +1275,13 @@ function App() {
         const files = await queryNativeDuplicateFiles(currentIndexPath, candidate.id, Math.max(candidate.files, 1000));
         setSelectedDuplicateGroup(candidate.id);
         setDuplicateFiles(files.slice(0, 24));
-        const sorted = [...files].sort((a, b) => {
-          const modifiedDelta = (b.modified_at ?? 0) - (a.modified_at ?? 0);
-          return modifiedDelta || a.path.localeCompare(b.path);
-        });
-        const [keepFile, ...removeFiles] = sorted;
-        if (keepFile && removeFiles.length > 0) {
-          operation = {
-            kind: "recycleFiles",
-            keepPath: keepFile.path,
-            removePaths: removeFiles.map((file) => file.path),
-          };
+        rememberRetainedDuplicatePath(candidate.id, files);
+        const keepFile = suggestDuplicateKeepFile(files)?.file;
+        if (keepFile) {
+          const nextOperation = buildDuplicateRecycleOperation(candidate.id, files, keepFile.path);
+          if (nextOperation.removePaths.length > 0) {
+            operation = nextOperation;
+          }
         }
       } catch (error) {
         setRuntimeMessage(error instanceof Error ? error.message : "Duplicate details failed");
@@ -1178,10 +1306,14 @@ function App() {
               ? "Review copies and choose retained files before committing cleanup."
               : "Inspect matching candidates before choosing which copy should stay.",
           evidence: [
+            candidate.id ? `Duplicate group: ${candidate.id}.` : "Duplicate group id unavailable.",
             `${formatCount(candidate.files)} files share the same ${formatBytes(candidate.size)} size.`,
             confidenceScore >= 1 ? "Full-file hashes match across this group." : "This group has not reached exact-hash confidence.",
             `${formatBytes(candidate.reclaimableBytes)} is potentially reclaimable after keeping one copy.`,
             operation ? `Retained copy: ${operation.keepPath}` : "No file operation is attached to this staged review yet.",
+            operation ? `Retained file id: ${operation.keepFileId ?? "unknown"}.` : "Retained file id unavailable until a copy is selected.",
+            operation ? `Files to recycle: ${operation.removeFileIds?.join(", ") || "none"}.` : "Deleted file ids unavailable until a copy is selected.",
+            operation?.rollbackHint ?? "Recycle Bin rollback metadata unavailable until staging has a file operation.",
           ],
           operation,
         },
@@ -1194,20 +1326,56 @@ function App() {
     return Boolean(candidate?.id && candidate.confidenceScore === 1 && duplicateFiles.length > 1);
   }
 
+  function canChooseSelectedDuplicateKeep() {
+    const candidate = scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup);
+    return Boolean(candidate?.id && duplicateFiles.length > 1);
+  }
+
+  function chooseDuplicateRetainedCopy(keepFile: Pick<PreviewableFile, "path" | "name">) {
+    const candidate = scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup);
+    if (!candidate?.id || duplicateFiles.length <= 1) {
+      setRuntimeMessage("Choose a duplicate group before selecting the retained copy");
+      return;
+    }
+
+    const groupId = candidate.id;
+    setRetainedDuplicatePaths((current) => ({ ...current, [groupId]: keepFile.path }));
+    setStagedActions((current) => current.map((action) => {
+      if (action.id !== `duplicate-${groupId}` || action.operation?.kind !== "recycleFiles") {
+        return action;
+      }
+
+      const operation = buildDuplicateRecycleOperation(groupId, duplicateFiles, keepFile.path);
+      return {
+        ...action,
+        suggestedAction: `Keep ${lastSegment(keepFile.path)} and move ${formatCount(operation.removePaths.length)} duplicate copies to the Recycle Bin on commit.`,
+        evidence: [
+          `Duplicate group: ${groupId}.`,
+          `${formatCount(candidate.files)} files share the same ${formatBytes(candidate.size)} size.`,
+          "Full-file hashes match across this group.",
+          `Retained copy: ${keepFile.path}`,
+          `Retained file id: ${operation.keepFileId ?? "unknown"}.`,
+          `Files to recycle: ${operation.removeFileIds?.join(", ") || "none"}.`,
+          `${formatBytes(candidate.reclaimableBytes)} is potentially reclaimable after keeping one copy.`,
+          operation.rollbackHint ?? "Recycle Bin rollback metadata unavailable.",
+        ],
+        operation,
+      };
+    }));
+    setRuntimeMessage(`Marked ${keepFile.name} as the retained copy for this duplicate group`);
+  }
+
   function stageSelectedDuplicateKeep(keepFile: Pick<PreviewableFile, "path">) {
     const candidate = scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup);
-    if (!candidate || candidate.confidenceScore !== 1 || duplicateFiles.length <= 1) {
+    if (!candidate?.id || candidate.confidenceScore !== 1 || duplicateFiles.length <= 1) {
       setRuntimeMessage("Choose an exact duplicate group before selecting the retained copy");
       return;
     }
 
-    const removePaths = duplicateFiles.filter((file) => file.path !== keepFile.path).map((file) => file.path);
-    const operation: StagedAction["operation"] = {
-      kind: "recycleFiles",
-      keepPath: keepFile.path,
-      removePaths,
-    };
     const id = `duplicate-${candidate.id ?? candidate.size}`;
+    const groupId = candidate.id;
+    const operation = buildDuplicateRecycleOperation(groupId, duplicateFiles, keepFile.path);
+    setRetainedDuplicatePaths((current) => ({ ...current, [groupId]: keepFile.path }));
 
     setStagedActions((current) => {
       const nextAction: StagedAction = {
@@ -1216,17 +1384,55 @@ function App() {
         confidence: "Safe",
         bytes: candidate.reclaimableBytes,
         reason: `Group ${candidate.id ?? formatBytes(candidate.size)} has matching full-file hashes. You chose the retained copy.`,
-        suggestedAction: `Keep ${lastSegment(keepFile.path)} and move ${formatCount(removePaths.length)} duplicate copies to the Recycle Bin on commit.`,
+        suggestedAction: `Keep ${lastSegment(keepFile.path)} and move ${formatCount(operation.removePaths.length)} duplicate copies to the Recycle Bin on commit.`,
         evidence: [
+          `Duplicate group: ${groupId}.`,
           `${formatCount(candidate.files)} files share the same ${formatBytes(candidate.size)} size.`,
           "Full-file hashes match across this group.",
           `Retained copy: ${keepFile.path}`,
+          `Retained file id: ${operation.keepFileId ?? "unknown"}.`,
+          `Files to recycle: ${operation.removeFileIds?.join(", ") || "none"}.`,
           `${formatBytes(candidate.reclaimableBytes)} is potentially reclaimable after keeping one copy.`,
+          operation.rollbackHint ?? "Recycle Bin rollback metadata unavailable.",
         ],
         operation,
       };
       return [...current.filter((action) => action.id !== id), nextAction];
     });
+  }
+
+  function rememberRetainedDuplicatePath(groupId: number, files: NativeDuplicateFile[]) {
+    if (files.length === 0) return;
+
+    setRetainedDuplicatePaths((current) => {
+      if (current[groupId] && files.some((file) => file.path === current[groupId])) {
+        return current;
+      }
+
+      const stagedKeepPath = stagedActions
+        .map((action) => action.operation)
+        .find((operation) => operation?.kind === "recycleFiles" && operation.keepPath && files.some((file) => file.path === operation.keepPath))
+        ?.keepPath;
+      const fallbackKeepPath = suggestDuplicateKeepFile(files)?.file.path;
+      const keepPath = stagedKeepPath ?? fallbackKeepPath;
+
+      return keepPath ? { ...current, [groupId]: keepPath } : current;
+    });
+  }
+
+  function duplicateFileStatus(file: PreviewableFile) {
+    const candidate = scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup);
+    if (!candidate?.id) return { label: "Review", tone: "manual" as const };
+    const groupId = candidate.id;
+
+    const stagedOperation = stagedActions
+      .map((action) => action.operation)
+      .find((operation) => operation?.kind === "recycleFiles" && operation.keepPath === retainedDuplicatePaths[groupId]);
+
+    if (stagedOperation?.keepPath === file.path) return { label: "Retained", tone: "safe" as const };
+    if (stagedOperation?.removePaths.includes(file.path)) return { label: "Staged recycle", tone: "risky" as const };
+    if (retainedDuplicatePaths[groupId] === file.path) return { label: "Retained", tone: "safe" as const };
+    return { label: "Delete candidate", tone: "medium" as const };
   }
 
   async function commitStagedActions() {
@@ -1240,19 +1446,64 @@ function App() {
     }
 
     const recycleActions = actionableStagedActions;
-    const paths = [...new Set(recycleActions.flatMap((action) => action.operation?.removePaths ?? []))];
+    const validationFailures = new Map<string, string[]>();
+    const validActions: StagedAction[] = [];
+
+    for (const action of recycleActions) {
+      const expectedFiles = action.operation?.expectedFiles ?? [];
+      if (expectedFiles.length === 0) {
+        validationFailures.set(action.id, ["validation metadata is missing"]);
+        continue;
+      }
+
+      let validation: Awaited<ReturnType<typeof validateNativeCleanupFiles>>;
+      try {
+        validation = await validateNativeCleanupFiles(expectedFiles);
+      } catch (error) {
+        setRuntimeMessage(error instanceof Error ? error.message : "Pre-commit validation failed");
+        return;
+      }
+      if (validation.can_commit) {
+        validActions.push(action);
+      } else {
+        validationFailures.set(action.id, validation.results
+          .filter((result) => result.status !== "valid")
+          .map((result) => `${result.path}: ${result.reason ?? "changed since scan"}`));
+      }
+    }
+
+    if (validationFailures.size > 0) {
+      setStagedActions((current) => current.map((action) => {
+        const failures = validationFailures.get(action.id);
+        if (!failures) return action;
+        return {
+          ...action,
+          confidence: "Risky",
+          reason: "This staged cleanup is stale and was blocked before commit.",
+          suggestedAction: "Refresh or rescan this duplicate group before committing it.",
+          evidence: [...action.evidence, ...failures.map((failure) => `Blocked: ${failure}`)],
+        };
+      }));
+    }
+
+    const paths = [...new Set(validActions.flatMap((action) => action.operation?.removePaths ?? []))];
     if (paths.length === 0) {
+      if (validationFailures.size > 0) {
+        setRuntimeMessage("Pre-commit validation blocked stale duplicate cleanup items");
+        return;
+      }
       setRuntimeMessage("No safe recycle actions are ready to commit");
       return;
     }
 
-    const confirmed = window.confirm(`Move ${formatCount(paths.length)} duplicate files to the Recycle Bin? Kept copies stay in place.`);
+    const blockedNote = validationFailures.size > 0 ? ` ${formatCount(validationFailures.size)} stale staged item(s) will stay in the queue.` : "";
+    const confirmed = window.confirm(`Move ${formatCount(paths.length)} duplicate files to the Recycle Bin? Kept copies stay in place.${blockedNote}`);
     if (!confirmed) return;
 
     setCommittingActions(true);
     try {
       const result = await recycleNativeFiles(paths);
-      const committedIds = new Set(recycleActions.map((action) => action.id));
+      const committedIds = new Set(validActions.map((action) => action.id));
       setStagedActions((current) => current.filter((action) => !committedIds.has(action.id)));
       setDuplicateFiles([]);
       setSelectedDuplicateGroup(null);
@@ -1423,7 +1674,10 @@ function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): Sc
     id: group.id,
     size: group.size,
     files: group.file_count,
+    folderCount: group.folder_count,
+    dominantMediaKind: group.dominant_media_kind,
     reclaimableBytes: group.reclaimable_bytes,
+    cleanupScore: group.cleanup_score,
     samples: [`confidence ${(group.confidence * 100).toFixed(0)}%`],
     confidence: "size-match" as const,
     confidenceScore: group.confidence,
@@ -1471,6 +1725,10 @@ function categoryFromMediaKind(kind: string): CategoryKey {
   if (kind === "installer") return "installers";
   if (kind === "model") return "models";
   return "other";
+}
+
+function mediaKindLabel(kind?: string) {
+  return categories[categoryFromMediaKind(kind ?? "other")].label;
 }
 
 function mediaKindFromCategory(category: CategoryKey) {
@@ -2260,12 +2518,14 @@ function FilePreviewWorkbench({
   files,
   nativeRuntime,
   emptyLabel,
+  statusForFile,
   renderFileActions,
 }: {
   files: PreviewableFile[];
   nativeRuntime: boolean;
   emptyLabel: string;
-  renderFileActions?: (file: PreviewableFile) => React.ReactNode;
+  statusForFile?: (file: PreviewableFile) => { label: string; tone: "safe" | "medium" | "risky" | "manual" };
+  renderFileActions?: (file: PreviewableFile, preview: () => void) => React.ReactNode;
 }) {
   const [selectedPath, setSelectedPath] = useState(files[0]?.path ?? "");
 
@@ -2297,26 +2557,52 @@ function FilePreviewWorkbench({
           <span>File</span>
           <span>Size</span>
           <span>Modified</span>
+          <span>Actions</span>
         </div>
         <ScrollableRows compact>
-          {files.map((file) => (
-            <button
-              className={`file-preview-row ${file.path === selectedFile.path ? "active" : ""}`}
-              key={file.path}
-              type="button"
-              onClick={() => setSelectedPath(file.path)}
-            >
-              <span className="file-preview-row-name">
-                {fileTypeIcon(file)}
-                <span>
-                  <strong>{file.name}</strong>
-                  <small>{file.path}</small>
+          {files.map((file) => {
+            const status = statusForFile?.(file);
+            const preview = () => setSelectedPath(file.path);
+
+            return (
+              <div
+                className={`file-preview-row ${file.path === selectedFile.path ? "active" : ""}`}
+                key={file.path}
+                onClick={preview}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    preview();
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+              >
+                <span className="file-preview-row-name">
+                  {fileTypeIcon(file)}
+                  <span>
+                    <strong>{file.name}</strong>
+                    <small>{file.path}</small>
+                    <small>{file.folderPath}</small>
+                    <span className="file-preview-badges">
+                      <span>{categories[file.category].label}</span>
+                      <span>{file.extension}</span>
+                      {file.hashMatchType && <span>{file.hashMatchType}</span>}
+                      {typeof file.confidence === "number" && <span>{Math.round(file.confidence * 100)}% confidence</span>}
+                      {status && <span className={`status-pill ${status.tone}`}>{status.label}</span>}
+                    </span>
+                  </span>
                 </span>
-              </span>
-              <strong>{formatBytes(file.size)}</strong>
-              <small>{file.modifiedAt ? formatDate(file.modifiedAt) : "-"}</small>
-            </button>
-          ))}
+                <strong>{formatBytes(file.size)}</strong>
+                <small>{file.modifiedAt ? formatDate(file.modifiedAt) : "-"}</small>
+                {renderFileActions && (
+                  <span className="file-preview-row-actions">
+                    {renderFileActions(file, preview)}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </ScrollableRows>
       </div>
       <aside className="file-preview-pane">
@@ -2334,13 +2620,15 @@ function FilePreviewWorkbench({
         </div>
         <div className="file-preview-meta">
           <strong title={selectedFile.name}>{selectedFile.name}</strong>
+          <span>{selectedFile.folderPath}</span>
+          <span>{selectedFile.hashMatchType ?? "size"} match - {Math.round((selectedFile.confidence ?? 0) * 100)}% confidence</span>
           <span>{formatBytes(selectedFile.size)} · {selectedFile.extension}</span>
           <span>{selectedFile.modifiedAt ? formatDate(selectedFile.modifiedAt) : "No modified date"}</span>
           <small title={selectedFile.path}>{selectedFile.path}</small>
         </div>
         {renderFileActions && (
           <div className="file-preview-actions">
-            {renderFileActions(selectedFile)}
+            {renderFileActions(selectedFile, () => setSelectedPath(selectedFile.path))}
           </div>
         )}
       </aside>
@@ -2353,6 +2641,100 @@ function fileTypeIcon(file: PreviewableFile, size = 16) {
   if (file.category === "videos") return <FileVideo size={size} />;
   if (file.category === "music") return <FileAudio size={size} />;
   return <FileText size={size} />;
+}
+
+function suggestDuplicateKeepFile(files: NativeDuplicateFile[]) {
+  if (files.length === 0) return null;
+
+  const maxModified = Math.max(...files.map((file) => file.modified_at ?? 0));
+  const scored = files.map((file) => {
+    const path = file.path.toLowerCase();
+    const organizedFolder = /photos|pictures|sorted|archive|library|media|documents/.test(path);
+    const temporaryFolder = /downloads|temp|tmp|cache|trash|recycle/.test(path);
+    const newestScore = maxModified > 0 && file.modified_at === maxModified ? 40 : 0;
+    const organizedScore = organizedFolder ? 24 : 0;
+    const temporaryPenalty = temporaryFolder ? -36 : 0;
+    const pathScore = Math.max(0, 20 - Math.floor(file.path.length / 12));
+    const score = newestScore + organizedScore + temporaryPenalty + pathScore;
+    const reasonParts = [
+      newestScore > 0 ? "newest copy" : "",
+      organizedFolder ? "organized folder" : "",
+      temporaryFolder ? "temporary folder penalty considered" : "",
+      pathScore > 0 ? "cleaner path" : "",
+    ].filter(Boolean);
+
+    return {
+      file,
+      score,
+      reason: reasonParts.length > 0
+        ? `Reason: ${reasonParts.join(", ")}.`
+        : "Reason: stable path and matching duplicate metadata.",
+    };
+  });
+
+  return scored.sort((a, b) => {
+    return b.score - a.score
+      || (b.file.modified_at ?? 0) - (a.file.modified_at ?? 0)
+      || a.file.path.length - b.file.path.length
+      || a.file.path.localeCompare(b.file.path);
+  })[0];
+}
+
+function buildDuplicateRecycleOperation(groupId: number, files: NativeDuplicateFile[], keepPath: string): NonNullable<StagedAction["operation"]> {
+  const keepFile = files.find((file) => file.path === keepPath);
+  const removeFiles = files.filter((file) => file.path !== keepPath);
+
+  return {
+    kind: "recycleFiles",
+    keepPath,
+    removePaths: removeFiles.map((file) => file.path),
+    duplicateGroupId: groupId,
+    keepFileId: keepFile?.id,
+    removeFileIds: removeFiles.map((file) => file.id),
+    expectedFiles: files.map((file) => ({
+      path: file.path,
+      size: file.size,
+      modifiedAt: file.modified_at,
+    })),
+    rollbackHint: "Files are moved to the OS Recycle Bin when available; restore from there before emptying it.",
+  };
+}
+
+function buildDuplicateFolderRelationship(files: NativeDuplicateFile[]) {
+  if (files.length === 0) return null;
+
+  const byFolder = new Map<string, { path: string; files: number; bytes: number; latestModified: number }>();
+  for (const file of files) {
+    const current = byFolder.get(file.folder_path) ?? {
+      path: file.folder_path,
+      files: 0,
+      bytes: 0,
+      latestModified: 0,
+    };
+    current.files += 1;
+    current.bytes += file.size;
+    current.latestModified = Math.max(current.latestModified, file.modified_at ?? 0);
+    byFolder.set(file.folder_path, current);
+  }
+
+  const folders = [...byFolder.values()].sort((a, b) => {
+    return b.files - a.files || b.bytes - a.bytes || a.path.localeCompare(b.path);
+  });
+  const likelySource = [...folders].sort((a, b) => {
+    return b.latestModified - a.latestModified || a.path.length - b.path.length || a.path.localeCompare(b.path);
+  })[0];
+  const likelyDuplicate = folders.find((folder) => folder.path !== likelySource.path) ?? likelySource;
+  const message = folders.length > 1
+    ? `Most copies are between ${lastSegment(likelySource.path)} and ${lastSegment(likelyDuplicate.path)}.`
+    : `All visible copies are currently inside ${lastSegment(likelySource.path)}.`;
+
+  return {
+    folderCount: folders.length,
+    folders,
+    likelySource,
+    likelyDuplicate,
+    message,
+  };
 }
 
 function MediaPreviewPanel({ file, nativeRuntime }: { file: ScanState["largestFiles"][number] | null; nativeRuntime: boolean }) {

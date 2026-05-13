@@ -42,7 +42,10 @@ export type DuplicateCandidate = {
   id?: number;
   size: number;
   files: number;
+  folderCount?: number;
+  dominantMediaKind?: string;
   reclaimableBytes: number;
+  cleanupScore?: number;
   samples: string[];
   confidence: "size-match";
   confidenceScore?: number;

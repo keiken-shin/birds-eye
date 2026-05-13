@@ -25,8 +25,11 @@ export type NativeIndexOverview = {
     id: number;
     size: number;
     file_count: number;
+    folder_count: number;
+    dominant_media_kind: string;
     reclaimable_bytes: number;
     confidence: number;
+    cleanup_score: number;
   }>;
   duplicate_overlaps: Array<{
     folder_a: string;
@@ -67,9 +70,16 @@ export type NativeIndexEntry = {
 };
 
 export type NativeDuplicateFile = {
+  id: number;
   path: string;
+  name: string;
+  folder_path: string;
   size: number;
   modified_at: number | null;
+  extension: string | null;
+  media_kind: string;
+  hash_match_type: string;
+  confidence: number;
 };
 
 export async function isNativeRuntime() {
@@ -149,6 +159,21 @@ export async function refreshNativeIndexPaths(indexPath: string, paths: string[]
     request: {
       index_path: indexPath,
       paths,
+    },
+  });
+}
+
+export async function validateNativeCleanupFiles(files: Array<{ path: string; size: number; modifiedAt: number | null }>) {
+  return invoke<{
+    can_commit: boolean;
+    results: Array<{ path: string; status: "valid" | "stale"; reason: string | null }>;
+  }>("validate_cleanup_files", {
+    request: {
+      files: files.map((file) => ({
+        path: file.path,
+        size: file.size,
+        modified_at: file.modifiedAt,
+      })),
     },
   });
 }

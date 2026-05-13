@@ -1389,6 +1389,25 @@ h2 {
   line-height: 1.5;
 }
 
+.duplicate-sort-control {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  color: #96a1b6;
+  font-size: 12px;
+}
+
+.duplicate-sort-control select {
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(12, 16, 24, 0.86);
+  color: #e5eefb;
+  padding: 0 10px;
+}
+
 .duplicate-list-header {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) 130px 96px auto;
@@ -1475,6 +1494,95 @@ h2 {
   font-size: 16px;
 }
 
+.duplicate-folder-summary {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(12, 16, 24, 0.46);
+  padding: 12px;
+}
+
+.duplicate-folder-summary > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.duplicate-folder-summary strong {
+  color: #ffffff;
+}
+
+.duplicate-folder-summary span,
+.duplicate-folder-summary small {
+  min-width: 0;
+  overflow: hidden;
+  color: #96a1b6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duplicate-folder-pairs,
+.duplicate-folder-breakdown {
+  display: grid;
+  gap: 8px;
+}
+
+.duplicate-folder-pairs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.duplicate-folder-pairs div,
+.duplicate-folder-breakdown div {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 8px;
+}
+
+.duplicate-folder-pairs div {
+  display: grid;
+  gap: 3px;
+}
+
+.duplicate-folder-breakdown div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.duplicate-keep-suggestion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(74, 222, 128, 0.22);
+  border-radius: 8px;
+  background: rgba(74, 222, 128, 0.07);
+  padding: 10px 12px;
+}
+
+.duplicate-keep-suggestion div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.duplicate-keep-suggestion span,
+.duplicate-keep-suggestion small {
+  color: #9fb0c8;
+  font-size: 12px;
+}
+
+.duplicate-keep-suggestion strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #ffffff;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .duplicate-detail-files {
   display: grid;
   gap: 8px;
@@ -1502,7 +1610,7 @@ h2 {
 .file-preview-list-header,
 .file-preview-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px 88px;
+  grid-template-columns: minmax(0, 1fr) 96px 88px auto;
   gap: 10px;
   align-items: center;
 }
@@ -1516,13 +1624,14 @@ h2 {
 }
 
 .file-preview-list-header span:nth-child(2),
-.file-preview-list-header span:nth-child(3) {
+.file-preview-list-header span:nth-child(3),
+.file-preview-list-header span:nth-child(4) {
   text-align: right;
 }
 
 .file-preview-row {
   width: 100%;
-  min-height: 58px;
+  min-height: 86px;
   border: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   background: transparent;
@@ -1552,6 +1661,36 @@ h2 {
   min-width: 0;
 }
 
+.file-preview-badges,
+.file-preview-row-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.file-preview-badges span {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+}
+
+.file-preview-row-actions {
+  justify-content: flex-end;
+}
+
+.file-preview-row-actions .icon-cta {
+  width: 30px;
+  height: 30px;
+}
+
 .file-preview-row-name strong,
 .file-preview-row-name small,
 .file-preview-row > strong,
@@ -1574,6 +1713,26 @@ h2 {
 .file-preview-row > strong,
 .file-preview-row > small {
   text-align: right;
+}
+
+.status-pill.safe {
+  background: rgba(74, 222, 128, 0.16);
+  color: #86efac;
+}
+
+.status-pill.medium {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fde68a;
+}
+
+.status-pill.risky {
+  background: rgba(251, 113, 133, 0.16);
+  color: #fda4af;
+}
+
+.status-pill.manual {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
 }
 
 .file-preview-pane {
@@ -2180,6 +2339,23 @@ button.overlap-pair:focus-visible {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.staged-operation-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.staged-operation-meta span {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
 }
 
 .staged-row strong,
