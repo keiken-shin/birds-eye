@@ -134,6 +134,7 @@ function App() {
   const [focusedFolder, setFocusedFolder] = useState<string | null>(null);
   const [duplicateFiles, setDuplicateFiles] = useState<NativeDuplicateFile[]>([]);
   const [selectedDuplicateGroup, setSelectedDuplicateGroup] = useState<number | null>(null);
+  const [duplicateComparePaths, setDuplicateComparePaths] = useState<Record<number, string[]>>({});
   const [retainedDuplicatePaths, setRetainedDuplicatePaths] = useState<Record<number, string>>({});
   const [savedIndexes, setSavedIndexes] = useState<NativeIndexEntry[]>([]);
   const [stagedActions, setStagedActions] = useState<StagedAction[]>([]);
@@ -222,6 +223,14 @@ function App() {
   const duplicateKeepSuggestion = useMemo(() => {
     return suggestDuplicateKeepFile(duplicateFiles);
   }, [duplicateFiles]);
+  const duplicateComparisonFiles = useMemo(() => {
+    if (!selectedDuplicateGroup) return [];
+    const paths = duplicateComparePaths[selectedDuplicateGroup] ?? duplicatePreviewFiles.slice(0, 2).map((file) => file.path);
+    return paths
+      .map((path) => duplicatePreviewFiles.find((file) => file.path === path))
+      .filter((file): file is PreviewableFile => Boolean(file))
+      .slice(0, 2);
+  }, [duplicateComparePaths, duplicatePreviewFiles, selectedDuplicateGroup]);
 
   const filteredFolders = useMemo(() => {
     const categoryFolders = filter === "all"
@@ -1054,6 +1063,11 @@ function App() {
                           </IconButton>
                         </div>
                       )}
+                      <DuplicateComparisonPanel
+                        files={duplicateComparisonFiles}
+                        exact={selectedDuplicateCandidate.confidenceScore === 1}
+                        nativeRuntime={nativeRuntime}
+                      />
                       <div className="duplicate-detail-files">
                         {duplicatePreviewFiles.length === 0 ? (
                           <div className="empty-state compact">Select this group again to load file details.</div>
@@ -1086,6 +1100,12 @@ function App() {
                                   void revealPath(file.path);
                                 }}>
                                   <ExternalLink size={16} />
+                                </IconButton>
+                                <IconButton title="Compare this copy" onClick={(event) => {
+                                  event.stopPropagation();
+                                  toggleDuplicateComparison(file);
+                                }}>
+                                  <Square size={16} />
                                 </IconButton>
                                 <IconButton
                                   disabled={!canStageSelectedDuplicateKeep()}
@@ -1362,6 +1382,25 @@ function App() {
       };
     }));
     setRuntimeMessage(`Marked ${keepFile.name} as the retained copy for this duplicate group`);
+  }
+
+  function toggleDuplicateComparison(file: Pick<PreviewableFile, "path" | "name">) {
+    const candidate = scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup);
+    if (!candidate?.id) {
+      setRuntimeMessage("Choose a duplicate group before comparing copies");
+      return;
+    }
+
+    const groupId = candidate.id;
+    setDuplicateComparePaths((current) => {
+      const existing = current[groupId] ?? duplicatePreviewFiles.slice(0, 2).map((previewFile) => previewFile.path);
+      const next = existing.includes(file.path)
+        ? existing.filter((path) => path !== file.path)
+        : [...existing, file.path].slice(-2);
+
+      return { ...current, [groupId]: next };
+    });
+    setRuntimeMessage(`Comparison updated with ${file.name}`);
   }
 
   function stageSelectedDuplicateKeep(keepFile: Pick<PreviewableFile, "path">) {
@@ -2035,6 +2074,87 @@ function DuplicateSummary({
         Start with groups marked Safe. Each row is one duplicate set: keep one copy, review the listed files, then stage the group into the Review Queue.
         {overlaps.length > 0 ? " The folder overlap map is available for spotting folders that share many duplicate files." : ""}
       </p>
+    </div>
+  );
+}
+
+function DuplicateComparisonPanel({
+  files,
+  exact,
+  nativeRuntime,
+}: {
+  files: PreviewableFile[];
+  exact: boolean;
+  nativeRuntime: boolean;
+}) {
+  if (files.length < 2) {
+    return (
+      <div className="duplicate-comparison-panel empty">
+        <strong>Select two copies to compare</strong>
+        <span>Use the compare action on duplicate rows before choosing which copy to keep.</span>
+      </div>
+    );
+  }
+
+  const [left, right] = files;
+  const sameSize = left.size === right.size;
+  const sameModified = left.modifiedAt === right.modifiedAt;
+  const sameExtension = left.extension === right.extension;
+  const sameMediaKind = left.mediaKind === right.mediaKind;
+  const sameHashStatus = left.hashMatchType === right.hashMatchType && left.confidence === right.confidence;
+
+  return (
+    <div className={`duplicate-comparison-panel ${exact ? "exact" : "review"}`}>
+      <div className="duplicate-comparison-header">
+        <div>
+          <strong>{exact ? "Content is identical" : "Review required"}</strong>
+          <span>{exact ? "Keeping either copy preserves the file data." : "These candidates are not full-hash confirmed; inspect before staging cleanup."}</span>
+        </div>
+        <small className={`confidence-pill ${exact ? "safe" : "medium"}`}>{exact ? "Safe" : "Review"}</small>
+      </div>
+      <div className="duplicate-comparison-files">
+        {[left, right].map((file) => (
+          <div key={file.path} className="duplicate-comparison-card">
+            <ComparisonPreview file={file} nativeRuntime={nativeRuntime} />
+            <strong title={file.name}>{file.name}</strong>
+            <span title={file.path}>{file.path}</span>
+            <small title={file.folderPath}>{file.folderPath}</small>
+          </div>
+        ))}
+      </div>
+      <div className="duplicate-comparison-grid">
+        <ComparisonRow label="Path" left={left.path} right={right.path} same={left.path === right.path} />
+        <ComparisonRow label="Modified" left={left.modifiedAt ? formatDate(left.modifiedAt) : "No date"} right={right.modifiedAt ? formatDate(right.modifiedAt) : "No date"} same={sameModified} />
+        <ComparisonRow label="Size" left={formatBytes(left.size)} right={formatBytes(right.size)} same={sameSize} />
+        <ComparisonRow label="Hash status" left={`${left.hashMatchType ?? "size"} - ${Math.round((left.confidence ?? 0) * 100)}%`} right={`${right.hashMatchType ?? "size"} - ${Math.round((right.confidence ?? 0) * 100)}%`} same={sameHashStatus} />
+        <ComparisonRow label="Metadata" left={`${left.mediaKind}, ${left.extension}`} right={`${right.mediaKind}, ${right.extension}`} same={sameExtension && sameMediaKind} />
+      </div>
+    </div>
+  );
+}
+
+function ComparisonPreview({ file, nativeRuntime }: { file: PreviewableFile; nativeRuntime: boolean }) {
+  const canRenderPhoto = nativeRuntime && file.category === "photos";
+  const canRenderVideo = nativeRuntime && file.category === "videos";
+  const canRenderAudio = nativeRuntime && file.category === "music";
+
+  return (
+    <div className="comparison-preview">
+      {canRenderPhoto && <img src={convertFileSrc(file.path)} alt="" loading="lazy" />}
+      {canRenderVideo && <video src={convertFileSrc(file.path)} preload="metadata" muted />}
+      {canRenderAudio && <audio src={convertFileSrc(file.path)} controls preload="metadata" />}
+      {!canRenderPhoto && !canRenderVideo && !canRenderAudio && fileTypeIcon(file, 26)}
+    </div>
+  );
+}
+
+function ComparisonRow({ label, left, right, same }: { label: string; left: string; right: string; same: boolean }) {
+  return (
+    <div className={`comparison-row ${same ? "same" : "different"}`}>
+      <span>{label}</span>
+      <strong title={left}>{left}</strong>
+      <strong title={right}>{right}</strong>
+      <small>{same ? "Same" : "Different"}</small>
     </div>
   );
 }

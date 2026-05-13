@@ -1583,6 +1583,138 @@ h2 {
   white-space: nowrap;
 }
 
+.duplicate-comparison-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(12, 16, 24, 0.48);
+  padding: 12px;
+}
+
+.duplicate-comparison-panel.exact {
+  border-color: rgba(74, 222, 128, 0.22);
+  background: rgba(74, 222, 128, 0.06);
+}
+
+.duplicate-comparison-panel.review {
+  border-color: rgba(251, 191, 36, 0.2);
+  background: rgba(251, 191, 36, 0.06);
+}
+
+.duplicate-comparison-panel.empty {
+  color: #96a1b6;
+}
+
+.duplicate-comparison-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.duplicate-comparison-header div,
+.duplicate-comparison-card {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.duplicate-comparison-header strong,
+.duplicate-comparison-card strong {
+  color: #ffffff;
+}
+
+.duplicate-comparison-header span,
+.duplicate-comparison-card span,
+.duplicate-comparison-card small {
+  min-width: 0;
+  overflow: hidden;
+  color: #96a1b6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duplicate-comparison-files {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.duplicate-comparison-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 10px;
+}
+
+.comparison-preview {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  min-height: 120px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  color: #96a1b6;
+}
+
+.comparison-preview img,
+.comparison-preview video {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  object-fit: contain;
+}
+
+.comparison-preview audio {
+  width: 100%;
+}
+
+.duplicate-comparison-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.comparison-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) minmax(0, 1fr) 82px;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 6px;
+}
+
+.comparison-row span,
+.comparison-row strong,
+.comparison-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comparison-row span,
+.comparison-row small {
+  color: #96a1b6;
+  font-size: 12px;
+}
+
+.comparison-row strong {
+  color: #dce6f5;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.comparison-row.same small {
+  color: #86efac;
+}
+
+.comparison-row.different small {
+  color: #fde68a;
+}
+
 .duplicate-detail-files {
   display: grid;
   gap: 8px;
