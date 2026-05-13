@@ -2358,6 +2358,81 @@ button.overlap-pair:focus-visible {
   padding: 3px 8px;
 }
 
+.staged-duplicate-audit {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(12, 16, 24, 0.42);
+  padding: 10px;
+}
+
+.staged-audit-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.35fr);
+  gap: 10px;
+}
+
+.staged-audit-grid > div,
+.staged-recycle-list,
+.staged-folder-list,
+.staged-warning {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.staged-audit-grid > div {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 8px;
+}
+
+.staged-recycle-list,
+.staged-folder-list {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 8px;
+}
+
+.staged-recycle-list > span,
+.staged-folder-list > span,
+.staged-audit-grid span {
+  color: #dce6f5;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.staged-recycle-list div,
+.staged-folder-list div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.staged-duplicate-audit strong,
+.staged-duplicate-audit span,
+.staged-duplicate-audit small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staged-warning {
+  border: 1px solid rgba(251, 113, 133, 0.25);
+  border-radius: 8px;
+  background: rgba(251, 113, 133, 0.08);
+  padding: 8px;
+}
+
+.staged-warning strong {
+  color: #fda4af;
+}
+
 .staged-row strong,
 .staged-row span {
   min-width: 0;

@@ -82,6 +82,9 @@ type StagedAction = {
     duplicateGroupId?: number;
     keepFileId?: number;
     removeFileIds?: number[];
+    keepName?: string;
+    recycleFiles?: Array<{ id: number; path: string; name: string; size: number }>;
+    affectedFolders?: Array<{ path: string; files: number; bytes: number }>;
     expectedFiles?: Array<{ path: string; size: number; modifiedAt: number | null }>;
     rollbackHint?: string;
   };
@@ -1156,11 +1159,7 @@ function App() {
                           <strong>{action.suggestedAction}</strong>
                         </div>
                         {action.operation?.kind === "recycleFiles" && (
-                          <div className="staged-operation-meta">
-                            <span>Group {action.operation.duplicateGroupId ?? "n/a"}</span>
-                            <span>Keep file {action.operation.keepFileId ?? "n/a"}</span>
-                            <span>Recycle {formatCount(action.operation.removeFileIds?.length ?? action.operation.removePaths.length)} files</span>
-                          </div>
+                          <StagedDuplicateAudit action={action} />
                         )}
                       </div>
                       <small className={`confidence-pill ${confidenceClass(action.confidence)}`}>{action.confidence}</small>
@@ -2040,6 +2039,71 @@ function DuplicateSummary({
   );
 }
 
+function StagedDuplicateAudit({ action }: { action: StagedAction }) {
+  if (action.operation?.kind !== "recycleFiles") return null;
+
+  const operation = action.operation;
+  const recyclePreview = operation.recycleFiles?.slice(0, 4) ?? operation.removePaths.slice(0, 4).map((path, index) => ({
+    id: operation.removeFileIds?.[index] ?? index,
+    path,
+    name: lastSegment(path),
+    size: 0,
+  }));
+  const remainingRecycleFiles = Math.max(0, operation.removePaths.length - recyclePreview.length);
+  const staleWarnings = action.evidence.filter((item) => item.startsWith("Blocked:"));
+
+  return (
+    <div className="staged-duplicate-audit">
+      <div className="staged-operation-meta">
+        <span>Group {operation.duplicateGroupId ?? "n/a"}</span>
+        <span>Keep file {operation.keepFileId ?? "n/a"}</span>
+        <span>Recycle {formatCount(operation.removeFileIds?.length ?? operation.removePaths.length)} files</span>
+      </div>
+      <div className="staged-audit-grid">
+        <div>
+          <span>Retained copy</span>
+          <strong title={operation.keepPath}>{operation.keepName ?? lastSegment(operation.keepPath)}</strong>
+          <small title={operation.keepPath}>{operation.keepPath}</small>
+        </div>
+        <div>
+          <span>Reclaimable space</span>
+          <strong>{formatBytes(action.bytes)}</strong>
+          <small>{action.confidence} confidence</small>
+        </div>
+      </div>
+      <div className="staged-recycle-list">
+        <span>Copies to recycle</span>
+        {recyclePreview.map((file) => (
+          <div key={`${file.id}-${file.path}`}>
+            <strong title={file.path}>{file.name}</strong>
+            <small>{file.size > 0 ? formatBytes(file.size) : "Indexed duplicate"}</small>
+          </div>
+        ))}
+        {remainingRecycleFiles > 0 && <small>{formatCount(remainingRecycleFiles)} more copies queued</small>}
+      </div>
+      {(operation.affectedFolders?.length ?? 0) > 0 && (
+        <div className="staged-folder-list">
+          <span>Affected folders</span>
+          {operation.affectedFolders?.map((folder) => (
+            <div key={folder.path}>
+              <strong title={folder.path}>{folder.path}</strong>
+              <small>{formatCount(folder.files)} copies - {formatBytes(folder.bytes)}</small>
+            </div>
+          ))}
+        </div>
+      )}
+      {staleWarnings.length > 0 && (
+        <div className="staged-warning">
+          <strong>Commit blocked</strong>
+          {staleWarnings.map((warning) => (
+            <span key={warning}>{warning.replace("Blocked: ", "")}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ActionHeatmap({ scan, onStageAction }: { scan: ScanState; onStageAction: (folder: FolderStats, action: HeatmapActionCell) => void }) {
   const duplicateBytesByFolder = new Map<string, number>();
   for (const overlap of scan.duplicateOverlaps) {
@@ -2691,6 +2755,14 @@ function buildDuplicateRecycleOperation(groupId: number, files: NativeDuplicateF
     duplicateGroupId: groupId,
     keepFileId: keepFile?.id,
     removeFileIds: removeFiles.map((file) => file.id),
+    keepName: keepFile?.name ?? lastSegment(keepPath),
+    recycleFiles: removeFiles.map((file) => ({
+      id: file.id,
+      path: file.path,
+      name: file.name,
+      size: file.size,
+    })),
+    affectedFolders: summarizeOperationFolders(files),
     expectedFiles: files.map((file) => ({
       path: file.path,
       size: file.size,
@@ -2698,6 +2770,23 @@ function buildDuplicateRecycleOperation(groupId: number, files: NativeDuplicateF
     })),
     rollbackHint: "Files are moved to the OS Recycle Bin when available; restore from there before emptying it.",
   };
+}
+
+function summarizeOperationFolders(files: NativeDuplicateFile[]) {
+  const folders = new Map<string, { path: string; files: number; bytes: number }>();
+
+  for (const file of files) {
+    const current = folders.get(file.folder_path) ?? {
+      path: file.folder_path,
+      files: 0,
+      bytes: 0,
+    };
+    current.files += 1;
+    current.bytes += file.size;
+    folders.set(file.folder_path, current);
+  }
+
+  return [...folders.values()].sort((a, b) => b.files - a.files || b.bytes - a.bytes || a.path.localeCompare(b.path));
 }
 
 function buildDuplicateFolderRelationship(files: NativeDuplicateFile[]) {
