@@ -8,6 +8,10 @@ import {
   Database,
   Eye,
   ExternalLink,
+  FileAudio,
+  FileImage,
+  FileText,
+  FileVideo,
   FolderOpen,
   MoveRight,
   Pause,
@@ -22,10 +26,12 @@ import {
 import { motion } from "framer-motion";
 import {
   categories,
+  classifyFile,
   emptyCategories,
   emptyFolderCategories,
   formatBytes,
   formatCount,
+  getExtension,
   initialScanState,
   lastSegment,
   type CategoryKey,
@@ -80,6 +86,15 @@ type MoveSuggestion = {
   destination: string;
   sourceFolders: Array<{ path: string; bytes: number; files: number }>;
   yearBuckets: Array<{ year: string; files: number }>;
+};
+
+type PreviewableFile = {
+  path: string;
+  name: string;
+  size: number;
+  extension: string;
+  category: CategoryKey;
+  modifiedAt: number | null;
 };
 
 type AppPage = "workspace" | "index";
@@ -154,6 +169,19 @@ function App() {
   const selectedDuplicateCandidate = useMemo(() => {
     return scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup) ?? null;
   }, [scan.duplicateCandidates, selectedDuplicateGroup]);
+  const duplicatePreviewFiles = useMemo(() => {
+    return duplicateFiles.map((file): PreviewableFile => {
+      const extension = getExtension(lastSegment(file.path));
+      return {
+        path: file.path,
+        name: lastSegment(file.path),
+        size: file.size,
+        extension,
+        category: classifyFile(file.path),
+        modifiedAt: file.modified_at,
+      };
+    });
+  }, [duplicateFiles]);
 
   const filteredFolders = useMemo(() => {
     const categoryFolders = filter === "all"
@@ -893,22 +921,15 @@ function App() {
                         </div>
                       </div>
                       <div className="duplicate-detail-files">
-                        <div className="duplicate-detail-list-header" aria-hidden="true">
-                          <span>File</span>
-                          <span>Size</span>
-                          <span>Modified</span>
-                          <span>Keep</span>
-                          <span>Open</span>
-                        </div>
-                        {duplicateFiles.length === 0 ? (
+                        {duplicatePreviewFiles.length === 0 ? (
                           <div className="empty-state compact">Select this group again to load file details.</div>
                         ) : (
-                          <ScrollableRows compact>
-                            {duplicateFiles.map((file) => (
-                              <div className="folder-row file-row duplicate-detail-row" key={file.path}>
-                                <span>{file.path}</span>
-                                <strong>{formatBytes(file.size)}</strong>
-                                <small>{file.modified_at ? formatDate(file.modified_at) : "-"}</small>
+                          <FilePreviewWorkbench
+                            files={duplicatePreviewFiles}
+                            nativeRuntime={nativeRuntime}
+                            emptyLabel="Select a duplicate copy"
+                            renderFileActions={(file) => (
+                              <>
                                 <IconButton
                                   disabled={!canStageSelectedDuplicateKeep()}
                                   title="Keep this copy when staging duplicate cleanup"
@@ -919,9 +940,9 @@ function App() {
                                 <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
                                   <ExternalLink size={16} />
                                 </IconButton>
-                              </div>
-                            ))}
-                          </ScrollableRows>
+                              </>
+                            )}
+                          />
                         )}
                         {selectedDuplicateCandidate.files > duplicateFiles.length && (
                           <span className="duplicate-detail-footnote">
@@ -1143,7 +1164,7 @@ function App() {
     return Boolean(candidate?.id && candidate.confidenceScore === 1 && duplicateFiles.length > 1);
   }
 
-  function stageSelectedDuplicateKeep(keepFile: NativeDuplicateFile) {
+  function stageSelectedDuplicateKeep(keepFile: Pick<PreviewableFile, "path">) {
     const candidate = scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup);
     if (!candidate || candidate.confidenceScore !== 1 || duplicateFiles.length <= 1) {
       setRuntimeMessage("Choose an exact duplicate group before selecting the retained copy");
@@ -2202,6 +2223,105 @@ function BeforeAfterSimulation({
       )}
     </section>
   );
+}
+
+function FilePreviewWorkbench({
+  files,
+  nativeRuntime,
+  emptyLabel,
+  renderFileActions,
+}: {
+  files: PreviewableFile[];
+  nativeRuntime: boolean;
+  emptyLabel: string;
+  renderFileActions?: (file: PreviewableFile) => React.ReactNode;
+}) {
+  const [selectedPath, setSelectedPath] = useState(files[0]?.path ?? "");
+
+  useEffect(() => {
+    if (files.length === 0) {
+      setSelectedPath("");
+      return;
+    }
+    if (!files.some((file) => file.path === selectedPath)) {
+      setSelectedPath(files[0].path);
+    }
+  }, [files, selectedPath]);
+
+  const selectedFile = files.find((file) => file.path === selectedPath) ?? files[0] ?? null;
+
+  if (!selectedFile) {
+    return <div className="empty-state compact">{emptyLabel}</div>;
+  }
+
+  const canRenderPhoto = nativeRuntime && selectedFile.category === "photos";
+  const canRenderVideo = nativeRuntime && selectedFile.category === "videos";
+  const canRenderAudio = nativeRuntime && selectedFile.category === "music";
+  const canRenderInline = canRenderPhoto || canRenderVideo || canRenderAudio;
+
+  return (
+    <div className="file-preview-workbench">
+      <div className="file-preview-list" aria-label="Files in this review set">
+        <div className="file-preview-list-header" aria-hidden="true">
+          <span>File</span>
+          <span>Size</span>
+          <span>Modified</span>
+        </div>
+        <ScrollableRows compact>
+          {files.map((file) => (
+            <button
+              className={`file-preview-row ${file.path === selectedFile.path ? "active" : ""}`}
+              key={file.path}
+              type="button"
+              onClick={() => setSelectedPath(file.path)}
+            >
+              <span className="file-preview-row-name">
+                {fileTypeIcon(file)}
+                <span>
+                  <strong>{file.name}</strong>
+                  <small>{file.path}</small>
+                </span>
+              </span>
+              <strong>{formatBytes(file.size)}</strong>
+              <small>{file.modifiedAt ? formatDate(file.modifiedAt) : "-"}</small>
+            </button>
+          ))}
+        </ScrollableRows>
+      </div>
+      <aside className="file-preview-pane">
+        <div className="file-preview-frame">
+          {canRenderPhoto && <img src={convertFileSrc(selectedFile.path)} alt="" loading="lazy" />}
+          {canRenderVideo && <video src={convertFileSrc(selectedFile.path)} controls preload="metadata" />}
+          {canRenderAudio && <audio src={convertFileSrc(selectedFile.path)} controls preload="metadata" />}
+          {!canRenderInline && (
+            <div className="file-preview-fallback">
+              {fileTypeIcon(selectedFile, 28)}
+              <strong>{nativeRuntime ? "Preview not available" : "Native preview required"}</strong>
+              <span>{categories[selectedFile.category].label}</span>
+            </div>
+          )}
+        </div>
+        <div className="file-preview-meta">
+          <strong title={selectedFile.name}>{selectedFile.name}</strong>
+          <span>{formatBytes(selectedFile.size)} · {selectedFile.extension}</span>
+          <span>{selectedFile.modifiedAt ? formatDate(selectedFile.modifiedAt) : "No modified date"}</span>
+          <small title={selectedFile.path}>{selectedFile.path}</small>
+        </div>
+        {renderFileActions && (
+          <div className="file-preview-actions">
+            {renderFileActions(selectedFile)}
+          </div>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+function fileTypeIcon(file: PreviewableFile, size = 16) {
+  if (file.category === "photos") return <FileImage size={size} />;
+  if (file.category === "videos") return <FileVideo size={size} />;
+  if (file.category === "music") return <FileAudio size={size} />;
+  return <FileText size={size} />;
 }
 
 function MediaPreviewPanel({ file, nativeRuntime }: { file: ScanState["largestFiles"][number] | null; nativeRuntime: boolean }) {
