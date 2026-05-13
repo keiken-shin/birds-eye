@@ -13,6 +13,7 @@ import {
   FileText,
   FileVideo,
   FolderOpen,
+  Keyboard,
   MoveRight,
   Pause,
   Play,
@@ -132,6 +133,7 @@ function App() {
   const [showSimulation, setShowSimulation] = useState(true);
   const [showDuplicates, setShowDuplicates] = useState(true);
   const [showReviewQueue, setShowReviewQueue] = useState(true);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const isWindowsRuntime = useMemo(() => {
     return typeof navigator !== "undefined" && navigator.userAgent.toLowerCase().includes("windows");
   }, []);
@@ -258,7 +260,9 @@ function App() {
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
-      const isTyping = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT";
+      const isTyping = isEditableShortcutTarget(target);
+      const hasModifier = event.altKey || event.ctrlKey || event.metaKey;
+      if (hasModifier) return;
       if (isTyping && event.key !== "Escape") return;
 
       if (event.key === "/") {
@@ -269,26 +273,39 @@ function App() {
       }
 
       if (event.key === "Escape") {
+        event.preventDefault();
         setFocusedFolder(null);
+        setSelectedFolders([]);
+        setSelectionMode(false);
+        setShowShortcutHelp(false);
         searchInputRef.current?.blur();
         return;
       }
 
+      if (event.key === "?" || event.key.toLowerCase() === "h") {
+        event.preventDefault();
+        setShowShortcutHelp((current) => !current);
+        return;
+      }
+
       if (event.key.toLowerCase() === "i") {
+        event.preventDefault();
         setActivePage("index");
         return;
       }
 
       if (event.key.toLowerCase() === "w") {
+        event.preventDefault();
         setActivePage("workspace");
         return;
       }
 
       const filterKeys: Array<CategoryKey | "all"> = ["all", "photos", "videos", "music", "documents", "archives", "code", "installers", "models", "other"];
-      const numericKey = Number(event.key);
-      if (Number.isInteger(numericKey) && numericKey >= 1 && numericKey <= filterKeys.length) {
+      const filterIndex = event.key === "0" ? 9 : Number(event.key) - 1;
+      if (Number.isInteger(filterIndex) && filterIndex >= 0 && filterIndex < filterKeys.length) {
+        event.preventDefault();
         setActivePage("workspace");
-        setFilter(filterKeys[numericKey - 1]);
+        setFilter(filterKeys[filterIndex]);
       }
     }
 
@@ -512,6 +529,16 @@ function App() {
                 <Trash2 size={18} />
               </button>
             )}
+            <button
+              className={`ghost-action ${showShortcutHelp ? "active" : ""}`}
+              type="button"
+              onClick={() => setShowShortcutHelp((current) => !current)}
+              title="Keyboard shortcuts"
+              aria-label="Keyboard shortcuts"
+              aria-expanded={showShortcutHelp}
+            >
+              <Keyboard size={18} />
+            </button>
           </div>
         </header>
 
@@ -559,6 +586,8 @@ function App() {
             </button>
           ))}
         </section>
+
+        {showShortcutHelp && <ShortcutHelp />}
 
         <details className="layout-controls">
           <summary>Layout controls</summary>
@@ -2537,6 +2566,28 @@ function buildSuggestionYearBuckets(files: ScanState["largestFiles"], category: 
     .slice(0, 5);
 }
 
+function ShortcutHelp() {
+  const shortcuts = [
+    { keys: "/", label: "Focus search" },
+    { keys: "1-0", label: "Switch category filters" },
+    { keys: "W", label: "Show workspace" },
+    { keys: "I", label: "Show index library" },
+    { keys: "Esc", label: "Clear focus and batch selection" },
+    { keys: "? / H", label: "Toggle this shortcut reference" },
+  ];
+
+  return (
+    <section className="shortcut-help" aria-label="Keyboard shortcut reference">
+      {shortcuts.map((shortcut) => (
+        <span key={shortcut.keys}>
+          <kbd>{shortcut.keys}</kbd>
+          {shortcut.label}
+        </span>
+      ))}
+    </section>
+  );
+}
+
 function IconButton({
   children,
   className = "",
@@ -2618,6 +2669,12 @@ function isDescendantPath(path: string, parent: string) {
   const normalizedParent = normalizePath(parent);
   if (normalizedPath === normalizedParent) return false;
   return normalizedPath.startsWith(`${normalizedParent}\\`) || normalizedPath.startsWith(`${normalizedParent}/`);
+}
+
+function isEditableShortcutTarget(target: HTMLElement | null) {
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  return target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT";
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

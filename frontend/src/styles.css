@@ -180,6 +180,12 @@ h2 {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.ghost-action.active {
+  border-color: rgba(71, 215, 198, 0.46);
+  background: rgba(71, 215, 198, 0.14);
+  color: #ffffff;
+}
+
 .ghost-action.danger {
   color: #fb7185;
 }
@@ -293,6 +299,42 @@ h2 {
   width: 10px;
   height: 10px;
   border-radius: 50%;
+}
+
+.shortcut-help {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: -4px 0 14px;
+  border: 1px solid rgba(71, 215, 198, 0.22);
+  border-radius: 8px;
+  background: rgba(71, 215, 198, 0.08);
+  color: #c9d2e3;
+  padding: 10px;
+}
+
+.shortcut-help span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 5px 8px;
+}
+
+.shortcut-help kbd {
+  min-width: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 5px;
+  background: rgba(6, 9, 14, 0.74);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 5px 6px;
+  text-align: center;
 }
 
 .analysis-layout {
@@ -561,6 +603,14 @@ h2 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   margin-top: 5px;
+}
+
+.tooltip-preview-empty {
+  margin-top: 4px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #b7c1d3;
+  padding: 6px 7px;
 }
 
 .tooltip-category-mix {

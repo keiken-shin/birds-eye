@@ -133,7 +133,7 @@ export function TreemapCanvas({
           <span>{formatBytes(hover.folder.displayBytes)}</span>
           <span>{hover.folder.files.toLocaleString()} files</span>
           <FolderCategoryMix folder={hover.folder} />
-          <FolderFilmstrip samples={filmstripSamples} nativeRuntime={nativeRuntime} />
+          <FolderFilmstrip folder={hover.folder} samples={filmstripSamples} nativeRuntime={nativeRuntime} />
         </div>
       )}
     </div>
@@ -163,9 +163,10 @@ function FolderCategoryMix({ folder }: { folder: TreemapFolder }) {
   );
 }
 
-function FolderFilmstrip({ samples, nativeRuntime }: { samples: FileStats[]; nativeRuntime: boolean }) {
+function FolderFilmstrip({ folder, samples, nativeRuntime }: { folder: TreemapFolder; samples: FileStats[]; nativeRuntime: boolean }) {
+  const hasPreviewableMedia = folder.categories.photos > 0 || folder.categories.videos > 0;
   if (samples.length === 0) {
-    return null;
+    return hasPreviewableMedia ? <span className="tooltip-preview-empty">No indexed media samples available for this folder</span> : null;
   }
 
   return (
@@ -173,14 +174,31 @@ function FolderFilmstrip({ samples, nativeRuntime }: { samples: FileStats[]; nat
       {samples.map((file) => (
         <div className={`filmstrip-frame ${file.category}`} key={file.path}>
           {nativeRuntime && file.category === "photos" ? (
-            <img src={toAssetUrl(file.path)} alt="" loading="lazy" />
+            <PreviewImage file={file} />
           ) : (
-            <span title={lastSegment(file.path)}>{lastSegment(file.path)}</span>
+            <span title={lastSegment(file.path)}>{getFilmstripLabel(file)}</span>
           )}
         </div>
       ))}
     </div>
   );
+}
+
+function PreviewImage({ file }: { file: FileStats }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return <span title={lastSegment(file.path)}>Preview unavailable</span>;
+  }
+
+  return <img src={toAssetUrl(file.path)} alt="" loading="lazy" onError={() => setFailed(true)} />;
+}
+
+function getFilmstripLabel(file: FileStats) {
+  if (file.category === "videos") {
+    return `Video ${lastSegment(file.path)}`;
+  }
+  return lastSegment(file.path);
 }
 
 function getTooltipPosition(x: number, y: number, width: number, height: number) {
