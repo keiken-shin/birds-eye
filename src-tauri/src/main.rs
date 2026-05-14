@@ -1,10 +1,13 @@
 use birds_eye::native::api::{
+    get_file_preview as get_native_file_preview,
+    get_media_metadata as get_native_media_metadata, get_thumbnail as get_native_thumbnail,
     index_metadata, refresh_duplicate_group as refresh_native_duplicate_group,
     refresh_index_paths as refresh_native_index_paths,
     validate_cleanup_files as validate_native_cleanup_files,
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
     search_files as search_index_files, DuplicateFileSummaryDto, DuplicateGroupFilesRequest,
-    FileSearchResultDto, IndexMetadataDto, IndexOverviewDto, IndexQueryRequest,
+    FileMediaMetadataDto, FilePreviewDto, FilePreviewRequest, FileSearchResultDto,
+    IndexMetadataDto, IndexOverviewDto, IndexQueryRequest,
     RefreshDuplicateGroupRequest, RefreshDuplicateGroupResponse,
     RefreshIndexPathsRequest, RefreshIndexPathsResponse, ScanToIndexRequest, ScanToIndexResponse,
     SearchFilesRequest, ValidateCleanupFilesRequest, ValidateCleanupFilesResponse,
@@ -50,6 +53,21 @@ fn duplicate_group_files(
     request: DuplicateGroupFilesRequest,
 ) -> Result<Vec<DuplicateFileSummaryDto>, String> {
     query_duplicate_group_files(request)
+}
+
+#[tauri::command]
+fn get_file_preview(request: FilePreviewRequest) -> Result<FilePreviewDto, String> {
+    get_native_file_preview(request)
+}
+
+#[tauri::command]
+fn get_thumbnail(request: FilePreviewRequest) -> Result<FilePreviewDto, String> {
+    get_native_thumbnail(request)
+}
+
+#[tauri::command]
+fn get_media_metadata(request: FilePreviewRequest) -> Result<FileMediaMetadataDto, String> {
+    get_native_media_metadata(request)
 }
 
 #[tauri::command]
@@ -301,6 +319,9 @@ fn main() {
             query_index,
             search_files,
             duplicate_group_files,
+            get_file_preview,
+            get_thumbnail,
+            get_media_metadata,
             refresh_duplicate_group,
             refresh_index_paths,
             validate_cleanup_files,

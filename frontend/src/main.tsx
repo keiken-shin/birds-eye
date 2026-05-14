@@ -114,6 +114,15 @@ type PreviewableFile = {
   confidence?: number;
 };
 
+type ResolvedPreview = {
+  mode: "image" | "video" | "audio" | "document" | "generic" | "unavailable";
+  cacheKey: string;
+  label: string;
+};
+
+const previewFailureCache = new Map<string, true>();
+const maxPreviewFailureCacheEntries = 300;
+
 type AppPage = "workspace" | "index";
 type DuplicateSortKey = "cleanup" | "reclaimable" | "files" | "folders" | "confidence";
 type DuplicateReviewFilters = {
@@ -2448,16 +2457,14 @@ function DuplicateComparisonPanel({
 }
 
 function ComparisonPreview({ file, nativeRuntime }: { file: PreviewableFile; nativeRuntime: boolean }) {
-  const canRenderPhoto = nativeRuntime && file.category === "photos";
-  const canRenderVideo = nativeRuntime && file.category === "videos";
-  const canRenderAudio = nativeRuntime && file.category === "music";
+  const resolvedPreview = resolveFilePreview(file, nativeRuntime);
 
   return (
     <div className="comparison-preview">
-      {canRenderPhoto && <img src={convertFileSrc(file.path)} alt="" loading="lazy" />}
-      {canRenderVideo && <video src={convertFileSrc(file.path)} preload="metadata" muted />}
-      {canRenderAudio && <audio src={convertFileSrc(file.path)} controls preload="metadata" />}
-      {!canRenderPhoto && !canRenderVideo && !canRenderAudio && fileTypeIcon(file, 26)}
+      {resolvedPreview.mode === "image" && <img src={convertFileSrc(file.path)} alt="" loading="lazy" onError={() => rememberPreviewFailure(resolvedPreview.cacheKey)} />}
+      {resolvedPreview.mode === "video" && <video src={convertFileSrc(file.path)} preload="metadata" muted onError={() => rememberPreviewFailure(resolvedPreview.cacheKey)} />}
+      {resolvedPreview.mode === "audio" && <audio src={convertFileSrc(file.path)} controls preload="metadata" onError={() => rememberPreviewFailure(resolvedPreview.cacheKey)} />}
+      {!["image", "video", "audio"].includes(resolvedPreview.mode) && fileTypeIcon(file, 26)}
     </div>
   );
 }
@@ -3043,10 +3050,8 @@ function FilePreviewWorkbench({
     return <div className="empty-state compact">{emptyLabel}</div>;
   }
 
-  const canRenderPhoto = nativeRuntime && selectedFile.category === "photos";
-  const canRenderVideo = nativeRuntime && selectedFile.category === "videos";
-  const canRenderAudio = nativeRuntime && selectedFile.category === "music";
-  const canRenderInline = canRenderPhoto || canRenderVideo || canRenderAudio;
+  const resolvedPreview = resolveFilePreview(selectedFile, nativeRuntime);
+  const canRenderInline = resolvedPreview.mode === "image" || resolvedPreview.mode === "video" || resolvedPreview.mode === "audio";
 
   return (
     <div className="file-preview-workbench">
@@ -3105,13 +3110,13 @@ function FilePreviewWorkbench({
       </div>
       <aside className="file-preview-pane">
         <div className="file-preview-frame">
-          {canRenderPhoto && <img src={convertFileSrc(selectedFile.path)} alt="" loading="lazy" />}
-          {canRenderVideo && <video src={convertFileSrc(selectedFile.path)} controls preload="metadata" />}
-          {canRenderAudio && <audio src={convertFileSrc(selectedFile.path)} controls preload="metadata" />}
+          {resolvedPreview.mode === "image" && <img src={convertFileSrc(selectedFile.path)} alt="" loading="lazy" onError={() => rememberPreviewFailure(resolvedPreview.cacheKey)} />}
+          {resolvedPreview.mode === "video" && <video src={convertFileSrc(selectedFile.path)} controls preload="metadata" onError={() => rememberPreviewFailure(resolvedPreview.cacheKey)} />}
+          {resolvedPreview.mode === "audio" && <audio src={convertFileSrc(selectedFile.path)} controls preload="metadata" onError={() => rememberPreviewFailure(resolvedPreview.cacheKey)} />}
           {!canRenderInline && (
             <div className="file-preview-fallback">
               {fileTypeIcon(selectedFile, 28)}
-              <strong>{nativeRuntime ? "Preview not available" : "Native preview required"}</strong>
+              <strong>{resolvedPreview.label}</strong>
               <span>{categories[selectedFile.category].label}</span>
             </div>
           )}
@@ -3139,6 +3144,25 @@ function fileTypeIcon(file: PreviewableFile, size = 16) {
   if (file.category === "videos") return <FileVideo size={size} />;
   if (file.category === "music") return <FileAudio size={size} />;
   return <FileText size={size} />;
+}
+
+function resolveFilePreview(file: PreviewableFile, nativeRuntime: boolean): ResolvedPreview {
+  const cacheKey = `${file.id ?? file.path}:${file.modifiedAt ?? 0}:${file.size}`;
+  if (!nativeRuntime) return { mode: "unavailable", cacheKey, label: "Native preview required" };
+  if (previewFailureCache.has(cacheKey)) return { mode: "unavailable", cacheKey, label: "Preview unavailable" };
+  if (file.category === "photos") return { mode: "image", cacheKey, label: "Image preview" };
+  if (file.category === "videos") return { mode: "video", cacheKey, label: "Video preview" };
+  if (file.category === "music") return { mode: "audio", cacheKey, label: "Audio preview" };
+  if (file.category === "documents") return { mode: "document", cacheKey, label: "Document metadata" };
+  return { mode: "generic", cacheKey, label: "File metadata" };
+}
+
+function rememberPreviewFailure(cacheKey: string) {
+  previewFailureCache.set(cacheKey, true);
+  if (previewFailureCache.size > maxPreviewFailureCacheEntries) {
+    const oldestKey = previewFailureCache.keys().next().value;
+    if (oldestKey) previewFailureCache.delete(oldestKey);
+  }
 }
 
 function suggestDuplicateKeepFile(files: NativeDuplicateFile[]) {

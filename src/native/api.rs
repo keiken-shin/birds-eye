@@ -52,6 +52,12 @@ pub struct DuplicateGroupFilesRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct FilePreviewRequest {
+    pub index_path: PathBuf,
+    pub file_id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct RefreshIndexPathsRequest {
     pub index_path: PathBuf,
     pub paths: Vec<PathBuf>,
@@ -387,6 +393,106 @@ pub fn duplicate_group_files(
     Ok(results)
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FilePreviewDto {
+    pub file_id: i64,
+    pub path: Option<String>,
+    pub name: Option<String>,
+    pub size: Option<i64>,
+    pub modified_at: Option<i64>,
+    pub extension: Option<String>,
+    pub media_kind: Option<String>,
+    pub preview_kind: String,
+    pub thumbnail_cache_id: Option<String>,
+    pub unavailable_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FileMediaMetadataDto {
+    pub file_id: i64,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub codec: Option<String>,
+    pub title: Option<String>,
+}
+
+pub fn get_file_preview(request: FilePreviewRequest) -> Result<FilePreviewDto, String> {
+    let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    let Some(file) = lookup_preview_file(&writer, request.file_id)? else {
+        return Ok(unavailable_preview(request.file_id, "file is not in the active index"));
+    };
+
+    if !path_belongs_to_latest_root(&writer, &file.path)? {
+        return Ok(unavailable_preview(request.file_id, "file is outside the indexed root"));
+    }
+    if !PathBuf::from(&file.path).is_file() {
+        return Ok(unavailable_preview(request.file_id, "file unavailable"));
+    }
+
+    let preview_kind = match file.media_kind.as_str() {
+        "photo" => "image",
+        "video" => "video",
+        "music" => "audio",
+        "document" => "document",
+        _ => "generic",
+    }
+    .to_owned();
+
+    Ok(FilePreviewDto {
+        file_id: file.id,
+        path: Some(file.path),
+        name: Some(file.name),
+        size: Some(file.size),
+        modified_at: file.modified_at,
+        extension: file.extension,
+        media_kind: Some(file.media_kind),
+        preview_kind,
+        thumbnail_cache_id: Some(format!("{}:{}:{}", file.id, file.modified_at.unwrap_or_default(), file.size)),
+        unavailable_reason: None,
+    })
+}
+
+pub fn get_thumbnail(request: FilePreviewRequest) -> Result<FilePreviewDto, String> {
+    let mut preview = get_file_preview(request)?;
+    if preview.preview_kind != "image" {
+        preview.thumbnail_cache_id = None;
+        preview.unavailable_reason = Some("thumbnail generation is only available for image previews".to_owned());
+    }
+    Ok(preview)
+}
+
+pub fn get_media_metadata(request: FilePreviewRequest) -> Result<FileMediaMetadataDto, String> {
+    let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    let metadata = writer
+        .connection()
+        .query_row(
+            "SELECT width, height, duration_ms, codec, title FROM media_metadata WHERE file_id = ?1",
+            [request.file_id],
+            |row| {
+                Ok(FileMediaMetadataDto {
+                    file_id: request.file_id,
+                    width: row.get(0)?,
+                    height: row.get(1)?,
+                    duration_ms: row.get(2)?,
+                    codec: row.get(3)?,
+                    title: row.get(4)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| format!("{error:?}"))?;
+
+    Ok(metadata.unwrap_or(FileMediaMetadataDto {
+        file_id: request.file_id,
+        width: None,
+        height: None,
+        duration_ms: None,
+        codec: None,
+        title: None,
+    }))
+}
+
 pub fn refresh_duplicate_group(
     request: RefreshDuplicateGroupRequest,
 ) -> Result<RefreshDuplicateGroupResponse, String> {
@@ -465,6 +571,72 @@ fn duplicate_file_to_dto(file: crate::index::DuplicateFileSummary) -> DuplicateF
         media_kind: file.media_kind,
         hash_match_type: file.hash_match_type,
         confidence: file.confidence,
+    }
+}
+
+struct PreviewFileRecord {
+    id: i64,
+    path: String,
+    name: String,
+    size: i64,
+    modified_at: Option<i64>,
+    extension: Option<String>,
+    media_kind: String,
+}
+
+fn lookup_preview_file(
+    writer: &IndexWriter,
+    file_id: i64,
+) -> Result<Option<PreviewFileRecord>, String> {
+    writer
+        .connection()
+        .query_row(
+            "SELECT id, path, name, size, modified_at, extension, media_kind
+             FROM files
+             WHERE id = ?1 AND deleted_at IS NULL",
+            [file_id],
+            |row| {
+                Ok(PreviewFileRecord {
+                    id: row.get(0)?,
+                    path: row.get(1)?,
+                    name: row.get(2)?,
+                    size: row.get(3)?,
+                    modified_at: row.get(4)?,
+                    extension: row.get(5)?,
+                    media_kind: row.get(6)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| format!("{error:?}"))
+}
+
+fn path_belongs_to_latest_root(writer: &IndexWriter, path: &str) -> Result<bool, String> {
+    let root = writer
+        .connection()
+        .query_row(
+            "SELECT root_path FROM scan_sessions ORDER BY id DESC LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("{error:?}"))?;
+
+    Ok(root.map(|root| path.starts_with(&root)).unwrap_or(false))
+}
+
+fn unavailable_preview(file_id: i64, reason: &str) -> FilePreviewDto {
+    FilePreviewDto {
+        file_id,
+        path: None,
+        name: None,
+        size: None,
+        modified_at: None,
+        extension: None,
+        media_kind: None,
+        preview_kind: "unavailable".to_owned(),
+        thumbnail_cache_id: None,
+        unavailable_reason: Some(reason.to_owned()),
     }
 }
 
@@ -734,6 +906,53 @@ mod tests {
         assert_eq!(first.media_kind, "photo");
         assert_eq!(first.hash_match_type, "full hash");
         assert_eq!(first.confidence, 1.0);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn command_shaped_file_preview_returns_safe_payload() {
+        let root = test_root("native-file-preview");
+        let index_path = root.join("index.sqlite");
+        let data = root.join("data");
+        fs::create_dir_all(&data).expect("failed to create folders");
+        write_file(&data.join("one.jpg"), &[1; 48]);
+        write_file(&data.join("two.jpg"), &[1; 48]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: data,
+            index_path: index_path.clone(),
+        })
+        .expect("scan command failed");
+        let overview = query_index_overview(IndexQueryRequest {
+            index_path: index_path.clone(),
+            limit: 10,
+        })
+        .expect("query command failed");
+        let group_id = overview
+            .duplicate_groups
+            .first()
+            .expect("duplicate group")
+            .id;
+        let file = duplicate_group_files(DuplicateGroupFilesRequest {
+            index_path: index_path.clone(),
+            group_id,
+            limit: 10,
+        })
+        .expect("duplicate files")
+        .into_iter()
+        .next()
+        .expect("duplicate file");
+
+        let preview = get_file_preview(FilePreviewRequest {
+            index_path,
+            file_id: file.id,
+        })
+        .expect("file preview");
+
+        assert_eq!(preview.preview_kind, "image");
+        assert_eq!(preview.file_id, file.id);
+        assert!(preview.thumbnail_cache_id.is_some());
+        assert!(preview.unavailable_reason.is_none());
         cleanup(&root);
     }
 

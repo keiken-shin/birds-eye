@@ -83,6 +83,19 @@ export type NativeDuplicateFile = {
   confidence: number;
 };
 
+export type NativeFilePreview = {
+  file_id: number;
+  path: string | null;
+  name: string | null;
+  size: number | null;
+  modified_at: number | null;
+  extension: string | null;
+  media_kind: string | null;
+  preview_kind: "image" | "video" | "audio" | "document" | "generic" | "unavailable";
+  thumbnail_cache_id: string | null;
+  unavailable_reason: string | null;
+};
+
 export async function isNativeRuntime() {
   return isTauri();
 }
@@ -151,6 +164,24 @@ export async function queryNativeDuplicateFiles(indexPath: string, groupId: numb
       index_path: indexPath,
       group_id: groupId,
       limit,
+    },
+  });
+}
+
+export async function getNativeFilePreview(indexPath: string, fileId: number) {
+  return invoke<NativeFilePreview>("get_file_preview", {
+    request: {
+      index_path: indexPath,
+      file_id: fileId,
+    },
+  });
+}
+
+export async function getNativeThumbnail(indexPath: string, fileId: number) {
+  return invoke<NativeFilePreview>("get_thumbnail", {
+    request: {
+      index_path: indexPath,
+      file_id: fileId,
     },
   });
 }
