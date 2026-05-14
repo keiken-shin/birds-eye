@@ -1,5 +1,5 @@
 import React from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 
 interface WorkspaceLayoutProps {
   centerCanvas: React.ReactNode;
@@ -8,7 +8,7 @@ interface WorkspaceLayoutProps {
 export const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ centerCanvas }) => {
   return (
     <div className="h-screen w-screen bg-[#0a0a0f] text-slate-300 overflow-hidden font-sans">
-      <PanelGroup direction="horizontal">
+      <PanelGroup orientation="horizontal">
         <Panel defaultSize={20} minSize={10}>
           <div className="h-full border-r border-white/10 p-4">
             <h2 className="text-xs font-mono text-indigo-400 mb-4 uppercase">Contexts</h2>
@@ -22,7 +22,7 @@ export const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ centerCanvas }
         <PanelResizeHandle className="w-1 bg-white/5 hover:bg-indigo-500/50 transition-colors" />
 
         <Panel defaultSize={60}>
-          <PanelGroup direction="vertical">
+          <PanelGroup orientation="vertical">
             <Panel defaultSize={75}>
               <div className="h-full w-full relative">
                 {centerCanvas}
