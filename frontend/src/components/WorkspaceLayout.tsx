@@ -1,5 +1,6 @@
 import React from "react";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
+import { TopNavigation } from "./TopNavigation";
 
 interface WorkspaceLayoutProps {
   centerCanvas: React.ReactNode;
@@ -7,7 +8,8 @@ interface WorkspaceLayoutProps {
 
 export const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ centerCanvas }) => {
   return (
-    <div className="h-screen w-screen bg-[#0a0a0f] text-slate-300 overflow-hidden font-sans">
+    <div className="h-screen w-screen bg-[#0a0a0f] text-slate-300 overflow-hidden font-sans relative">
+      <TopNavigation />
       <PanelGroup orientation="horizontal">
         <Panel defaultSize={20} minSize={10}>
           <div className="h-full border-r border-white/10 p-4">
