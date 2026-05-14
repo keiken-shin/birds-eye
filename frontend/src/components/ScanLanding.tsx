@@ -19,8 +19,8 @@ export const ScanLanding: React.FC<ScanLandingProps> = ({ onComplete, progress }
           style={{ width: `${progress}%` }}
         ></div>
       </div>
-      {progress >= 100 && (
-        <button 
+      {(progress === 0 || progress >= 100) && (
+        <button
           onClick={onComplete}
           className="mt-6 px-6 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-md transition-colors"
         >

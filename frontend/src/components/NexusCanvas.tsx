@@ -79,7 +79,9 @@ function buildScene(container: HTMLDivElement) {
   Object.assign(dirLight.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40 });
   dirLight.shadow.bias = -0.0005;
   scene.add(dirLight);
-  scene.add(Object.assign(new THREE.DirectionalLight(0x818cf8, 0.4), { position: new THREE.Vector3(-20, 10, -20) }));
+  const fillLight = new THREE.DirectionalLight(0x818cf8, 0.4);
+  fillLight.position.set(-20, 10, -20);
+  scene.add(fillLight);
 
   [
     [15, 12, 15], [-15, 12, -15], [15, 12, -15], [-15, 12, 15],
