@@ -93,7 +93,8 @@ export type ScanWorkerCommand =
 export type ScanWorkerMessage =
   | { type: "progress"; payload: ScanProgressPayload }
   | { type: "finished"; payload: ScanProgressPayload }
-  | { type: "cancelled"; payload: ScanProgressPayload };
+  | { type: "cancelled"; payload: ScanProgressPayload }
+  | { type: "error"; message: string; path?: string };
 
 export const categories: Record<CategoryKey, Category> = {
   photos: {

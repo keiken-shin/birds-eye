@@ -249,6 +249,115 @@ h2 {
   transition: width 180ms ease;
 }
 
+.scan-diagnostics {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(260px, 1fr) minmax(280px, 1.2fr);
+  gap: 12px;
+  align-items: start;
+  margin: -2px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(71, 215, 198, 0.16);
+  border-radius: 8px;
+  background: rgba(4, 12, 24, 0.48);
+}
+
+.scan-diagnostics.warning {
+  border-color: rgba(251, 191, 36, 0.34);
+  background: rgba(63, 48, 12, 0.2);
+}
+
+.scan-diagnostics-status,
+.scan-diagnostics-log div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.scan-diagnostics-title {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  color: #c9f7ef;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.scan-diagnostics-status strong {
+  color: #ffffff;
+  font-size: 13px;
+}
+
+.scan-diagnostics-status small,
+.scan-diagnostics-log small {
+  min-width: 0;
+  overflow: hidden;
+  color: #96a1b6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-diagnostics-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.scan-diagnostics-metrics span {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #96a1b6;
+  font-size: 11px;
+}
+
+.scan-diagnostics-metrics strong {
+  color: #ffffff;
+  font-size: 13px;
+}
+
+.scan-diagnostics-log {
+  display: grid;
+  gap: 6px;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.scan-diagnostics-log div {
+  padding: 8px 9px;
+  border-left: 3px solid rgba(71, 215, 198, 0.7);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.scan-diagnostics-log div.warning {
+  border-left-color: #fbbf24;
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.scan-diagnostics-log div.error {
+  border-left-color: #fb7185;
+  background: rgba(251, 113, 133, 0.09);
+}
+
+.scan-diagnostics-log span {
+  color: #dbeafe;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.scan-diagnostics-log strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2797,6 +2906,7 @@ button.overlap-pair:focus-visible {
 
 @media (max-width: 1080px) {
   .scan-strip,
+  .scan-diagnostics,
   .metric-grid,
   .analysis-layout,
   .detail-grid,
@@ -2807,6 +2917,10 @@ button.overlap-pair:focus-visible {
   .duplicate-candidates,
   .file-preview-workbench {
     grid-template-columns: 1fr;
+  }
+
+  .scan-diagnostics-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

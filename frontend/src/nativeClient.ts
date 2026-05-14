@@ -7,6 +7,9 @@ export type NativeJobStatus = "Running" | "Completed" | "Cancelled" | "Failed";
 export type NativeJobEvent = {
   job_id: number;
   status: NativeJobStatus;
+  event_kind: "started" | "progress" | "scan_error" | "completed" | "cancelled" | "failed" | string;
+  severity: "info" | "warning" | "error" | string;
+  occurred_at_ms: number;
   message: string;
   files_scanned: number;
   folders_scanned: number;

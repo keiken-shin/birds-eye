@@ -21,7 +21,9 @@ self.onmessage = (event: MessageEvent<ScanWorkerCommand>) => {
   const command = event.data;
 
   if (command.type === "start") {
-    void scanFiles(command.files);
+    void scanFiles(command.files).catch((error) => {
+      postError(error instanceof Error ? error.message : "Browser scan failed");
+    });
     return;
   }
 
@@ -193,8 +195,12 @@ function getDuplicateCandidates(sizeGroups: Map<number, { files: number; samples
     .slice(0, 20);
 }
 
-function post(type: ScanWorkerMessage["type"], payload: ScanProgressPayload) {
+function post(type: Exclude<ScanWorkerMessage["type"], "error">, payload: ScanProgressPayload) {
   self.postMessage({ type, payload } satisfies ScanWorkerMessage);
+}
+
+function postError(message: string, path?: string) {
+  self.postMessage({ type: "error", message, path } satisfies ScanWorkerMessage);
 }
 
 function wait(ms: number) {

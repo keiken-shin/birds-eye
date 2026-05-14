@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type JobEventListener = Arc<dyn Fn(JobEventDto) + Send + Sync + 'static>;
 
@@ -32,6 +33,9 @@ pub enum JobStatusDto {
 pub struct JobEventDto {
     pub job_id: u64,
     pub status: JobStatusDto,
+    pub event_kind: String,
+    pub severity: String,
+    pub occurred_at_ms: u64,
     pub message: String,
     pub files_scanned: u64,
     pub folders_scanned: u64,
@@ -168,6 +172,9 @@ impl JobEventDto {
         Self {
             job_id,
             status: JobStatusDto::Running,
+            event_kind: "progress".to_owned(),
+            severity: "info".to_owned(),
+            occurred_at_ms: now_millis(),
             message: message.to_owned(),
             files_scanned: stats.files_scanned,
             folders_scanned: stats.folders_scanned,
@@ -186,6 +193,9 @@ impl JobEventDto {
             ScanEvent::Started { root, workers } => Some(Self {
                 job_id,
                 status: JobStatusDto::Running,
+                event_kind: "started".to_owned(),
+                severity: "info".to_owned(),
+                occurred_at_ms: now_millis(),
                 message: format!("started scan root={} workers={workers}", root.display()),
                 files_scanned: 0,
                 folders_scanned: 0,
@@ -197,6 +207,9 @@ impl JobEventDto {
             ScanEvent::Progress(stats) => Some(Self {
                 job_id,
                 status: JobStatusDto::Running,
+                event_kind: "progress".to_owned(),
+                severity: "info".to_owned(),
+                occurred_at_ms: now_millis(),
                 message: "progress".to_owned(),
                 files_scanned: stats.files_scanned,
                 folders_scanned: stats.folders_scanned,
@@ -211,6 +224,9 @@ impl JobEventDto {
             ScanEvent::Finished(report) => Some(Self {
                 job_id,
                 status: JobStatusDto::Completed,
+                event_kind: "completed".to_owned(),
+                severity: "info".to_owned(),
+                occurred_at_ms: now_millis(),
                 message: "completed".to_owned(),
                 files_scanned: report.stats.files_scanned,
                 folders_scanned: report.stats.folders_scanned,
@@ -222,6 +238,9 @@ impl JobEventDto {
             ScanEvent::Cancelled(stats) => Some(Self {
                 job_id,
                 status: JobStatusDto::Cancelled,
+                event_kind: "cancelled".to_owned(),
+                severity: "warning".to_owned(),
+                occurred_at_ms: now_millis(),
                 message: "cancelled".to_owned(),
                 files_scanned: stats.files_scanned,
                 folders_scanned: stats.folders_scanned,
@@ -236,6 +255,9 @@ impl JobEventDto {
             ScanEvent::Error(error) => Some(Self {
                 job_id,
                 status: JobStatusDto::Running,
+                event_kind: "scan_error".to_owned(),
+                severity: "warning".to_owned(),
+                occurred_at_ms: now_millis(),
                 message: format!("error path={} message={}", error.path.display(), error.message),
                 files_scanned: 0,
                 folders_scanned: 0,
@@ -252,6 +274,9 @@ impl JobEventDto {
         Self {
             job_id,
             status: JobStatusDto::Failed,
+            event_kind: "failed".to_owned(),
+            severity: "error".to_owned(),
+            occurred_at_ms: now_millis(),
             message,
             files_scanned: 0,
             folders_scanned: 0,
@@ -261,6 +286,13 @@ impl JobEventDto {
             current_path: None,
         }
     }
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
 }
 
 fn push_event(
@@ -347,6 +379,25 @@ mod tests {
         let status = manager.job_status(response.job_id).expect("missing status");
         assert!(matches!(status, JobStatusDto::Cancelled | JobStatusDto::Completed));
         cleanup(&root);
+    }
+
+    #[test]
+    fn scan_error_events_are_marked_as_visible_warnings() {
+        let event = JobEventDto::from_scan_event(
+            42,
+            &ScanEvent::Error(crate::scanner::ScanError {
+                path: PathBuf::from("blocked-folder"),
+                message: "permission denied".to_owned(),
+            }),
+        )
+        .expect("scan errors should be forwarded to the job log");
+
+        assert_eq!(event.status, JobStatusDto::Running);
+        assert_eq!(event.event_kind, "scan_error");
+        assert_eq!(event.severity, "warning");
+        assert!(event.occurred_at_ms > 0);
+        assert_eq!(event.current_path.as_deref(), Some("blocked-folder"));
+        assert!(event.message.contains("permission denied"));
     }
 
     fn wait_for_terminal(manager: &ScanJobManager, job_id: u64) {

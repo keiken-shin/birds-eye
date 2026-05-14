@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { createRoot } from "react-dom/client";
 import {
+  Activity,
+  AlertTriangle,
   ChevronLeft,
   Check,
   CopyCheck,
@@ -91,6 +93,16 @@ type StagedAction = {
   };
 };
 
+type ScanDiagnostic = {
+  id: string;
+  source: "native" | "browser";
+  severity: "info" | "warning" | "error";
+  label: string;
+  message: string;
+  path?: string;
+  occurredAt: number;
+};
+
 type MoveSuggestion = {
   category: CategoryKey;
   folderCount: number;
@@ -171,6 +183,10 @@ function App() {
   const [activePage, setActivePage] = useState<AppPage>("workspace");
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
+  const [scanDiagnostics, setScanDiagnostics] = useState<ScanDiagnostic[]>([]);
+  const [lastScanSignalAt, setLastScanSignalAt] = useState<number | null>(null);
+  const [lastNativeJobEvent, setLastNativeJobEvent] = useState<NativeJobEvent | null>(null);
+  const [scanClock, setScanClock] = useState(Date.now());
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
   const [showHeatmap, setShowHeatmap] = useState(true);
@@ -211,6 +227,12 @@ function App() {
       unlisten?.();
     };
   }, [nativeRuntime]);
+
+  useEffect(() => {
+    if (scan.status !== "scanning" && scan.status !== "paused") return;
+    const timer = window.setInterval(() => setScanClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [scan.status]);
 
   const sortedFolders = useMemo(() => {
     return [...scan.folders].sort((a, b) => b.bytes - a.bytes);
@@ -430,6 +452,37 @@ function App() {
     { label: "Throughput", value: `${Math.round(scan.processedFiles / Math.max(scan.elapsedMs / 1000, 1))}/s`, detail: scan.status },
     { label: "Folders", value: formatCount(scan.folders.length), detail: scan.rootName },
   ];
+  const scanSignalAgeMs = lastScanSignalAt ? Math.max(0, scanClock - lastScanSignalAt) : null;
+  const scanAppearsStalled = scan.status === "scanning" && scanSignalAgeMs !== null && scanSignalAgeMs > 15_000;
+
+  function resetScanDiagnostics(source: ScanDiagnostic["source"], message: string, path?: string) {
+    const now = Date.now();
+    setLastScanSignalAt(now);
+    setLastNativeJobEvent(null);
+    setScanDiagnostics([
+      {
+        id: `${now}-started`,
+        source,
+        severity: "info",
+        label: "Started",
+        message,
+        path,
+        occurredAt: now,
+      },
+    ]);
+  }
+
+  function appendScanDiagnostic(diagnostic: Omit<ScanDiagnostic, "id" | "occurredAt"> & { occurredAt?: number }) {
+    const occurredAt = diagnostic.occurredAt ?? Date.now();
+    setScanDiagnostics((current) => [
+      {
+        ...diagnostic,
+        id: `${occurredAt}-${diagnostic.source}-${diagnostic.label}-${current.length}`,
+        occurredAt,
+      },
+      ...current,
+    ].slice(0, 16));
+  }
 
   function openFolderPicker() {
     if (nativeRuntime) {
@@ -458,6 +511,7 @@ function App() {
       setDuplicateFiles([]);
       setSelectedDuplicateGroup(null);
       setRuntimeMessage("Native scan starting");
+      resetScanDiagnostics("native", "Native scan starting", folder);
       setScan({
         ...initialScanState,
         status: "scanning",
@@ -478,8 +532,18 @@ function App() {
   async function handleNativeJobEvent(event: NativeJobEvent) {
     if (nativeJobRef.current?.jobId !== event.job_id) return;
 
-    if (event.status === "Failed") {
+    setLastScanSignalAt(Date.now());
+    setLastNativeJobEvent(event);
+
+    const diagnostic = diagnosticFromNativeEvent(event);
+    if (diagnostic) {
+      appendScanDiagnostic(diagnostic);
+    }
+
+    if (event.status === "Failed" || event.severity === "error") {
       setRuntimeMessage(event.message);
+    } else if (event.severity === "warning") {
+      setRuntimeMessage(`Scan warning: ${event.message}`);
     } else if (event.message === "finalizing index") {
       setRuntimeMessage("Finalizing index");
     }
@@ -523,6 +587,7 @@ function App() {
     setCurrentIndexPath(null);
     setDuplicateFiles([]);
     setSelectedDuplicateGroup(null);
+    resetScanDiagnostics("browser", "Browser scan starting");
     setScan({
       ...initialScanState,
       status: "scanning",
@@ -536,13 +601,55 @@ function App() {
     workerRef.current = worker;
     worker.onmessage = (event: MessageEvent<ScanWorkerMessage>) => {
       const message = event.data;
-      setScan({ ...message.payload });
+      setLastScanSignalAt(Date.now());
 
-      if (message.type === "finished" || message.type === "cancelled") {
+      if (message.type === "error") {
+        appendScanDiagnostic({
+          source: "browser",
+          severity: "error",
+          label: "Worker error",
+          message: message.message,
+          path: message.path,
+        });
+        setRuntimeMessage(message.message);
+        setScan((current) => ({ ...current, status: "cancelled" }));
         worker.terminate();
         if (workerRef.current === worker) {
           workerRef.current = null;
         }
+        return;
+      }
+
+      setScan({ ...message.payload });
+
+      if (message.type === "finished" || message.type === "cancelled") {
+        appendScanDiagnostic({
+          source: "browser",
+          severity: message.type === "finished" ? "info" : "warning",
+          label: message.type === "finished" ? "Completed" : "Cancelled",
+          message: message.type === "finished" ? "Browser scan completed" : "Browser scan cancelled",
+          path: message.payload.currentPath,
+        });
+        worker.terminate();
+        if (workerRef.current === worker) {
+          workerRef.current = null;
+        }
+      }
+    };
+    worker.onerror = (event) => {
+      const message = event.message || "Browser worker crashed";
+      appendScanDiagnostic({
+        source: "browser",
+        severity: "error",
+        label: "Worker crash",
+        message,
+        path: event.filename,
+      });
+      setRuntimeMessage(message);
+      setScan((current) => ({ ...current, status: "cancelled" }));
+      worker.terminate();
+      if (workerRef.current === worker) {
+        workerRef.current = null;
       }
     };
 
@@ -579,6 +686,9 @@ function App() {
     setDuplicateFiles([]);
     setSelectedDuplicateGroup(null);
     setScan(initialScanState);
+    setScanDiagnostics([]);
+    setLastScanSignalAt(null);
+    setLastNativeJobEvent(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -665,6 +775,16 @@ function App() {
           </div>
           <small>{runtimeMessage} - {scan.currentPath}</small>
         </section>
+
+        {scan.status !== "idle" && (
+          <ScanDiagnosticsPanel
+            diagnostics={scanDiagnostics}
+            lastEvent={lastNativeJobEvent}
+            signalAgeMs={scanSignalAgeMs}
+            stalled={scanAppearsStalled}
+            currentPath={scan.currentPath}
+          />
+        )}
 
         <section className="metric-grid" aria-label="Scan metrics">
           {metrics.map((metric) => (
@@ -2317,6 +2437,89 @@ function DuplicateCleanupEdgeStates({
       ))}
     </div>
   );
+}
+
+function diagnosticFromNativeEvent(event: NativeJobEvent): Omit<ScanDiagnostic, "id"> | null {
+  if (event.event_kind === "progress" && event.severity === "info") return null;
+
+  const severity = normalizeDiagnosticSeverity(event.severity);
+  const labelByKind: Record<string, string> = {
+    started: "Started",
+    scan_error: "Scan warning",
+    completed: "Completed",
+    cancelled: "Cancelled",
+    failed: "Failed",
+    progress: "Progress",
+  };
+
+  return {
+    source: "native",
+    severity,
+    label: labelByKind[event.event_kind] ?? event.event_kind,
+    message: event.message,
+    path: event.current_path ?? undefined,
+    occurredAt: event.occurred_at_ms || Date.now(),
+  };
+}
+
+function normalizeDiagnosticSeverity(severity: string): ScanDiagnostic["severity"] {
+  if (severity === "warning" || severity === "error") return severity;
+  return "info";
+}
+
+function ScanDiagnosticsPanel({
+  diagnostics,
+  lastEvent,
+  signalAgeMs,
+  stalled,
+  currentPath,
+}: {
+  diagnostics: ScanDiagnostic[];
+  lastEvent: NativeJobEvent | null;
+  signalAgeMs: number | null;
+  stalled: boolean;
+  currentPath: string;
+}) {
+  const visibleDiagnostics = diagnostics.slice(0, 6);
+
+  return (
+    <section className={`scan-diagnostics ${stalled ? "warning" : ""}`} aria-label="Scan diagnostics">
+      <div className="scan-diagnostics-status">
+        <span className="scan-diagnostics-title">
+          {stalled ? <AlertTriangle size={16} /> : <Activity size={16} />}
+          Scan diagnostics
+        </span>
+        <strong>{stalled ? "No recent scan events" : signalAgeMs === null ? "Waiting for events" : `Last update ${formatAge(signalAgeMs)} ago`}</strong>
+        <small title={currentPath}>{currentPath}</small>
+      </div>
+      <div className="scan-diagnostics-metrics">
+        <span>Workers <strong>{lastEvent?.active_workers ?? "-"}</strong></span>
+        <span>Queue <strong>{lastEvent?.queue_depth ?? "-"}</strong></span>
+        <span>Files <strong>{lastEvent ? formatCount(lastEvent.files_scanned) : "-"}</strong></span>
+        <span>Folders <strong>{lastEvent ? formatCount(lastEvent.folders_scanned) : "-"}</strong></span>
+      </div>
+      {visibleDiagnostics.length > 0 && (
+        <div className="scan-diagnostics-log">
+          {visibleDiagnostics.map((diagnostic) => (
+            <div className={diagnostic.severity} key={diagnostic.id}>
+              <span>{diagnostic.label}</span>
+              <strong>{diagnostic.message}</strong>
+              {diagnostic.path && <small title={diagnostic.path}>{diagnostic.path}</small>}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function formatAge(ms: number) {
+  if (ms < 1000) return "now";
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds}s`;
 }
 
 function FolderPairDuplicateSummary({
