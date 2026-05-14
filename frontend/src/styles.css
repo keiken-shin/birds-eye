@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   color-scheme: dark light;
   font-family: "IBM Plex Mono", "Cascadia Code", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
