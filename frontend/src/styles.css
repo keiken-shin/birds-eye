@@ -1389,23 +1389,89 @@ h2 {
   line-height: 1.5;
 }
 
-.duplicate-sort-control {
+.duplicate-review-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr)) repeat(2, auto);
+  gap: 8px;
+  align-items: end;
+  margin: 0 0 10px;
+}
+
+.duplicate-review-controls label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.duplicate-review-controls .inline-check {
   display: flex;
-  justify-content: flex-end;
   align-items: center;
   gap: 8px;
-  margin: 0 0 10px;
+  min-height: 34px;
+}
+
+.duplicate-review-controls span {
   color: #96a1b6;
   font-size: 12px;
 }
 
-.duplicate-sort-control select {
+.duplicate-review-controls input,
+.duplicate-review-controls select,
+.duplicate-review-controls button,
+.folder-pair-summary button {
   min-height: 34px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   background: rgba(12, 16, 24, 0.86);
   color: #e5eefb;
   padding: 0 10px;
+}
+
+.duplicate-review-controls strong {
+  align-self: center;
+  justify-self: end;
+  color: #ffffff;
+}
+
+.folder-pair-summary {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.folder-pair-summary div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) 100px 82px auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(12, 16, 24, 0.46);
+  padding: 8px;
+}
+
+.folder-pair-summary div.active {
+  border-color: rgba(71, 215, 198, 0.32);
+  background: rgba(71, 215, 198, 0.08);
+}
+
+.folder-pair-summary span,
+.folder-pair-summary strong,
+.folder-pair-summary small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-pair-summary span,
+.folder-pair-summary small {
+  color: #96a1b6;
+}
+
+.folder-pair-summary strong {
+  color: #ffffff;
 }
 
 .duplicate-list-header {

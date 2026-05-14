@@ -75,6 +75,7 @@ pub struct DuplicateGroupSummary {
     pub size: i64,
     pub file_count: i64,
     pub folder_count: i64,
+    pub folder_paths: Vec<String>,
     pub dominant_media_kind: String,
     pub reclaimable_bytes: i64,
     pub confidence: f64,
@@ -374,6 +375,7 @@ impl IndexWriter {
                  dg.size,
                  COUNT(dgf.file_id) AS file_count,
                  COUNT(DISTINCT files.folder_id) AS folder_count,
+                 GROUP_CONCAT(DISTINCT folders.path) AS folder_paths,
                  COALESCE((
                    SELECT f2.media_kind
                    FROM duplicate_group_files dgf2
@@ -388,6 +390,7 @@ impl IndexWriter {
                FROM duplicate_groups dg
                JOIN duplicate_group_files dgf ON dgf.group_id = dg.id
                JOIN files ON files.id = dgf.file_id
+               JOIN folders ON folders.id = files.folder_id
                WHERE files.deleted_at IS NULL
                GROUP BY dg.id
              )
@@ -396,6 +399,7 @@ impl IndexWriter {
                size,
                file_count,
                folder_count,
+               folder_paths,
                dominant_media_kind,
                reclaimable_bytes,
                confidence,
@@ -422,10 +426,17 @@ impl IndexWriter {
                 size: row.get(1)?,
                 file_count: row.get(2)?,
                 folder_count: row.get(3)?,
-                dominant_media_kind: row.get(4)?,
-                reclaimable_bytes: row.get(5)?,
-                confidence: row.get(6)?,
-                cleanup_score: row.get(7)?,
+                folder_paths: row
+                    .get::<_, Option<String>>(4)?
+                    .unwrap_or_default()
+                    .split(',')
+                    .filter(|path| !path.is_empty())
+                    .map(ToOwned::to_owned)
+                    .collect(),
+                dominant_media_kind: row.get(5)?,
+                reclaimable_bytes: row.get(6)?,
+                confidence: row.get(7)?,
+                cleanup_score: row.get(8)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)

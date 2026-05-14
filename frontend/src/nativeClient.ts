@@ -26,6 +26,7 @@ export type NativeIndexOverview = {
     size: number;
     file_count: number;
     folder_count: number;
+    folder_paths: string[];
     dominant_media_kind: string;
     reclaimable_bytes: number;
     confidence: number;

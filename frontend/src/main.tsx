@@ -116,6 +116,25 @@ type PreviewableFile = {
 
 type AppPage = "workspace" | "index";
 type DuplicateSortKey = "cleanup" | "reclaimable" | "files" | "folders" | "confidence";
+type DuplicateReviewFilters = {
+  exactOnly: boolean;
+  mediaKind: "all" | CategoryKey;
+  minReclaimMb: string;
+  folderContains: string;
+  pathContains: string;
+  confidence: "all" | "safe" | "medium" | "review";
+  folderPair: { folderA: string; folderB: string } | null;
+};
+
+const initialDuplicateFilters: DuplicateReviewFilters = {
+  exactOnly: false,
+  mediaKind: "all",
+  minReclaimMb: "",
+  folderContains: "",
+  pathContains: "",
+  confidence: "all",
+  folderPair: null,
+};
 
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -153,6 +172,7 @@ function App() {
   const [showReviewQueue, setShowReviewQueue] = useState(true);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [duplicateSort, setDuplicateSort] = useState<DuplicateSortKey>("cleanup");
+  const [duplicateFilters, setDuplicateFilters] = useState<DuplicateReviewFilters>(initialDuplicateFilters);
   const isWindowsRuntime = useMemo(() => {
     return typeof navigator !== "undefined" && navigator.userAgent.toLowerCase().includes("windows");
   }, []);
@@ -191,15 +211,43 @@ function App() {
   const selectedDuplicateCandidate = useMemo(() => {
     return scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup) ?? null;
   }, [scan.duplicateCandidates, selectedDuplicateGroup]);
+  const filteredDuplicateCandidates = useMemo(() => {
+    return scan.duplicateCandidates.filter((candidate) => {
+      const confidenceScore = candidate.confidenceScore ?? 0;
+      const folderPaths = candidate.folderPaths ?? [];
+      const minReclaimBytes = Number(duplicateFilters.minReclaimMb || 0) * 1024 * 1024;
+
+      if (duplicateFilters.exactOnly && confidenceScore !== 1) return false;
+      if (duplicateFilters.mediaKind !== "all" && categoryFromMediaKind(candidate.dominantMediaKind ?? "other") !== duplicateFilters.mediaKind) return false;
+      if (minReclaimBytes > 0 && candidate.reclaimableBytes < minReclaimBytes) return false;
+      if (duplicateFilters.folderContains.trim()) {
+        const needle = duplicateFilters.folderContains.trim().toLowerCase();
+        if (!folderPaths.some((path) => path.toLowerCase().includes(needle))) return false;
+      }
+      if (duplicateFilters.pathContains.trim()) {
+        const needle = duplicateFilters.pathContains.trim().toLowerCase();
+        if (!folderPaths.some((path) => path.toLowerCase().includes(needle))) return false;
+      }
+      if (duplicateFilters.confidence === "safe" && confidenceScore !== 1) return false;
+      if (duplicateFilters.confidence === "medium" && (confidenceScore < 0.65 || confidenceScore >= 1)) return false;
+      if (duplicateFilters.confidence === "review" && confidenceScore >= 0.65) return false;
+      if (duplicateFilters.folderPair) {
+        const { folderA, folderB } = duplicateFilters.folderPair;
+        if (!folderPaths.includes(folderA) || !folderPaths.includes(folderB)) return false;
+      }
+
+      return true;
+    });
+  }, [duplicateFilters, scan.duplicateCandidates]);
   const sortedDuplicateCandidates = useMemo(() => {
-    return [...scan.duplicateCandidates].sort((a, b) => {
+    return [...filteredDuplicateCandidates].sort((a, b) => {
       if (duplicateSort === "reclaimable") return b.reclaimableBytes - a.reclaimableBytes;
       if (duplicateSort === "files") return b.files - a.files || b.reclaimableBytes - a.reclaimableBytes;
       if (duplicateSort === "folders") return (b.folderCount ?? 0) - (a.folderCount ?? 0) || b.reclaimableBytes - a.reclaimableBytes;
       if (duplicateSort === "confidence") return (b.confidenceScore ?? 0) - (a.confidenceScore ?? 0) || b.reclaimableBytes - a.reclaimableBytes;
       return (b.cleanupScore ?? b.reclaimableBytes) - (a.cleanupScore ?? a.reclaimableBytes);
     });
-  }, [duplicateSort, scan.duplicateCandidates]);
+  }, [duplicateSort, filteredDuplicateCandidates]);
   const duplicatePreviewFiles = useMemo(() => {
     return duplicateFiles.map((file): PreviewableFile => {
       const extension = file.extension ?? getExtension(file.name);
@@ -921,16 +969,20 @@ function App() {
               <span><CopyCheck size={14} /> Size + partial + full hash</span>
             </div>
             <DuplicateSummary candidates={scan.duplicateCandidates} overlaps={scan.duplicateOverlaps} />
-            <div className="duplicate-sort-control">
-              <span>Sort groups</span>
-              <select value={duplicateSort} onChange={(event) => setDuplicateSort(event.currentTarget.value as DuplicateSortKey)}>
-                <option value="cleanup">Cleanup score</option>
-                <option value="reclaimable">Reclaimable bytes</option>
-                <option value="files">File count</option>
-                <option value="folders">Folder count</option>
-                <option value="confidence">Confidence</option>
-              </select>
-            </div>
+            <DuplicateReviewControls
+              filters={duplicateFilters}
+              resultCount={sortedDuplicateCandidates.length}
+              sort={duplicateSort}
+              onFiltersChange={setDuplicateFilters}
+              onSortChange={setDuplicateSort}
+            />
+            {scan.duplicateOverlaps.length > 0 && (
+              <FolderPairDuplicateSummary
+                overlaps={scan.duplicateOverlaps}
+                activePair={duplicateFilters.folderPair}
+                onReviewPair={(pair) => setDuplicateFilters((current) => ({ ...current, folderPair: pair }))}
+              />
+            )}
             {scan.duplicateOverlaps.length > 0 && (
               <details className="insight-disclosure">
                 <summary>Folder overlap map</summary>
@@ -939,6 +991,8 @@ function App() {
             )}
             {scan.duplicateCandidates.length === 0 ? (
               <div className="empty-state compact">Files with identical sizes will appear here as duplicate candidates.</div>
+            ) : sortedDuplicateCandidates.length === 0 ? (
+              <div className="empty-state compact">No duplicate groups match the current filters.</div>
             ) : (
               <div className="duplicate-candidates">
                 <div className="duplicate-candidate-list">
@@ -1743,6 +1797,7 @@ function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): Sc
     size: group.size,
     files: group.file_count,
     folderCount: group.folder_count,
+    folderPaths: group.folder_paths,
     dominantMediaKind: group.dominant_media_kind,
     reclaimableBytes: group.reclaimable_bytes,
     cleanupScore: group.cleanup_score,
@@ -2104,6 +2159,115 @@ function DuplicateSummary({
         Start with groups marked Safe. Each row is one duplicate set: keep one copy, review the listed files, then stage the group into the Review Queue.
         {overlaps.length > 0 ? " The folder overlap map is available for spotting folders that share many duplicate files." : ""}
       </p>
+    </div>
+  );
+}
+
+function DuplicateReviewControls({
+  filters,
+  resultCount,
+  sort,
+  onFiltersChange,
+  onSortChange,
+}: {
+  filters: DuplicateReviewFilters;
+  resultCount: number;
+  sort: DuplicateSortKey;
+  onFiltersChange: React.Dispatch<React.SetStateAction<DuplicateReviewFilters>>;
+  onSortChange: React.Dispatch<React.SetStateAction<DuplicateSortKey>>;
+}) {
+  return (
+    <div className="duplicate-review-controls">
+      <label>
+        <span>Sort</span>
+        <select value={sort} onChange={(event) => onSortChange(event.currentTarget.value as DuplicateSortKey)}>
+          <option value="cleanup">Cleanup score</option>
+          <option value="reclaimable">Reclaimable bytes</option>
+          <option value="files">File count</option>
+          <option value="folders">Folder count</option>
+          <option value="confidence">Confidence</option>
+        </select>
+      </label>
+      <label className="inline-check">
+        <input
+          type="checkbox"
+          checked={filters.exactOnly}
+          onChange={(event) => onFiltersChange((current) => ({ ...current, exactOnly: event.currentTarget.checked }))}
+        />
+        <span>Exact only</span>
+      </label>
+      <label>
+        <span>Media</span>
+        <select value={filters.mediaKind} onChange={(event) => onFiltersChange((current) => ({ ...current, mediaKind: event.currentTarget.value as DuplicateReviewFilters["mediaKind"] }))}>
+          <option value="all">All</option>
+          <option value="photos">Images</option>
+          <option value="videos">Videos</option>
+          <option value="documents">Documents</option>
+          <option value="music">Audio</option>
+          <option value="archives">Archives</option>
+          <option value="other">Other</option>
+        </select>
+      </label>
+      <label>
+        <span>Confidence</span>
+        <select value={filters.confidence} onChange={(event) => onFiltersChange((current) => ({ ...current, confidence: event.currentTarget.value as DuplicateReviewFilters["confidence"] }))}>
+          <option value="all">All</option>
+          <option value="safe">Safe</option>
+          <option value="medium">Medium</option>
+          <option value="review">Review</option>
+        </select>
+      </label>
+      <label>
+        <span>Min MB</span>
+        <input value={filters.minReclaimMb} inputMode="numeric" onChange={(event) => onFiltersChange((current) => ({ ...current, minReclaimMb: event.currentTarget.value.replace(/[^0-9.]/g, "") }))} />
+      </label>
+      <label>
+        <span>Folder contains</span>
+        <input value={filters.folderContains} onChange={(event) => onFiltersChange((current) => ({ ...current, folderContains: event.currentTarget.value }))} />
+      </label>
+      <label>
+        <span>Path contains</span>
+        <input value={filters.pathContains} onChange={(event) => onFiltersChange((current) => ({ ...current, pathContains: event.currentTarget.value }))} />
+      </label>
+      {filters.folderPair && (
+        <button type="button" onClick={() => onFiltersChange((current) => ({ ...current, folderPair: null }))}>
+          Clear pair
+        </button>
+      )}
+      <button type="button" onClick={() => onFiltersChange(initialDuplicateFilters)}>
+        Reset
+      </button>
+      <strong>{formatCount(resultCount)} shown</strong>
+    </div>
+  );
+}
+
+function FolderPairDuplicateSummary({
+  overlaps,
+  activePair,
+  onReviewPair,
+}: {
+  overlaps: DuplicateOverlap[];
+  activePair: DuplicateReviewFilters["folderPair"];
+  onReviewPair: (pair: { folderA: string; folderB: string }) => void;
+}) {
+  return (
+    <div className="folder-pair-summary">
+      {overlaps.slice(0, 5).map((overlap) => {
+        const active = activePair?.folderA === overlap.folderA && activePair.folderB === overlap.folderB;
+        return (
+          <div className={active ? "active" : ""} key={`${overlap.folderA}-${overlap.folderB}`}>
+            <span title={overlap.folderA}>{overlap.folderA}</span>
+            <MoveRight size={15} />
+            <span title={overlap.folderB}>{overlap.folderB}</span>
+            <strong>{formatBytes(overlap.reclaimableBytes)}</strong>
+            <small>{formatCount(overlap.sharedGroups)} groups</small>
+            <button type="button" onClick={() => onReviewPair({ folderA: overlap.folderA, folderB: overlap.folderB })}>
+              Review pair
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

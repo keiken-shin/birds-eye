@@ -43,6 +43,7 @@ export type DuplicateCandidate = {
   size: number;
   files: number;
   folderCount?: number;
+  folderPaths?: string[];
   dominantMediaKind?: string;
   reclaimableBytes: number;
   cleanupScore?: number;
