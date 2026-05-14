@@ -49,6 +49,8 @@ import {
   type ScanWorkerCommand,
   type ScanWorkerMessage,
 } from "./domain";
+import { ScanLanding } from "./components/ScanLanding";
+import { WorkspaceLayout } from "./components/WorkspaceLayout";
 import {
   cancelNativeScan,
   chooseNativeFolder,
@@ -188,6 +190,7 @@ function App() {
   const [stagedActions, setStagedActions] = useState<StagedAction[]>([]);
   const [committingActions, setCommittingActions] = useState(false);
   const [activePage, setActivePage] = useState<AppPage>("workspace");
+  const [appVisualPhase, setAppVisualPhase] = useState<"landing" | "workspace">("landing");
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("explore");
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => getStoredThemePreference());
   const [nativeRuntime, setNativeRuntime] = useState(false);
@@ -737,13 +740,22 @@ function App() {
     workerRef.current = null;
   }
 
+  const calculatedProgress = scan.status === "complete" ? 100 : Math.min(99, (scan.processedFiles / Math.max(scan.totalFiles || 1, 1)) * 100);
+  const isLanding = appVisualPhase === "landing" || scan.status === "scanning";
+  const progress = scan.status === "idle" ? 0 : calculatedProgress;
+
   return (
-    <main className={`app-shell theme-${themePreference}`}>
-      <section className="workspace">
-        <header className="topbar" id="dashboard">
-          <div>
-            <div className="brand inline-brand">
-              <img src={logoUrl} alt="" />
+    <>
+      {isLanding ? (
+        <ScanLanding onComplete={() => setAppVisualPhase("workspace")} progress={progress} />
+      ) : (
+        <WorkspaceLayout centerCanvas={
+          <main className={`app-shell theme-${themePreference} h-full w-full overflow-auto relative`}>
+            <section className="workspace h-full flex flex-col">
+              <header className="topbar flex-shrink-0" id="dashboard">
+                <div>
+                  <div className="brand inline-brand">
+                    <img src={logoUrl} alt="" />
               <span>BIRDS_EYE_CORE</span>
             </div>
             <p className="eyebrow">PATH: {scan.currentPath !== "-" ? scan.currentPath : "//ROOT/SELECT_SCAN_TARGET"}</p>
@@ -833,6 +845,23 @@ function App() {
           />
         )}
 
+        <div className="workspace-container">
+          <nav className="filter-bar workspace-mode-tabs" aria-label="Workspace tabs" style={{ marginBottom: "20px" }}>
+            {workspaceModes.map((mode) => (
+              <button
+                key={mode.key}
+                className={workspaceMode === mode.key ? "active" : ""}
+                type="button"
+                onClick={() => setWorkspaceMode(mode.key)}
+              >
+                <strong>{mode.label}</strong>
+                {mode.count !== undefined && <small>{formatCount(mode.count)}</small>}
+              </button>
+            ))}
+          </nav>
+
+          {workspaceMode === "explore" && (
+            <div className="workspace-tab-content">
         <section className="analysis-layout spatial-workspace" id="treemap">
           <StorageOverviewPanel metrics={metrics} scan={scan} />
           <div className="treemap-panel">
@@ -939,8 +968,6 @@ function App() {
           </aside>
         </section>
 
-        <details className="insight-disclosure contextual-drawer" id="data">
-          <summary>Largest folders</summary>
         <section className="folder-table">
           <div className="panel-header">
             <h2>Largest Folders</h2>
@@ -963,10 +990,7 @@ function App() {
             </ScrollableRows>
           )}
         </section>
-        </details>
 
-        <details className="insight-disclosure contextual-drawer search-drawer">
-          <summary>File search</summary>
         <section className="folder-table search-panel">
           <div className="panel-header">
             <h2>File Search</h2>
@@ -1039,81 +1063,12 @@ function App() {
             </ScrollableRows>
           )}
         </section>
-        </details>
 
-        <details className="insight-disclosure contextual-drawer">
-          <summary>Media and extension details</summary>
-          <section className="detail-grid">
-            <div className="folder-table">
-              <div className="panel-header">
-                <h2>Largest Files</h2>
-                <span>{formatCount(scan.largestFiles.length)} tracked</span>
-              </div>
-              {scan.largestFiles.length === 0 ? (
-                <div className="empty-state compact">Largest files appear during the next scan.</div>
-              ) : (
-                <ScrollableRows compact>
-                  {scan.largestFiles.map((file) => (
-                    <div className="folder-row file-row action-row-grid" key={file.path}>
-                      <span>{file.path}</span>
-                      <strong>{formatBytes(file.bytes)}</strong>
-                      <small>{file.extension}</small>
-                      <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
-                        <ExternalLink size={16} />
-                      </IconButton>
-                    </div>
-                  ))}
-                </ScrollableRows>
-              )}
             </div>
+          )}
 
-            <div className="folder-table">
-              <div className="panel-header">
-                <h2>Extensions</h2>
-                <span>{formatCount(scan.extensions.length)} groups</span>
-              </div>
-              {scan.extensions.length === 0 ? (
-                <div className="empty-state compact">Extension totals appear during the next scan.</div>
-              ) : (
-                <ScrollableRows compact>
-                  {scan.extensions.map((extension) => (
-                    <div className="folder-row extension-row" key={extension.extension}>
-                      <span>.{extension.extension}</span>
-                      <strong>{formatBytes(extension.bytes)}</strong>
-                      <small>{formatCount(extension.files)} files</small>
-                    </div>
-                  ))}
-                </ScrollableRows>
-              )}
-            </div>
-          </section>
-        </details>
-
-        <details className="insight-disclosure pinned-feature">
-          <summary>Media timeline is pinned for repair</summary>
-          <p>The timeline is currently parked while the rest of the cleanup workflow moves forward.</p>
-          <TimelineScatter
-            files={scan.largestFiles}
-            nativeRuntime={nativeRuntime}
-            onSelectFile={(file) => {
-              setSearchQuery(file.path);
-            }}
-          />
-        </details>
-
-        <details className="insight-disclosure contextual-drawer">
-          <summary>Cleanup simulation</summary>
-          <BeforeAfterSimulation
-            candidates={scan.duplicateCandidates}
-            files={scan.largestFiles}
-            folders={scan.folders}
-            nativeRuntime={nativeRuntime}
-            overlaps={scan.duplicateOverlaps}
-          />
-        </details>
-
-        <details className="insight-disclosure contextual-drawer">
-          <summary>Duplicate review</summary>
+          {workspaceMode === "duplicates" && (
+            <div className="workspace-tab-content">
           <section className="folder-table">
             <div className="panel-header">
               <h2>Duplicate Candidates</h2>
@@ -1142,10 +1097,7 @@ function App() {
               />
             )}
             {scan.duplicateOverlaps.length > 0 && (
-              <details className="insight-disclosure">
-                <summary>Folder overlap map</summary>
                 <DuplicateOverlapGraph overlaps={scan.duplicateOverlaps} onSelectFolder={(path) => setFocusedFolder(path)} />
-              </details>
             )}
             {exactBatchCandidates.length > 0 && (
               <ExactDuplicateBatchReview
@@ -1359,10 +1311,84 @@ function App() {
               </div>
             )}
           </section>
-        </details>
 
-        <details className="insight-disclosure contextual-drawer">
-          <summary>Review queue</summary>
+            </div>
+          )}
+
+          {workspaceMode === "media" && (
+            <div className="workspace-tab-content">
+          <section className="detail-grid">
+            <div className="folder-table">
+              <div className="panel-header">
+                <h2>Largest Files</h2>
+                <span>{formatCount(scan.largestFiles.length)} tracked</span>
+              </div>
+              {scan.largestFiles.length === 0 ? (
+                <div className="empty-state compact">Largest files appear during the next scan.</div>
+              ) : (
+                <ScrollableRows compact>
+                  {scan.largestFiles.map((file) => (
+                    <div className="folder-row file-row action-row-grid" key={file.path}>
+                      <span>{file.path}</span>
+                      <strong>{formatBytes(file.bytes)}</strong>
+                      <small>{file.extension}</small>
+                      <IconButton title="Open in Explorer" onClick={() => void revealPath(file.path)}>
+                        <ExternalLink size={16} />
+                      </IconButton>
+                    </div>
+                  ))}
+                </ScrollableRows>
+              )}
+            </div>
+
+            <div className="folder-table">
+              <div className="panel-header">
+                <h2>Extensions</h2>
+                <span>{formatCount(scan.extensions.length)} groups</span>
+              </div>
+              {scan.extensions.length === 0 ? (
+                <div className="empty-state compact">Extension totals appear during the next scan.</div>
+              ) : (
+                <ScrollableRows compact>
+                  {scan.extensions.map((extension) => (
+                    <div className="folder-row extension-row" key={extension.extension}>
+                      <span>.{extension.extension}</span>
+                      <strong>{formatBytes(extension.bytes)}</strong>
+                      <small>{formatCount(extension.files)} files</small>
+                    </div>
+                  ))}
+                </ScrollableRows>
+              )}
+            </div>
+          </section>
+
+          <p>The timeline is currently parked while the rest of the cleanup workflow moves forward.</p>
+          <TimelineScatter
+            files={scan.largestFiles}
+            nativeRuntime={nativeRuntime}
+            onSelectFile={(file) => {
+              setSearchQuery(file.path);
+            }}
+          />
+
+            </div>
+          )}
+
+          {workspaceMode === "cleanup" && (
+            <div className="workspace-tab-content">
+          <BeforeAfterSimulation
+            candidates={scan.duplicateCandidates}
+            files={scan.largestFiles}
+            folders={scan.folders}
+            nativeRuntime={nativeRuntime}
+            overlaps={scan.duplicateOverlaps}
+          />
+
+            </div>
+          )}
+
+          {workspaceMode === "review" && (
+            <div className="workspace-tab-content">
           <section className="folder-table">
             <div className="panel-header">
               <h2>Review Queue</h2>
@@ -1415,7 +1441,10 @@ function App() {
               </>
             )}
           </section>
-        </details>
+
+            </div>
+          )}
+        </div>
         <OperationalDock
           stagedCount={stagedActions.length}
           reclaimableBytes={queueBytes}
@@ -1484,7 +1513,8 @@ function App() {
         </section>
         )}
       </section>
-    </main>
+      </main>
+      } />
   );
 
   async function selectDuplicateCandidate(candidate: ScanState["duplicateCandidates"][number]) {
