@@ -67,6 +67,8 @@ npm run build
 - `frontend/src/` - React dashboard, worker fallback, native client bridge, canvas treemap.
 - `docs/` - Architecture notes and original product guide.
 
+Duplicate cleanup design and safety notes live in `docs/duplicate-cleanup.md`.
+
 ## Known Packaging Note
 
 The app currently builds a runnable desktop executable. Installer generation is intentionally separate because Windows MSI bundling depends on the WiX toolchain or a successful WiX download.
