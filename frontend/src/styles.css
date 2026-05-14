@@ -238,6 +238,55 @@ h2 {
   font-size: 12px;
 }
 
+.floating-settings {
+  position: fixed;
+  top: 88px;
+  right: 30px;
+  z-index: 45;
+  display: grid;
+  gap: 14px;
+  width: min(320px, calc(100vw - 36px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-strong) 94%, transparent);
+  box-shadow: var(--shadow), var(--glow);
+  backdrop-filter: blur(22px);
+  padding: 16px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.settings-row > span,
+.floating-settings > button {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.floating-settings > button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  cursor: pointer;
+  padding: 0 12px;
+}
+
+.floating-settings > button.active {
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
+
 .scan-manager-grid {
   display: flex;
   align-items: center;
@@ -389,114 +438,94 @@ h2 {
   margin-bottom: 12px;
 }
 
-.scan-diagnostics {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.9fr) minmax(260px, 1fr) minmax(280px, 1.2fr);
-  gap: 12px;
-  align-items: start;
+.scan-terminal {
+  max-width: 1480px;
   margin: -2px auto 14px;
-  max-width: 1180px;
-  padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--panel-soft);
+  background: color-mix(in srgb, var(--panel-strong) 82%, transparent);
+  box-shadow: var(--shadow);
+  overflow: hidden;
 }
 
-.scan-diagnostics.warning {
-  border-color: rgba(251, 191, 36, 0.34);
-  background: rgba(63, 48, 12, 0.2);
+.scan-terminal.warning {
+  border-color: rgba(251, 191, 36, 0.38);
 }
 
-.scan-diagnostics-status,
-.scan-diagnostics-log div {
+.scan-terminal summary {
+  min-height: 46px;
   display: grid;
-  gap: 4px;
-  min-width: 0;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(140px, auto) minmax(240px, 1.2fr);
+  gap: 12px;
+  align-items: center;
+  cursor: pointer;
+  padding: 0 14px;
 }
 
-.scan-diagnostics-title {
+.scan-terminal summary > span {
   display: inline-flex;
-  gap: 7px;
+  gap: 8px;
   align-items: center;
   color: var(--accent);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.scan-diagnostics-status strong {
-  color: var(--text);
-  font-size: 13px;
-}
-
-.scan-diagnostics-status small,
-.scan-diagnostics-log small {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.scan-diagnostics-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.scan-diagnostics-metrics span {
-  display: grid;
-  gap: 3px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.scan-diagnostics-metrics strong {
-  color: var(--text);
-  font-size: 13px;
-}
-
-.scan-diagnostics-log {
-  display: grid;
-  gap: 6px;
-  max-height: 150px;
-  overflow: auto;
-}
-
-.scan-diagnostics-log div {
-  padding: 8px 9px;
-  border-left: 3px solid rgba(71, 215, 198, 0.7);
-  background: rgba(148, 163, 184, 0.08);
-}
-
-.scan-diagnostics-log div.warning {
-  border-left-color: #fbbf24;
-  background: rgba(251, 191, 36, 0.08);
-}
-
-.scan-diagnostics-log div.error {
-  border-left-color: #fb7185;
-  background: rgba(251, 113, 133, 0.09);
-}
-
-.scan-diagnostics-log span {
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.scan-diagnostics-log strong {
-  min-width: 0;
-  overflow: hidden;
+.scan-terminal summary strong {
   color: var(--text);
   font-size: 12px;
-  font-weight: 600;
+}
+
+.scan-terminal summary small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.scan-terminal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding: 10px 14px 0;
+}
+
+.scan-terminal-meta span {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 7px;
+}
+
+.scan-terminal-log {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 12px 14px 14px;
+}
+
+.scan-terminal-log code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font: 12px/1.45 "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-terminal-log code.warning {
+  color: var(--warn);
+}
+
+.scan-terminal-log code.error {
+  color: var(--danger);
 }
 
 .metric-grid {
@@ -533,16 +562,17 @@ h2 {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: #b7c1d3;
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+  color: var(--muted);
   padding: 0 12px;
 }
 
 .filter-bar button.active,
 .filter-bar button:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
+  border-color: var(--border-strong);
+  background: rgba(16, 245, 223, 0.11);
+  color: var(--accent);
 }
 
 .filter-bar span {
@@ -552,16 +582,47 @@ h2 {
 }
 
 .shortcut-help {
+  position: fixed;
+  right: 30px;
+  bottom: 106px;
+  z-index: 46;
+  display: grid;
+  gap: 8px;
+  width: min(360px, calc(100vw - 36px));
+  margin: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-strong) 94%, transparent);
+  color: var(--text);
+  box-shadow: var(--shadow), var(--glow);
+  backdrop-filter: blur(22px);
+  padding: 12px;
+}
+
+.shortcut-help-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: -4px 0 14px;
-  border: 1px solid rgba(71, 215, 198, 0.22);
-  border-radius: 8px;
-  background: rgba(71, 215, 198, 0.08);
-  color: #c9d2e3;
-  padding: 10px;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shortcut-help-header strong {
+  color: var(--accent);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.shortcut-help-header button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--text);
+  cursor: pointer;
 }
 
 .shortcut-help span {
@@ -570,16 +631,16 @@ h2 {
   gap: 6px;
   min-height: 30px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(148, 163, 184, 0.08);
   padding: 5px 8px;
 }
 
 .shortcut-help kbd {
   min-width: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid var(--border);
   border-radius: 5px;
   background: rgba(6, 9, 14, 0.74);
-  color: #ffffff;
+  color: var(--accent);
   font-size: 11px;
   font-weight: 800;
   line-height: 1;
@@ -589,14 +650,64 @@ h2 {
 
 .analysis-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
-  gap: 20px;
-  max-width: 1480px;
+  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr) minmax(320px, 380px);
+  gap: 28px;
+  align-items: start;
+  max-width: 1680px;
   margin: 0 auto 18px;
 }
 
 .spatial-workspace .treemap-panel {
   min-height: min(70vh, 820px);
+}
+
+.storage-overview-panel,
+.inspector-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+  padding: 18px;
+}
+
+.storage-overview-panel {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 18px;
+}
+
+.overview-stat {
+  display: grid;
+  gap: 6px;
+}
+
+.overview-stat span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.overview-stat strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 26px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-stat.primary strong {
+  color: var(--accent);
+  font-size: 34px;
+}
+
+.overview-stat small {
+  color: var(--muted);
 }
 
 .detail-grid {
@@ -1403,7 +1514,16 @@ h2 {
 .recommendations {
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 14px;
+}
+
+.recommendations > .panel-header {
+  margin-bottom: 0;
+}
+
+.inspector-card {
+  display: grid;
+  gap: 12px;
 }
 
 .action-heatmap {
@@ -1433,6 +1553,17 @@ h2 {
 .panel-toggles button.active {
   border-color: rgba(255, 255, 255, 0.4);
   background: rgba(255, 255, 255, 0.12);
+}
+
+.filter-bar.vertical {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.filter-bar.vertical button {
+  justify-content: flex-start;
+  width: 100%;
 }
   overflow-x: auto;
 }
@@ -3201,9 +3332,57 @@ button.overlap-pair:focus-visible {
   color: var(--text);
 }
 
+.search-box,
+.search-filters input[type="text"],
+.search-filters input[type="number"],
+.search-filters select,
+.icon-cta,
+.index-summary-grid div {
+  border-color: var(--border);
+  background: var(--panel-soft);
+  color: var(--text);
+}
+
+.search-box input {
+  color: var(--text);
+}
+
+.search-box input::placeholder {
+  color: var(--faint);
+}
+
+.folder-row,
+.duplicate-row,
+.duplicate-file-list,
+.index-row {
+  border-color: var(--border);
+}
+
+.folder-row span,
+.folder-row strong,
+.duplicate-row strong,
+.index-row strong,
+.index-summary-grid strong {
+  color: var(--text);
+}
+
+.folder-row small,
+.duplicate-row span,
+.duplicate-row small,
+.index-row span,
+.index-summary-grid span {
+  color: var(--muted);
+}
+
+.empty-state,
+.treemap-empty {
+  border-color: var(--border);
+  color: var(--muted);
+}
+
 @media (max-width: 1080px) {
   .scan-strip,
-  .scan-diagnostics,
+  .scan-terminal summary,
   .metric-grid,
   .analysis-layout,
   .detail-grid,
@@ -3216,8 +3395,8 @@ button.overlap-pair:focus-visible {
     grid-template-columns: 1fr;
   }
 
-  .scan-diagnostics-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .scan-terminal summary {
+    grid-template-columns: 1fr;
   }
 }
 

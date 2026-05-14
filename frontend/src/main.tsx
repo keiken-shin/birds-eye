@@ -23,8 +23,10 @@ import {
   Play,
   RotateCw,
   Search,
+  Settings,
   Square,
   Sun,
+  Terminal,
   Trash2,
   Undo2,
   X,
@@ -203,6 +205,7 @@ function App() {
   const [showDuplicates, setShowDuplicates] = useState(true);
   const [showReviewQueue, setShowReviewQueue] = useState(true);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [duplicateSort, setDuplicateSort] = useState<DuplicateSortKey>("cleanup");
   const [duplicateFilters, setDuplicateFilters] = useState<DuplicateReviewFilters>(initialDuplicateFilters);
   const [batchDuplicateIds, setBatchDuplicateIds] = useState<number[]>([]);
@@ -509,7 +512,7 @@ function App() {
         occurredAt,
       },
       ...current,
-    ].slice(0, 16));
+    ].slice(0, 80));
   }
 
   function openFolderPicker() {
@@ -649,6 +652,13 @@ function App() {
       }
 
       setScan({ ...message.payload });
+      appendScanDiagnostic({
+        source: "browser",
+        severity: "info",
+        label: message.type === "progress" ? "Progress" : message.type === "finished" ? "Completed" : "Cancelled",
+        message: `${message.payload.status} ${formatCount(message.payload.processedFiles)} / ${formatCount(message.payload.totalFiles)} files`,
+        path: message.payload.currentPath,
+      });
 
       if (message.type === "finished" || message.type === "cancelled") {
         appendScanDiagnostic({
@@ -737,7 +747,7 @@ function App() {
               <span>BIRDS_EYE_CORE</span>
             </div>
             <p className="eyebrow">PATH: {scan.currentPath !== "-" ? scan.currentPath : "//ROOT/SELECT_SCAN_TARGET"}</p>
-            <h1>{activePage === "index" ? "Index library" : `${workspaceMode}_workspace`}</h1>
+            <h1>{activePage === "index" ? "index_library" : "workspace_canvas"}</h1>
           </div>
           <div className="action-row">
             <nav className="top-nav" aria-label="Primary">
@@ -779,35 +789,29 @@ function App() {
               </button>
             )}
             <button
-              className={`ghost-action ${showShortcutHelp ? "active" : ""}`}
+              className={`ghost-action ${showSettingsPanel ? "active" : ""}`}
               type="button"
-              onClick={() => setShowShortcutHelp((current) => !current)}
-              title="Keyboard shortcuts"
-              aria-label="Keyboard shortcuts"
-              aria-expanded={showShortcutHelp}
+              onClick={() => setShowSettingsPanel((current) => !current)}
+              title="Settings"
+              aria-label="Settings"
+              aria-expanded={showSettingsPanel}
             >
-              <Keyboard size={18} />
+              <Settings size={18} />
             </button>
-            <ThemeSwitcher value={themePreference} onChange={setThemePreference} />
           </div>
         </header>
 
+        <FloatingSettingsPanel
+          open={showSettingsPanel}
+          themePreference={themePreference}
+          shortcutsOpen={showShortcutHelp}
+          onThemeChange={setThemePreference}
+          onToggleShortcuts={() => setShowShortcutHelp((current) => !current)}
+        />
+        {showShortcutHelp && <ShortcutHelp onClose={() => setShowShortcutHelp(false)} />}
+
         {activePage === "workspace" ? (
         <>
-        <section className="workspace-mode-bar" aria-label="Workspace modes">
-          {workspaceModes.map((mode) => (
-            <button
-              className={workspaceMode === mode.key ? "active" : ""}
-              key={mode.key}
-              type="button"
-              onClick={() => setWorkspaceMode(mode.key)}
-            >
-              <span>{mode.label}</span>
-              {mode.count !== undefined && <strong>{formatCount(mode.count)}</strong>}
-            </button>
-          ))}
-        </section>
-
         <section className="scan-strip" id="scan" aria-label="Scan progress">
           <div>
             <span>{scan.rootName}</span>
@@ -820,7 +824,7 @@ function App() {
         </section>
 
         {scan.status !== "idle" && (
-          <ScanDiagnosticsPanel
+          <ScanTerminalPanel
             diagnostics={scanDiagnostics}
             lastEvent={lastNativeJobEvent}
             signalAgeMs={scanSignalAgeMs}
@@ -829,45 +833,8 @@ function App() {
           />
         )}
 
-        <details className="telemetry-drawer">
-          <summary>Telemetry and filters</summary>
-          <section className="metric-grid" aria-label="Scan metrics">
-            {metrics.map((metric) => (
-              <motion.article
-                className="metric-card"
-                key={metric.label}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-              >
-                <span>{metric.label}</span>
-                <strong>{metric.value}</strong>
-                <small>{metric.detail}</small>
-              </motion.article>
-            ))}
-          </section>
-
-          <section className="filter-bar" aria-label="Category filters">
-            <button className={filter === "all" ? "active" : ""} type="button" onClick={() => setFilter("all")}>
-              All
-            </button>
-            {(Object.keys(categories) as CategoryKey[]).map((key) => (
-              <button
-                className={filter === key ? "active" : ""}
-                key={key}
-                type="button"
-                onClick={() => setFilter(key)}
-              >
-                <span style={{ background: categories[key].color }} />
-                {categories[key].label}
-              </button>
-            ))}
-          </section>
-        </details>
-
-        {showShortcutHelp && <ShortcutHelp />}
-
-        {workspaceMode === "explore" && (
         <section className="analysis-layout spatial-workspace" id="treemap">
+          <StorageOverviewPanel metrics={metrics} scan={scan} />
           <div className="treemap-panel">
             <div className="panel-header">
               <h2>Space Distribution</h2>
@@ -938,32 +905,40 @@ function App() {
 
           <aside className="recommendations">
             <div className="panel-header compact">
-              <h2>Cleanup Signals</h2>
-              <span>Toggle panels</span>
+              <h2>Inspector</h2>
+              <span>Context rail</span>
             </div>
-            <div className="panel-toggles" role="group" aria-label="Cleanup panel visibility">
-              <button className={showHeatmap ? "active" : ""} type="button" onClick={() => setShowHeatmap((current) => !current)}>
-                Heatmap
-              </button>
-              <button className={showSuggestedMoves ? "active" : ""} type="button" onClick={() => setShowSuggestedMoves((current) => !current)}>
-                Suggested moves
-              </button>
-            </div>
-            {showHeatmap ? (
+            <section className="inspector-card">
+              <div className="panel-header compact">
+                <h2>Filters</h2>
+                <span>{filter === "all" ? "All media" : categories[filter].label}</span>
+              </div>
+              <section className="filter-bar vertical" aria-label="Category filters">
+                <button className={filter === "all" ? "active" : ""} type="button" onClick={() => setFilter("all")}>
+                  All
+                </button>
+                {(Object.keys(categories) as CategoryKey[]).map((key) => (
+                  <button
+                    className={filter === key ? "active" : ""}
+                    key={key}
+                    type="button"
+                    onClick={() => setFilter(key)}
+                  >
+                    <span style={{ background: categories[key].color }} />
+                    {categories[key].label}
+                  </button>
+                ))}
+              </section>
+            </section>
+            <section className="inspector-card">
               <ActionHeatmap scan={scan} onStageAction={stageHeatmapAction} />
-            ) : (
-              <div className="empty-state compact">Action heatmap hidden. Toggle it back on to review cleanup signals.</div>
-            )}
-            {showSuggestedMoves ? (
+            </section>
+            <section className="inspector-card">
               <SmartSuggestedMoves scan={scan} onStage={stageSuggestedMove} />
-            ) : (
-              <div className="empty-state compact">Suggested moves hidden. Toggle it back on to review move ideas.</div>
-            )}
+            </section>
           </aside>
         </section>
-        )}
 
-        {workspaceMode === "explore" && (
         <details className="insight-disclosure contextual-drawer" id="data">
           <summary>Largest folders</summary>
         <section className="folder-table">
@@ -989,9 +964,7 @@ function App() {
           )}
         </section>
         </details>
-        )}
 
-        {workspaceMode === "explore" && (
         <details className="insight-disclosure contextual-drawer search-drawer">
           <summary>File search</summary>
         <section className="folder-table search-panel">
@@ -1067,9 +1040,9 @@ function App() {
           )}
         </section>
         </details>
-        )}
 
-        {workspaceMode === "media" && (
+        <details className="insight-disclosure contextual-drawer">
+          <summary>Media and extension details</summary>
           <section className="detail-grid">
             <div className="folder-table">
               <div className="panel-header">
@@ -1114,9 +1087,8 @@ function App() {
               )}
             </div>
           </section>
-        )}
+        </details>
 
-        {workspaceMode === "media" && (
         <details className="insight-disclosure pinned-feature">
           <summary>Media timeline is pinned for repair</summary>
           <p>The timeline is currently parked while the rest of the cleanup workflow moves forward.</p>
@@ -1128,9 +1100,9 @@ function App() {
             }}
           />
         </details>
-        )}
 
-        {workspaceMode === "cleanup" && (
+        <details className="insight-disclosure contextual-drawer">
+          <summary>Cleanup simulation</summary>
           <BeforeAfterSimulation
             candidates={scan.duplicateCandidates}
             files={scan.largestFiles}
@@ -1138,9 +1110,10 @@ function App() {
             nativeRuntime={nativeRuntime}
             overlaps={scan.duplicateOverlaps}
           />
-        )}
+        </details>
 
-        {workspaceMode === "duplicates" && (
+        <details className="insight-disclosure contextual-drawer">
+          <summary>Duplicate review</summary>
           <section className="folder-table">
             <div className="panel-header">
               <h2>Duplicate Candidates</h2>
@@ -1386,9 +1359,10 @@ function App() {
               </div>
             )}
           </section>
-        )}
+        </details>
 
-        {workspaceMode === "review" && (
+        <details className="insight-disclosure contextual-drawer">
+          <summary>Review queue</summary>
           <section className="folder-table">
             <div className="panel-header">
               <h2>Review Queue</h2>
@@ -1441,7 +1415,7 @@ function App() {
               </>
             )}
           </section>
-        )}
+        </details>
         <OperationalDock
           stagedCount={stagedActions.length}
           reclaimableBytes={queueBytes}
@@ -2521,6 +2495,68 @@ function ThemeSwitcher({
   );
 }
 
+function FloatingSettingsPanel({
+  open,
+  themePreference,
+  shortcutsOpen,
+  onThemeChange,
+  onToggleShortcuts,
+}: {
+  open: boolean;
+  themePreference: ThemePreference;
+  shortcutsOpen: boolean;
+  onThemeChange: (value: ThemePreference) => void;
+  onToggleShortcuts: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <aside className="floating-settings" aria-label="Settings">
+      <div className="panel-header compact">
+        <h2>Settings</h2>
+        <span>Interface</span>
+      </div>
+      <div className="settings-row">
+        <span>Theme</span>
+        <ThemeSwitcher value={themePreference} onChange={onThemeChange} />
+      </div>
+      <button className={shortcutsOpen ? "active" : ""} type="button" onClick={onToggleShortcuts}>
+        <Keyboard size={16} />
+        Keyboard shortcuts
+      </button>
+    </aside>
+  );
+}
+
+function StorageOverviewPanel({ metrics, scan }: { metrics: Array<{ label: string; value: string; detail: string }>; scan: ScanState }) {
+  const largestFolder = [...scan.folders].sort((a, b) => b.bytes - a.bytes)[0] ?? null;
+
+  return (
+    <aside className="storage-overview-panel" aria-label="Storage overview">
+      <div className="panel-header compact">
+        <h2>Storage Overview</h2>
+        <span>{scan.status}</span>
+      </div>
+      <div className="overview-stat primary">
+        <span>Total size</span>
+        <strong>{formatBytes(scan.totalBytes || scan.processedBytes)}</strong>
+      </div>
+      <div className="overview-stat">
+        <span>Largest folder</span>
+        <strong title={largestFolder?.path}>{largestFolder ? lastSegment(largestFolder.path) : "-"}</strong>
+        <small>{largestFolder ? formatBytes(largestFolder.bytes) : "Waiting for scan"}</small>
+      </div>
+      {metrics.slice(0, 3).map((metric) => (
+        <div className="overview-stat compact" key={metric.label}>
+          <span>{metric.label}</span>
+          <strong>{metric.value}</strong>
+          <small>{metric.detail}</small>
+        </div>
+      ))}
+    </aside>
+  );
+}
+
 function OperationalDock({
   stagedCount,
   reclaimableBytes,
@@ -2579,8 +2615,6 @@ function applyThemePreference(preference: ThemePreference) {
 }
 
 function diagnosticFromNativeEvent(event: NativeJobEvent): Omit<ScanDiagnostic, "id"> | null {
-  if (event.event_kind === "progress" && event.severity === "info") return null;
-
   const severity = normalizeDiagnosticSeverity(event.severity);
   const labelByKind: Record<string, string> = {
     started: "Started",
@@ -2606,7 +2640,7 @@ function normalizeDiagnosticSeverity(severity: string): ScanDiagnostic["severity
   return "info";
 }
 
-function ScanDiagnosticsPanel({
+function ScanTerminalPanel({
   diagnostics,
   lastEvent,
   signalAgeMs,
@@ -2619,37 +2653,40 @@ function ScanDiagnosticsPanel({
   stalled: boolean;
   currentPath: string;
 }) {
-  const visibleDiagnostics = diagnostics.slice(0, 6);
+  const visibleDiagnostics = [...diagnostics].reverse().slice(-36);
 
   return (
-    <section className={`scan-diagnostics ${stalled ? "warning" : ""}`} aria-label="Scan diagnostics">
-      <div className="scan-diagnostics-status">
-        <span className="scan-diagnostics-title">
-          {stalled ? <AlertTriangle size={16} /> : <Activity size={16} />}
-          Scan diagnostics
+    <details className={`scan-terminal ${stalled ? "warning" : ""}`} aria-label="Scan terminal" open={stalled}>
+      <summary>
+        <span>
+          {stalled ? <AlertTriangle size={16} /> : <Terminal size={16} />}
+          Scan terminal
         </span>
         <strong>{stalled ? "No recent scan events" : signalAgeMs === null ? "Waiting for events" : `Last update ${formatAge(signalAgeMs)} ago`}</strong>
         <small title={currentPath}>{currentPath}</small>
+      </summary>
+      <div className="scan-terminal-meta">
+        <span>workers={lastEvent?.active_workers ?? "-"}</span>
+        <span>queue={lastEvent?.queue_depth ?? "-"}</span>
+        <span>files={lastEvent ? formatCount(lastEvent.files_scanned) : "-"}</span>
+        <span>folders={lastEvent ? formatCount(lastEvent.folders_scanned) : "-"}</span>
       </div>
-      <div className="scan-diagnostics-metrics">
-        <span>Workers <strong>{lastEvent?.active_workers ?? "-"}</strong></span>
-        <span>Queue <strong>{lastEvent?.queue_depth ?? "-"}</strong></span>
-        <span>Files <strong>{lastEvent ? formatCount(lastEvent.files_scanned) : "-"}</strong></span>
-        <span>Folders <strong>{lastEvent ? formatCount(lastEvent.folders_scanned) : "-"}</strong></span>
+      <div className="scan-terminal-log">
+        {visibleDiagnostics.length === 0 ? (
+          <code>[idle] waiting for scan events...</code>
+        ) : visibleDiagnostics.map((diagnostic) => (
+          <code className={diagnostic.severity} key={diagnostic.id}>
+            [{formatTerminalTime(diagnostic.occurredAt)}] {diagnostic.source.toUpperCase()} {diagnostic.label.toUpperCase()} :: {diagnostic.message}
+            {diagnostic.path ? ` :: ${diagnostic.path}` : ""}
+          </code>
+        ))}
       </div>
-      {visibleDiagnostics.length > 0 && (
-        <div className="scan-diagnostics-log">
-          {visibleDiagnostics.map((diagnostic) => (
-            <div className={diagnostic.severity} key={diagnostic.id}>
-              <span>{diagnostic.label}</span>
-              <strong>{diagnostic.message}</strong>
-              {diagnostic.path && <small title={diagnostic.path}>{diagnostic.path}</small>}
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+    </details>
   );
+}
+
+function formatTerminalTime(value: number) {
+  return new Date(value).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function formatAge(ms: number) {
@@ -3837,7 +3874,7 @@ function buildSuggestionYearBuckets(files: ScanState["largestFiles"], category: 
     .slice(0, 5);
 }
 
-function ShortcutHelp() {
+function ShortcutHelp({ onClose }: { onClose: () => void }) {
   const shortcuts = [
     { keys: "/", label: "Focus search" },
     { keys: "1-0", label: "Switch category filters" },
@@ -3849,6 +3886,12 @@ function ShortcutHelp() {
 
   return (
     <section className="shortcut-help" aria-label="Keyboard shortcut reference">
+      <div className="shortcut-help-header">
+        <strong>Keyboard shortcuts</strong>
+        <button type="button" onClick={onClose} aria-label="Close keyboard shortcuts">
+          <X size={14} />
+        </button>
+      </div>
       {shortcuts.map((shortcut) => (
         <span key={shortcut.keys}>
           <kbd>{shortcut.keys}</kbd>
