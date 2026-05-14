@@ -1474,6 +1474,77 @@ h2 {
   color: #ffffff;
 }
 
+.exact-batch-review {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 12px;
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  border-radius: 8px;
+  background: rgba(74, 222, 128, 0.06);
+  padding: 10px;
+}
+
+.exact-batch-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.exact-batch-header div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.exact-batch-header strong {
+  color: #ffffff;
+}
+
+.exact-batch-header span,
+.exact-batch-table span,
+.exact-batch-table small {
+  color: #96a1b6;
+}
+
+.exact-batch-header button,
+.exact-batch-table button {
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(12, 16, 24, 0.86);
+  color: #e5eefb;
+  padding: 0 10px;
+}
+
+.exact-batch-header button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.exact-batch-table {
+  display: grid;
+  gap: 6px;
+}
+
+.exact-batch-table label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 100px 86px;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.exact-batch-table strong,
+.exact-batch-table small {
+  text-align: right;
+}
+
+.exact-batch-table strong {
+  color: #ffffff;
+}
+
 .duplicate-list-header {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) 130px 96px auto;

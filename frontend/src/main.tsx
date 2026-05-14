@@ -173,6 +173,7 @@ function App() {
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [duplicateSort, setDuplicateSort] = useState<DuplicateSortKey>("cleanup");
   const [duplicateFilters, setDuplicateFilters] = useState<DuplicateReviewFilters>(initialDuplicateFilters);
+  const [batchDuplicateIds, setBatchDuplicateIds] = useState<number[]>([]);
   const isWindowsRuntime = useMemo(() => {
     return typeof navigator !== "undefined" && navigator.userAgent.toLowerCase().includes("windows");
   }, []);
@@ -248,6 +249,9 @@ function App() {
       return (b.cleanupScore ?? b.reclaimableBytes) - (a.cleanupScore ?? a.reclaimableBytes);
     });
   }, [duplicateSort, filteredDuplicateCandidates]);
+  const exactBatchCandidates = useMemo(() => {
+    return sortedDuplicateCandidates.filter((candidate) => candidate.id && candidate.confidenceScore === 1);
+  }, [sortedDuplicateCandidates]);
   const duplicatePreviewFiles = useMemo(() => {
     return duplicateFiles.map((file): PreviewableFile => {
       const extension = file.extension ?? getExtension(file.name);
@@ -989,6 +993,14 @@ function App() {
                 <DuplicateOverlapGraph overlaps={scan.duplicateOverlaps} onSelectFolder={(path) => setFocusedFolder(path)} />
               </details>
             )}
+            {exactBatchCandidates.length > 0 && (
+              <ExactDuplicateBatchReview
+                candidates={exactBatchCandidates}
+                selectedIds={batchDuplicateIds}
+                onSelectedIdsChange={setBatchDuplicateIds}
+                onStageSelected={() => void stageSelectedExactDuplicateBatch()}
+              />
+            )}
             {scan.duplicateCandidates.length === 0 ? (
               <div className="empty-state compact">Files with identical sizes will appear here as duplicate candidates.</div>
             ) : sortedDuplicateCandidates.length === 0 ? (
@@ -1422,6 +1434,20 @@ function App() {
         },
       ];
     });
+  }
+
+  async function stageSelectedExactDuplicateBatch() {
+    const selected = exactBatchCandidates.filter((candidate) => candidate.id && batchDuplicateIds.includes(candidate.id));
+    if (selected.length === 0) {
+      setRuntimeMessage("Select exact duplicate groups before staging a batch");
+      return;
+    }
+
+    for (const candidate of selected) {
+      await stageDuplicateAction(candidate);
+    }
+    setBatchDuplicateIds([]);
+    setRuntimeMessage(`Staged ${formatCount(selected.length)} exact duplicate groups for review`);
   }
 
   function canStageSelectedDuplicateKeep() {
@@ -2268,6 +2294,58 @@ function FolderPairDuplicateSummary({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function ExactDuplicateBatchReview({
+  candidates,
+  selectedIds,
+  onSelectedIdsChange,
+  onStageSelected,
+}: {
+  candidates: ScanState["duplicateCandidates"];
+  selectedIds: number[];
+  onSelectedIdsChange: React.Dispatch<React.SetStateAction<number[]>>;
+  onStageSelected: () => void;
+}) {
+  const visibleIds = candidates.flatMap((candidate) => candidate.id ? [candidate.id] : []);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
+
+  return (
+    <div className="exact-batch-review">
+      <div className="exact-batch-header">
+        <div>
+          <strong>Batch review for exact duplicates</strong>
+          <span>{formatCount(candidates.length)} full-hash groups are eligible. Risky groups are excluded.</span>
+        </div>
+        <button type="button" onClick={() => onSelectedIdsChange(allVisibleSelected ? [] : visibleIds)}>
+          {allVisibleSelected ? "Deselect all" : "Select all"}
+        </button>
+        <button type="button" disabled={selectedIds.length === 0} onClick={onStageSelected}>
+          Stage selected
+        </button>
+      </div>
+      <div className="exact-batch-table">
+        {candidates.slice(0, 12).map((candidate) => {
+          const id = candidate.id;
+          if (!id) return null;
+          return (
+            <label key={id}>
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(id)}
+                onChange={(event) => onSelectedIdsChange((current) => event.currentTarget.checked
+                  ? [...new Set([...current, id])]
+                  : current.filter((selectedId) => selectedId !== id))}
+              />
+              <span>{formatCount(candidate.files)} copies</span>
+              <strong>{formatBytes(candidate.reclaimableBytes)}</strong>
+              <small>{formatCount(candidate.folderCount ?? 1)} folders</small>
+            </label>
+          );
+        })}
+      </div>
     </div>
   );
 }
