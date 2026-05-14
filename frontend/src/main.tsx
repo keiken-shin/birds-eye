@@ -16,12 +16,15 @@ import {
   FileVideo,
   FolderOpen,
   Keyboard,
+  Monitor,
+  Moon,
   MoveRight,
   Pause,
   Play,
   RotateCw,
   Search,
   Square,
+  Sun,
   Trash2,
   Undo2,
   X,
@@ -136,6 +139,8 @@ const previewFailureCache = new Map<string, true>();
 const maxPreviewFailureCacheEntries = 300;
 
 type AppPage = "workspace" | "index";
+type WorkspaceMode = "explore" | "duplicates" | "media" | "cleanup" | "review";
+type ThemePreference = "system" | "dark" | "light";
 type DuplicateSortKey = "cleanup" | "reclaimable" | "files" | "folders" | "confidence";
 type DuplicateReviewFilters = {
   exactOnly: boolean;
@@ -181,6 +186,8 @@ function App() {
   const [stagedActions, setStagedActions] = useState<StagedAction[]>([]);
   const [committingActions, setCommittingActions] = useState(false);
   const [activePage, setActivePage] = useState<AppPage>("workspace");
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("explore");
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() => getStoredThemePreference());
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Browser preview");
   const [scanDiagnostics, setScanDiagnostics] = useState<ScanDiagnostic[]>([]);
@@ -212,6 +219,19 @@ function App() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    applyThemePreference(themePreference);
+    window.localStorage.setItem("birds-eye-theme", themePreference);
+  }, [themePreference]);
+
+  useEffect(() => {
+    if (themePreference !== "system") return;
+    const query = window.matchMedia("(prefers-color-scheme: light)");
+    const handleChange = () => applyThemePreference("system");
+    query.addEventListener("change", handleChange);
+    return () => query.removeEventListener("change", handleChange);
+  }, [themePreference]);
 
   useEffect(() => {
     if (!nativeRuntime) return;
@@ -451,6 +471,14 @@ function App() {
     { label: "Scanned", value: formatBytes(scan.processedBytes), detail: `${formatBytes(scan.totalBytes)} discovered` },
     { label: "Throughput", value: `${Math.round(scan.processedFiles / Math.max(scan.elapsedMs / 1000, 1))}/s`, detail: scan.status },
     { label: "Folders", value: formatCount(scan.folders.length), detail: scan.rootName },
+  ];
+  const queueBytes = stagedActions.reduce((sum, action) => sum + action.bytes, 0);
+  const workspaceModes: Array<{ key: WorkspaceMode; label: string; count?: number }> = [
+    { key: "explore", label: "Explore", count: scan.folders.length },
+    { key: "duplicates", label: "Duplicates", count: sortedDuplicateCandidates.length },
+    { key: "media", label: "Media", count: scan.largestFiles.length },
+    { key: "cleanup", label: "Cleanup", count: scan.duplicateCandidates.length },
+    { key: "review", label: "Review", count: stagedActions.length },
   ];
   const scanSignalAgeMs = lastScanSignalAt ? Math.max(0, scanClock - lastScanSignalAt) : null;
   const scanAppearsStalled = scan.status === "scanning" && scanSignalAgeMs !== null && scanSignalAgeMs > 15_000;
@@ -700,16 +728,16 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell theme-${themePreference}`}>
       <section className="workspace">
         <header className="topbar" id="dashboard">
           <div>
             <div className="brand inline-brand">
               <img src={logoUrl} alt="" />
-              <span>Birds Eye</span>
+              <span>BIRDS_EYE_CORE</span>
             </div>
-            <p className="eyebrow">Offline storage intelligence</p>
-            <h1>Understand where your disk space went.</h1>
+            <p className="eyebrow">PATH: {scan.currentPath !== "-" ? scan.currentPath : "//ROOT/SELECT_SCAN_TARGET"}</p>
+            <h1>{activePage === "index" ? "Index library" : `${workspaceMode}_workspace`}</h1>
           </div>
           <div className="action-row">
             <nav className="top-nav" aria-label="Primary">
@@ -760,11 +788,26 @@ function App() {
             >
               <Keyboard size={18} />
             </button>
+            <ThemeSwitcher value={themePreference} onChange={setThemePreference} />
           </div>
         </header>
 
         {activePage === "workspace" ? (
         <>
+        <section className="workspace-mode-bar" aria-label="Workspace modes">
+          {workspaceModes.map((mode) => (
+            <button
+              className={workspaceMode === mode.key ? "active" : ""}
+              key={mode.key}
+              type="button"
+              onClick={() => setWorkspaceMode(mode.key)}
+            >
+              <span>{mode.label}</span>
+              {mode.count !== undefined && <strong>{formatCount(mode.count)}</strong>}
+            </button>
+          ))}
+        </section>
+
         <section className="scan-strip" id="scan" aria-label="Scan progress">
           <div>
             <span>{scan.rootName}</span>
@@ -786,59 +829,45 @@ function App() {
           />
         )}
 
-        <section className="metric-grid" aria-label="Scan metrics">
-          {metrics.map((metric) => (
-            <motion.article
-              className="metric-card"
-              key={metric.label}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              <span>{metric.label}</span>
-              <strong>{metric.value}</strong>
-              <small>{metric.detail}</small>
-            </motion.article>
-          ))}
-        </section>
+        <details className="telemetry-drawer">
+          <summary>Telemetry and filters</summary>
+          <section className="metric-grid" aria-label="Scan metrics">
+            {metrics.map((metric) => (
+              <motion.article
+                className="metric-card"
+                key={metric.label}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+                <span>{metric.label}</span>
+                <strong>{metric.value}</strong>
+                <small>{metric.detail}</small>
+              </motion.article>
+            ))}
+          </section>
 
-        <section className="filter-bar" aria-label="Category filters">
-          <button className={filter === "all" ? "active" : ""} type="button" onClick={() => setFilter("all")}>
-            All
-          </button>
-          {(Object.keys(categories) as CategoryKey[]).map((key) => (
-            <button
-              className={filter === key ? "active" : ""}
-              key={key}
-              type="button"
-              onClick={() => setFilter(key)}
-            >
-              <span style={{ background: categories[key].color }} />
-              {categories[key].label}
+          <section className="filter-bar" aria-label="Category filters">
+            <button className={filter === "all" ? "active" : ""} type="button" onClick={() => setFilter("all")}>
+              All
             </button>
-          ))}
-        </section>
+            {(Object.keys(categories) as CategoryKey[]).map((key) => (
+              <button
+                className={filter === key ? "active" : ""}
+                key={key}
+                type="button"
+                onClick={() => setFilter(key)}
+              >
+                <span style={{ background: categories[key].color }} />
+                {categories[key].label}
+              </button>
+            ))}
+          </section>
+        </details>
 
         {showShortcutHelp && <ShortcutHelp />}
 
-        <details className="layout-controls">
-          <summary>Layout controls</summary>
-          <div className="layout-toggles" role="group" aria-label="Workbench panel visibility">
-            <button className={showDetailGrid ? "active" : ""} type="button" onClick={() => setShowDetailGrid((current) => !current)}>
-              Detail grids
-            </button>
-            <button className={showSimulation ? "active" : ""} type="button" onClick={() => setShowSimulation((current) => !current)}>
-              Simulation
-            </button>
-            <button className={showDuplicates ? "active" : ""} type="button" onClick={() => setShowDuplicates((current) => !current)}>
-              Duplicates
-            </button>
-            <button className={showReviewQueue ? "active" : ""} type="button" onClick={() => setShowReviewQueue((current) => !current)}>
-              Review queue
-            </button>
-          </div>
-        </details>
-
-        <section className="analysis-layout" id="treemap">
+        {workspaceMode === "explore" && (
+        <section className="analysis-layout spatial-workspace" id="treemap">
           <div className="treemap-panel">
             <div className="panel-header">
               <h2>Space Distribution</h2>
@@ -932,8 +961,12 @@ function App() {
             )}
           </aside>
         </section>
+        )}
 
-        <section className="folder-table" id="data">
+        {workspaceMode === "explore" && (
+        <details className="insight-disclosure contextual-drawer" id="data">
+          <summary>Largest folders</summary>
+        <section className="folder-table">
           <div className="panel-header">
             <h2>Largest Folders</h2>
             <span><Search size={14} /> {formatCount(sortedFolders.length)} folders</span>
@@ -955,7 +988,12 @@ function App() {
             </ScrollableRows>
           )}
         </section>
+        </details>
+        )}
 
+        {workspaceMode === "explore" && (
+        <details className="insight-disclosure contextual-drawer search-drawer">
+          <summary>File search</summary>
         <section className="folder-table search-panel">
           <div className="panel-header">
             <h2>File Search</h2>
@@ -1028,8 +1066,10 @@ function App() {
             </ScrollableRows>
           )}
         </section>
+        </details>
+        )}
 
-        {showDetailGrid && (
+        {workspaceMode === "media" && (
           <section className="detail-grid">
             <div className="folder-table">
               <div className="panel-header">
@@ -1076,6 +1116,7 @@ function App() {
           </section>
         )}
 
+        {workspaceMode === "media" && (
         <details className="insight-disclosure pinned-feature">
           <summary>Media timeline is pinned for repair</summary>
           <p>The timeline is currently parked while the rest of the cleanup workflow moves forward.</p>
@@ -1087,8 +1128,9 @@ function App() {
             }}
           />
         </details>
+        )}
 
-        {showSimulation && (
+        {workspaceMode === "cleanup" && (
           <BeforeAfterSimulation
             candidates={scan.duplicateCandidates}
             files={scan.largestFiles}
@@ -1098,7 +1140,7 @@ function App() {
           />
         )}
 
-        {showDuplicates && (
+        {workspaceMode === "duplicates" && (
           <section className="folder-table">
             <div className="panel-header">
               <h2>Duplicate Candidates</h2>
@@ -1346,7 +1388,7 @@ function App() {
           </section>
         )}
 
-        {showReviewQueue && (
+        {workspaceMode === "review" && (
           <section className="folder-table">
             <div className="panel-header">
               <h2>Review Queue</h2>
@@ -1400,6 +1442,15 @@ function App() {
             )}
           </section>
         )}
+        <OperationalDock
+          stagedCount={stagedActions.length}
+          reclaimableBytes={queueBytes}
+          canCommit={nativeRuntime && isWindowsRuntime && !committingActions && actionableStagedActions.length > 0}
+          onOpenReview={() => setWorkspaceMode("review")}
+          onUndo={() => setStagedActions((current) => current.slice(0, -1))}
+          onClear={() => setStagedActions([])}
+          onCommit={() => void commitStagedActions()}
+        />
         </>
         ) : (
         <section className="folder-table" id="index-library">
@@ -2437,6 +2488,94 @@ function DuplicateCleanupEdgeStates({
       ))}
     </div>
   );
+}
+
+function ThemeSwitcher({
+  value,
+  onChange,
+}: {
+  value: ThemePreference;
+  onChange: (value: ThemePreference) => void;
+}) {
+  const options: Array<{ value: ThemePreference; label: string; icon: React.ReactNode }> = [
+    { value: "system", label: "System theme", icon: <Monitor size={15} /> },
+    { value: "dark", label: "Dark theme", icon: <Moon size={15} /> },
+    { value: "light", label: "Light theme", icon: <Sun size={15} /> },
+  ];
+
+  return (
+    <div className="theme-switcher" role="group" aria-label="Theme preference">
+      {options.map((option) => (
+        <button
+          className={value === option.value ? "active" : ""}
+          key={option.value}
+          type="button"
+          onClick={() => onChange(option.value)}
+          title={option.label}
+          aria-label={option.label}
+        >
+          {option.icon}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function OperationalDock({
+  stagedCount,
+  reclaimableBytes,
+  canCommit,
+  onOpenReview,
+  onUndo,
+  onClear,
+  onCommit,
+}: {
+  stagedCount: number;
+  reclaimableBytes: number;
+  canCommit: boolean;
+  onOpenReview: () => void;
+  onUndo: () => void;
+  onClear: () => void;
+  onCommit: () => void;
+}) {
+  return (
+    <section className="operational-dock" aria-label="Operational queue">
+      <button type="button" onClick={onOpenReview}>
+        <CopyCheck size={17} />
+        <span>Queue</span>
+        <strong>{formatCount(stagedCount)}</strong>
+      </button>
+      <div>
+        <span>Reclaim staged</span>
+        <strong>{formatBytes(reclaimableBytes)}</strong>
+      </div>
+      <button type="button" onClick={onUndo} disabled={stagedCount === 0} title="Undo last staged action" aria-label="Undo last staged action">
+        <Undo2 size={16} />
+      </button>
+      <button type="button" onClick={onClear} disabled={stagedCount === 0} title="Clear staged actions" aria-label="Clear staged actions">
+        <X size={16} />
+      </button>
+      <button className="dock-commit" type="button" onClick={onCommit} disabled={!canCommit} title="Commit safe recycle actions">
+        <Trash2 size={16} />
+        <span>Commit</span>
+      </button>
+    </section>
+  );
+}
+
+function getStoredThemePreference(): ThemePreference {
+  if (typeof window === "undefined") return "system";
+  const stored = window.localStorage.getItem("birds-eye-theme");
+  return stored === "dark" || stored === "light" || stored === "system" ? stored : "system";
+}
+
+function applyThemePreference(preference: ThemePreference) {
+  if (typeof document === "undefined") return;
+  const resolved = preference === "system"
+    ? window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"
+    : preference;
+  document.documentElement.dataset.theme = resolved;
+  document.documentElement.dataset.themePreference = preference;
 }
 
 function diagnosticFromNativeEvent(event: NativeJobEvent): Omit<ScanDiagnostic, "id"> | null {

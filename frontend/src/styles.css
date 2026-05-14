@@ -1,8 +1,46 @@
 :root {
-  color-scheme: dark;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #090b10;
-  color: #f4f7fb;
+  color-scheme: dark light;
+  font-family: "IBM Plex Mono", "Cascadia Code", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+  background: var(--bg);
+  color: var(--text);
+  --bg: #07101f;
+  --bg-grid: rgba(148, 163, 184, 0.13);
+  --bg-grid-fine: rgba(148, 163, 184, 0.07);
+  --panel: rgba(17, 27, 48, 0.78);
+  --panel-strong: rgba(24, 35, 58, 0.92);
+  --panel-soft: rgba(15, 25, 45, 0.62);
+  --border: rgba(148, 163, 184, 0.24);
+  --border-strong: rgba(34, 211, 238, 0.52);
+  --text: #d8e4f6;
+  --muted: #8897ae;
+  --faint: #526175;
+  --accent: #10f5df;
+  --accent-2: #5eead4;
+  --warn: #fbbf24;
+  --danger: #fb7185;
+  --shadow: 0 22px 80px rgba(0, 0, 0, 0.34);
+  --glow: 0 0 28px rgba(16, 245, 223, 0.16);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eef6fb;
+  --bg-grid: rgba(14, 116, 144, 0.14);
+  --bg-grid-fine: rgba(14, 116, 144, 0.07);
+  --panel: rgba(249, 252, 255, 0.78);
+  --panel-strong: rgba(255, 255, 255, 0.94);
+  --panel-soft: rgba(235, 246, 251, 0.72);
+  --border: rgba(15, 23, 42, 0.16);
+  --border-strong: rgba(8, 145, 178, 0.48);
+  --text: #122033;
+  --muted: #516174;
+  --faint: #7a899a;
+  --accent: #008f9f;
+  --accent-2: #0f766e;
+  --warn: #a16207;
+  --danger: #be123c;
+  --shadow: 0 22px 70px rgba(15, 23, 42, 0.14);
+  --glow: 0 0 26px rgba(8, 145, 178, 0.12);
 }
 
 * {
@@ -35,9 +73,14 @@ button {
 .app-shell {
   min-height: 100vh;
   background:
-    radial-gradient(circle at 15% 20%, rgba(0, 212, 255, 0.16), transparent 28rem),
-    radial-gradient(circle at 78% 2%, rgba(236, 72, 153, 0.12), transparent 24rem),
-    #090b10;
+    linear-gradient(var(--bg-grid-fine) 1px, transparent 1px),
+    linear-gradient(90deg, var(--bg-grid-fine) 1px, transparent 1px),
+    linear-gradient(var(--bg-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px),
+    radial-gradient(circle at 50% 35%, rgba(16, 245, 223, 0.10), transparent 26rem),
+    var(--bg);
+  background-size: 30px 30px, 30px 30px, 150px 150px, 150px 150px, auto, auto;
+  color: var(--text);
 }
 
 .brand {
@@ -45,9 +88,11 @@ button {
   align-items: center;
   gap: 12px;
   min-height: 42px;
-  color: #ffffff;
-  font-size: 19px;
-  font-weight: 750;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .brand img {
@@ -62,7 +107,7 @@ button {
 }
 
 .workspace {
-  padding: 28px;
+  padding: 26px 30px 124px;
   min-width: 0;
 }
 
@@ -71,12 +116,12 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  margin-bottom: 16px;
+  margin-bottom: 26px;
 }
 
 .eyebrow {
   margin: 0 0 6px;
-  color: #47d7c6;
+  color: var(--accent);
   font-size: 13px;
   font-weight: 700;
   text-transform: uppercase;
@@ -89,8 +134,10 @@ h2 {
 }
 
 h1 {
-  font-size: 34px;
+  color: var(--text);
+  font-size: clamp(22px, 3vw, 34px);
   line-height: 1.1;
+  text-transform: uppercase;
 }
 
 h2 {
@@ -126,8 +173,69 @@ h2 {
 
 .top-nav button.active,
 .top-nav button:hover {
-  background: rgba(255, 255, 255, 0.09);
-  color: #ffffff;
+  background: rgba(16, 245, 223, 0.12);
+  color: var(--accent);
+}
+
+.theme-switcher {
+  display: inline-flex;
+  min-height: 42px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.theme-switcher button {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.theme-switcher button.active,
+.theme-switcher button:hover {
+  color: var(--accent);
+  background: rgba(16, 245, 223, 0.1);
+}
+
+.workspace-mode-bar {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 auto 18px;
+  max-width: 980px;
+}
+
+.workspace-mode-bar button {
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 14px;
+  text-transform: uppercase;
+}
+
+.workspace-mode-bar button.active {
+  border-color: var(--border-strong);
+  background: linear-gradient(135deg, rgba(16, 245, 223, 0.13), var(--panel));
+  color: var(--accent);
+  box-shadow: var(--glow);
+}
+
+.workspace-mode-bar strong {
+  color: var(--text);
+  font-size: 12px;
 }
 
 .scan-manager-grid {
@@ -195,10 +303,11 @@ h2 {
 .treemap-panel,
 .recommendations,
 .folder-table {
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.055);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
 }
 
 .scan-strip {
@@ -206,7 +315,8 @@ h2 {
   grid-template-columns: minmax(200px, 0.8fr) minmax(220px, 1.4fr) minmax(160px, 1fr);
   gap: 14px;
   align-items: center;
-  margin-bottom: 14px;
+  margin: 0 auto 14px;
+  max-width: 1180px;
   padding: 14px 16px;
 }
 
@@ -221,10 +331,11 @@ h2 {
 .metric-card small,
 .panel-header span {
   color: #96a1b6;
+  color: var(--muted);
 }
 
 .scan-strip strong {
-  color: #ffffff;
+  color: var(--text);
   text-transform: capitalize;
 }
 
@@ -239,14 +350,43 @@ h2 {
   height: 10px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(148, 163, 184, 0.18);
 }
 
 .progress-fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #00d4ff, #4ade80, #f472b6);
+  background: linear-gradient(90deg, var(--accent), #4ade80, #38bdf8);
   transition: width 180ms ease;
+}
+
+.telemetry-drawer,
+.contextual-drawer {
+  max-width: 1180px;
+  margin: 0 auto 14px;
+}
+
+.telemetry-drawer summary,
+.contextual-drawer summary {
+  width: fit-content;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 0 12px;
+  text-transform: uppercase;
+}
+
+.telemetry-drawer[open] summary,
+.contextual-drawer[open] summary {
+  margin-bottom: 12px;
 }
 
 .scan-diagnostics {
@@ -254,11 +394,12 @@ h2 {
   grid-template-columns: minmax(220px, 0.9fr) minmax(260px, 1fr) minmax(280px, 1.2fr);
   gap: 12px;
   align-items: start;
-  margin: -2px 0 14px;
+  margin: -2px auto 14px;
+  max-width: 1180px;
   padding: 12px 14px;
-  border: 1px solid rgba(71, 215, 198, 0.16);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgba(4, 12, 24, 0.48);
+  background: var(--panel-soft);
 }
 
 .scan-diagnostics.warning {
@@ -277,14 +418,14 @@ h2 {
   display: inline-flex;
   gap: 7px;
   align-items: center;
-  color: #c9f7ef;
+  color: var(--accent);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
 .scan-diagnostics-status strong {
-  color: #ffffff;
+  color: var(--text);
   font-size: 13px;
 }
 
@@ -292,7 +433,7 @@ h2 {
 .scan-diagnostics-log small {
   min-width: 0;
   overflow: hidden;
-  color: #96a1b6;
+  color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -307,14 +448,14 @@ h2 {
   display: grid;
   gap: 3px;
   padding: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  color: #96a1b6;
+  color: var(--muted);
   font-size: 11px;
 }
 
 .scan-diagnostics-metrics strong {
-  color: #ffffff;
+  color: var(--text);
   font-size: 13px;
 }
 
@@ -328,7 +469,7 @@ h2 {
 .scan-diagnostics-log div {
   padding: 8px 9px;
   border-left: 3px solid rgba(71, 215, 198, 0.7);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(148, 163, 184, 0.08);
 }
 
 .scan-diagnostics-log div.warning {
@@ -342,7 +483,7 @@ h2 {
 }
 
 .scan-diagnostics-log span {
-  color: #dbeafe;
+  color: var(--accent);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -351,7 +492,7 @@ h2 {
 .scan-diagnostics-log strong {
   min-width: 0;
   overflow: hidden;
-  color: #ffffff;
+  color: var(--text);
   font-size: 12px;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -448,13 +589,23 @@ h2 {
 
 .analysis-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: 20px;
+  max-width: 1480px;
+  margin: 0 auto 18px;
+}
+
+.spatial-workspace .treemap-panel {
+  min-height: min(70vh, 820px);
 }
 
 .detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  max-width: 1180px;
+  margin: 0 auto 18px;
+  gap: 18px;
+}
 .layout-controls {
   margin-top: 12px;
 }
@@ -492,8 +643,6 @@ h2 {
 .layout-toggles button.active {
   border-color: rgba(255, 255, 255, 0.4);
   background: rgba(255, 255, 255, 0.12);
-}
-  gap: 18px;
 }
 
 .treemap-panel,
@@ -2904,6 +3053,154 @@ button.overlap-pair:focus-visible {
   color: #cbd5e1;
 }
 
+.operational-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: minmax(140px, auto) minmax(160px, auto) 42px 42px minmax(112px, auto);
+  gap: 8px;
+  align-items: center;
+  transform: translateX(-50%);
+  width: min(720px, calc(100vw - 32px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-strong) 88%, transparent);
+  box-shadow: var(--shadow), var(--glow);
+  backdrop-filter: blur(22px);
+  padding: 10px;
+}
+
+.operational-dock button,
+.operational-dock > div {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--text);
+  padding: 0 12px;
+}
+
+.operational-dock button {
+  cursor: pointer;
+}
+
+.operational-dock button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.operational-dock span {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.operational-dock strong {
+  color: var(--accent);
+}
+
+.operational-dock .dock-commit:not(:disabled) {
+  border-color: rgba(251, 113, 133, 0.44);
+  color: var(--danger);
+}
+
+.folder-table,
+.pinned-feature,
+.duplicate-candidates,
+.file-preview-workbench {
+  max-width: 1180px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.folder-table + .folder-table,
+.folder-table + .insight-disclosure,
+.insight-disclosure + .folder-table {
+  margin-top: 18px;
+}
+
+.panel-header h2,
+.duplicate-detail-header strong,
+.stage-summary strong {
+  color: var(--text);
+  text-transform: uppercase;
+}
+
+.panel-header span,
+.folder-row span,
+.folder-row small,
+.duplicate-row span,
+.duplicate-detail-header span,
+.duplicate-detail-metrics span,
+.staged-main span,
+.empty-state,
+.search-filters label {
+  color: var(--muted);
+}
+
+.primary-action {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
+  box-shadow: var(--glow);
+}
+
+.ghost-action,
+.top-nav,
+.filter-bar button,
+.search-box,
+.search-filters input,
+.search-filters select,
+.breadcrumb-row button,
+.treemap-selection-bar button,
+.panel-toggles button,
+.layout-toggles button {
+  border-color: var(--border);
+  background: var(--panel-soft);
+  color: var(--text);
+}
+
+.filter-bar button.active,
+.panel-toggles button.active,
+.layout-toggles button.active,
+.treemap-selection-bar button.active {
+  border-color: var(--border-strong);
+  background: rgba(16, 245, 223, 0.11);
+  color: var(--accent);
+}
+
+.treemap-canvas-wrap,
+.treemap-empty {
+  border: 1px solid var(--border);
+  background: rgba(3, 10, 21, 0.28);
+}
+
+:root[data-theme="light"] .treemap-canvas-wrap,
+:root[data-theme="light"] .treemap-empty {
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.treemap-tooltip,
+.duplicate-detail-panel,
+.why-panel,
+.index-row,
+.staged-row,
+.duplicate-row,
+.stage-summary,
+.duplicate-folder-summary,
+.duplicate-keep-suggestion {
+  border-color: var(--border);
+  background: var(--panel-strong);
+  color: var(--text);
+}
+
 @media (max-width: 1080px) {
   .scan-strip,
   .scan-diagnostics,
@@ -2932,7 +3229,50 @@ button.overlap-pair:focus-visible {
 
 @media (max-width: 640px) {
   .workspace {
-    padding: 18px;
+    padding: 18px 18px 112px;
+  }
+
+  .workspace-mode-bar {
+    display: grid;
+    grid-auto-columns: minmax(118px, 1fr);
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    max-width: 100%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .workspace-mode-bar button {
+    min-height: 46px;
+  }
+
+  .operational-dock {
+    grid-template-columns: minmax(82px, 1fr) minmax(92px, 1fr) 38px 38px 46px;
+    gap: 6px;
+    width: calc(100vw - 16px);
+    bottom: 12px;
+    padding: 8px;
+  }
+
+  .operational-dock button,
+  .operational-dock > div {
+    min-height: 38px;
+    padding: 0 8px;
+  }
+
+  .operational-dock .dock-commit span,
+  .operational-dock > div span {
+    display: none;
+  }
+
+  .operational-dock span {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace {
+    padding: 18px 18px 112px;
   }
 
   .topbar {
