@@ -209,6 +209,9 @@ function App() {
   const actionableStagedActions = useMemo(() => {
     return stagedActions.filter((action) => action.operation?.kind === "recycleFiles" && action.operation.removePaths.length > 0);
   }, [stagedActions]);
+  const staleStagedDuplicateCount = useMemo(() => {
+    return stagedActions.filter((action) => action.operation?.kind === "recycleFiles" && action.evidence.some((item) => item.startsWith("Blocked:"))).length;
+  }, [stagedActions]);
   const selectedDuplicateCandidate = useMemo(() => {
     return scan.duplicateCandidates.find((item) => item.id === selectedDuplicateGroup) ?? null;
   }, [scan.duplicateCandidates, selectedDuplicateGroup]);
@@ -973,6 +976,13 @@ function App() {
               <span><CopyCheck size={14} /> Size + partial + full hash</span>
             </div>
             <DuplicateSummary candidates={scan.duplicateCandidates} overlaps={scan.duplicateOverlaps} />
+            <DuplicateCleanupEdgeStates
+              duplicateCount={scan.duplicateCandidates.length}
+              nativeRuntime={nativeRuntime}
+              isWindowsRuntime={isWindowsRuntime}
+              staleStagedCount={staleStagedDuplicateCount}
+              runtimeMessage={runtimeMessage}
+            />
             <DuplicateReviewControls
               filters={duplicateFilters}
               resultCount={sortedDuplicateCandidates.length}
@@ -2264,6 +2274,38 @@ function DuplicateReviewControls({
         Reset
       </button>
       <strong>{formatCount(resultCount)} shown</strong>
+    </div>
+  );
+}
+
+function DuplicateCleanupEdgeStates({
+  duplicateCount,
+  nativeRuntime,
+  isWindowsRuntime,
+  staleStagedCount,
+  runtimeMessage,
+}: {
+  duplicateCount: number;
+  nativeRuntime: boolean;
+  isWindowsRuntime: boolean;
+  staleStagedCount: number;
+  runtimeMessage: string;
+}) {
+  const states = [
+    duplicateCount === 0 ? "No duplicate groups are currently available in this index." : "",
+    !nativeRuntime ? "Desktop-only cleanup actions are disabled in browser preview mode." : "",
+    nativeRuntime && !isWindowsRuntime ? "Recycle Bin commits are currently implemented for Windows only." : "",
+    staleStagedCount > 0 ? `${formatCount(staleStagedCount)} staged duplicate cleanup ${staleStagedCount === 1 ? "item is" : "items are"} stale and blocked until refresh.` : "",
+    /permission|denied|locked|in use/i.test(runtimeMessage) ? runtimeMessage : "",
+  ].filter(Boolean);
+
+  if (states.length === 0) return null;
+
+  return (
+    <div className="duplicate-edge-states">
+      {states.map((state) => (
+        <span key={state}>{state}</span>
+      ))}
     </div>
   );
 }

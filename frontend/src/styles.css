@@ -1389,6 +1389,21 @@ h2 {
   line-height: 1.5;
 }
 
+.duplicate-edge-states {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.duplicate-edge-states span {
+  border: 1px solid rgba(251, 191, 36, 0.22);
+  border-radius: 8px;
+  background: rgba(251, 191, 36, 0.08);
+  color: #fde68a;
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
 .duplicate-review-controls {
   display: grid;
   grid-template-columns: repeat(4, minmax(120px, 1fr)) repeat(2, auto);

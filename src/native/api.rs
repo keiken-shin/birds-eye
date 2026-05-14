@@ -604,6 +604,11 @@ mod tests {
             .first()
             .expect("duplicate group summary");
         assert_eq!(duplicate_group.folder_count, 1);
+        assert_eq!(duplicate_group.folder_paths.len(), 1);
+        assert!(duplicate_group
+            .folder_paths
+            .iter()
+            .any(|path| path.ends_with("data")));
         assert_eq!(duplicate_group.dominant_media_kind, "other");
         assert!(duplicate_group.cleanup_score > duplicate_group.reclaimable_bytes as f64);
         assert_eq!(
