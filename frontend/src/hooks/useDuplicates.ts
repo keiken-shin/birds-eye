@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { queryNativeDuplicateFiles, NativeDuplicateFile } from "../nativeClient";
 import { ScanState } from "../domain";
 
@@ -18,20 +18,17 @@ export function useDuplicates({
   const [duplicateFiles, setDuplicateFiles] = useState<NativeDuplicateFile[]>([]);
   const [selectedDuplicateGroup, setSelectedDuplicateGroup] = useState<number | null>(null);
 
-  async function selectDuplicateCandidate(candidate: DuplicateCandidate) {
+  const selectDuplicateCandidate = useCallback(async (candidate: DuplicateCandidate) => {
     setSelectedDuplicateGroup(candidate.id ?? null);
     setDuplicateFiles([]);
-    if (!candidate.id || !currentIndexPath) {
-      return;
-    }
-
+    if (!candidate.id || !currentIndexPath) return;
     try {
       const files = await queryNativeDuplicateFiles(currentIndexPath, candidate.id, 24);
       setDuplicateFiles(files);
     } catch (error) {
       setRuntimeMessage(error instanceof Error ? error.message : "Duplicate details failed");
     }
-  }
+  }, [currentIndexPath, setRuntimeMessage]);
 
   return { duplicateFiles, selectedDuplicateGroup, selectDuplicateCandidate };
 }
