@@ -36,24 +36,34 @@ import {
   deleteNativeIndex,
   isNativeRuntime,
   listNativeIndexes,
-  nativeJobEvents,
+  listenNativeJobEvents,
   queryNativeIndex,
   queryNativeDuplicateFiles,
   searchNativeIndex,
   startNativeScan,
+  nativeJobEvents,
   type NativeDuplicateFile,
   type NativeIndexEntry,
   type NativeIndexOverview,
+  type NativeJobEvent,
   type NativeSearchResult,
 } from "./nativeClient";
 import { TreemapCanvas } from "./TreemapCanvas";
 import logoUrl from "./assets/birds-eye-logo.svg";
 import "./styles.css";
 
+type NativeEventState = {
+  maxFilesScanned: number;
+  maxBytesScanned: number;
+  seenFingerprints: Set<string>;
+};
+
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
-  const nativeJobRef = useRef<{ jobId: number; eventOffset: number; indexPath: string } | null>(null);
+  const nativeJobRef = useRef<{ jobId: number; indexPath: string } | null>(null);
+  const isWaitingForJobId = useRef(false);
+  const nativeEventStateRef = useRef(new Map<number, NativeEventState>());
   const [scan, setScan] = useState<ScanState>(initialScanState);
   const [filter, setFilter] = useState<CategoryKey | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -75,6 +85,21 @@ function App() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (!nativeRuntime) return;
+
+    let unlisten: (() => void) | null = null;
+    void listenNativeJobEvents((event) => {
+      void handleNativeJobEvent(event);
+    }).then((cleanup) => {
+      unlisten = cleanup;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, [nativeRuntime]);
 
   const sortedFolders = useMemo(() => {
     return [...scan.folders].sort((a, b) => b.bytes - a.bytes);
@@ -166,6 +191,15 @@ function App() {
       setDuplicateFiles([]);
       setSelectedDuplicateGroup(null);
       setRuntimeMessage("Native scan starting");
+
+      // Block pushed events until we've assigned the job ref and drained buffered events.
+      // Events can be emitted before startNativeScan resolves, so set this flag first.
+      isWaitingForJobId.current = true;
+      resetNativeEventState();
+
+      const { jobId, indexPath } = await startNativeScan(folder);
+      nativeJobRef.current = { jobId, indexPath };
+
       setScan({
         ...initialScanState,
         status: "scanning",
@@ -174,55 +208,104 @@ function App() {
         currentPath: folder,
       });
 
-      const { jobId, indexPath } = await startNativeScan(folder);
-      nativeJobRef.current = { jobId, eventOffset: 0, indexPath };
-      setRuntimeMessage("Native index mode");
-      void pollNativeJob(jobId);
+      const missedEvents = await nativeJobEvents(jobId, 0);
+      for (const event of missedEvents) {
+        await handleNativeJobEvent(event, { replay: true });
+      }
+
+      if (!nativeJobRef.current || nativeJobRef.current.jobId === jobId) {
+        // Only accept pushed events after the buffered replay has drained.
+        // handleNativeJobEvent is still monotonic, so any push/replay interleaving
+        // or non-adjacent duplicate that slips through cannot move progress backward.
+        isWaitingForJobId.current = false;
+      }
+      if (nativeJobRef.current?.jobId === jobId) {
+        setRuntimeMessage("Native index mode");
+      }
     } catch (error) {
+      isWaitingForJobId.current = false;
+      nativeJobRef.current = null;
       setRuntimeMessage(error instanceof Error ? error.message : "Native scan failed");
       setScan((current) => ({ ...current, status: "cancelled" }));
     }
   }
 
-  async function pollNativeJob(jobId: number) {
-    while (nativeJobRef.current?.jobId === jobId) {
-      const offset = nativeJobRef.current.eventOffset;
-      const events = await nativeJobEvents(jobId, offset);
-      nativeJobRef.current.eventOffset += events.length;
+  async function handleNativeJobEvent(event: NativeJobEvent, options: { replay?: boolean } = {}) {
+    if (nativeJobRef.current?.jobId !== event.job_id) return;
+    if (isWaitingForJobId.current && !options.replay) return;
+    if (shouldIgnoreNativeJobEvent(event)) return;
 
-      const latest = events.at(-1);
-      if (latest) {
-        if (latest.status === "Failed") {
-          setRuntimeMessage(latest.message);
-        } else if (latest.message === "finalizing index") {
-          setRuntimeMessage("Finalizing index");
-        }
-        setScan((current) => ({
-          ...current,
-          status: latest.status === "Completed" ? "complete" : latest.status === "Cancelled" ? "cancelled" : "scanning",
-          processedFiles: latest.files_scanned,
-          totalFiles: Math.max(current.totalFiles, latest.files_scanned),
-          processedBytes: latest.bytes_scanned,
-          totalBytes: Math.max(current.totalBytes, latest.bytes_scanned),
-          currentPath: latest.current_path ?? current.currentPath,
-          elapsedMs: performance.now() - current.startedAt,
-        }));
-      }
-
-      if (latest?.status === "Completed" || latest?.status === "Cancelled" || latest?.status === "Failed") {
-        if (latest.status === "Completed" && nativeJobRef.current) {
-          const overview = await queryNativeIndex(nativeJobRef.current.indexPath, 1000);
-          setScan((current) => mergeNativeOverview(current, overview));
-          setCurrentIndexPath(nativeJobRef.current.indexPath);
-          setRuntimeMessage("Native index ready");
-          void refreshSavedIndexes();
-        }
-        nativeJobRef.current = null;
-        return;
-      }
-
-      await wait(300);
+    if (event.status === "Failed") {
+      setRuntimeMessage(event.message);
+    } else if (event.message === "finalizing index") {
+      setRuntimeMessage("Finalizing index");
     }
+
+    setScan((current) => ({
+      ...current,
+      status: event.status === "Completed" ? "complete" : event.status === "Cancelled" || event.status === "Failed" ? "cancelled" : "scanning",
+      processedFiles: Math.max(current.processedFiles, event.files_scanned),
+      totalFiles: Math.max(current.totalFiles, event.files_scanned),
+      processedBytes: Math.max(current.processedBytes, event.bytes_scanned),
+      totalBytes: Math.max(current.totalBytes, event.bytes_scanned),
+      currentPath: event.current_path ?? current.currentPath,
+      elapsedMs: performance.now() - current.startedAt,
+    }));
+
+    if (event.status === "Completed" && nativeJobRef.current) {
+      const indexPath = nativeJobRef.current.indexPath;
+      const overview = await queryNativeIndex(indexPath, 1000);
+      setScan((current) => mergeNativeOverview(current, overview));
+      setCurrentIndexPath(indexPath);
+      setRuntimeMessage("Native index ready");
+      nativeJobRef.current = null;
+      clearNativeEventState(event.job_id);
+      void refreshSavedIndexes();
+      return;
+    }
+
+    if (event.status === "Cancelled" || event.status === "Failed") {
+      nativeJobRef.current = null;
+      clearNativeEventState(event.job_id);
+    }
+  }
+
+  function shouldIgnoreNativeJobEvent(event: NativeJobEvent) {
+    const fingerprint = nativeJobEventFingerprint(event);
+    const state = nativeEventStateRef.current.get(event.job_id) ?? {
+      maxFilesScanned: 0,
+      maxBytesScanned: 0,
+      seenFingerprints: new Set<string>(),
+    };
+
+    if (state.seenFingerprints.has(fingerprint)) {
+      return true;
+    }
+
+    const isTerminal = event.status === "Completed" || event.status === "Cancelled" || event.status === "Failed";
+    const isOlderProgress =
+      !isTerminal &&
+      (event.files_scanned < state.maxFilesScanned || event.bytes_scanned < state.maxBytesScanned);
+
+    if (isOlderProgress) {
+      state.seenFingerprints.add(fingerprint);
+      nativeEventStateRef.current.set(event.job_id, state);
+      return true;
+    }
+
+    state.seenFingerprints.add(fingerprint);
+    state.maxFilesScanned = Math.max(state.maxFilesScanned, event.files_scanned);
+    state.maxBytesScanned = Math.max(state.maxBytesScanned, event.bytes_scanned);
+    nativeEventStateRef.current.set(event.job_id, state);
+    return false;
+  }
+
+  function resetNativeEventState() {
+    nativeEventStateRef.current.clear();
+  }
+
+  function clearNativeEventState(jobId: number) {
+    nativeEventStateRef.current.delete(jobId);
   }
 
   function handleFiles(fileList: FileList | null) {
@@ -285,6 +368,8 @@ function App() {
   function clearScan() {
     stopWorker();
     nativeJobRef.current = null;
+    isWaitingForJobId.current = false;
+    resetNativeEventState();
     setFilter("all");
     setFocusedFolder(null);
     setSearchQuery("");
@@ -632,10 +717,35 @@ function App() {
 
   async function rescanSavedIndex(entry: NativeIndexEntry) {
     if (!entry.root_path) return;
-    const { jobId, indexPath } = await startNativeScan(entry.root_path);
-    nativeJobRef.current = { jobId, eventOffset: 0, indexPath };
+
+    stopWorker();
+    setFilter("all");
+    setFocusedFolder(null);
+    setSearchQuery("");
+    setSearchResults([]);
     setCurrentIndexPath(null);
+    setDuplicateFiles([]);
+    setSelectedDuplicateGroup(null);
     setRuntimeMessage("Native rescan starting");
+
+    // Block pushed events until we've assigned the job ref and drained buffered events.
+    isWaitingForJobId.current = true;
+    resetNativeEventState();
+
+    let jobId: number;
+    let indexPath: string;
+    try {
+      ({ jobId, indexPath } = await startNativeScan(entry.root_path));
+    } catch (error) {
+      nativeJobRef.current = null;
+      isWaitingForJobId.current = false;
+      setRuntimeMessage(error instanceof Error ? error.message : "Native rescan failed");
+      setScan((current) => ({ ...current, status: "cancelled" }));
+      window.location.hash = "scan";
+      return;
+    }
+    nativeJobRef.current = { jobId, indexPath };
+
     setScan({
       ...initialScanState,
       status: "scanning",
@@ -643,7 +753,22 @@ function App() {
       startedAt: performance.now(),
       currentPath: entry.root_path,
     });
-    void pollNativeJob(jobId);
+
+    const missedEvents = await nativeJobEvents(jobId, 0);
+    for (const event of missedEvents) {
+      await handleNativeJobEvent(event, { replay: true });
+    }
+
+    if (!nativeJobRef.current || nativeJobRef.current.jobId === jobId) {
+      // Only accept pushed events after the buffered replay has drained.
+      // handleNativeJobEvent is still monotonic, so any push/replay interleaving
+      // or non-adjacent duplicate that slips through cannot move progress backward.
+      isWaitingForJobId.current = false;
+    }
+    if (nativeJobRef.current?.jobId === jobId) {
+      setRuntimeMessage("Native index mode");
+    }
+
     window.location.hash = "scan";
   }
 
@@ -654,6 +779,17 @@ function App() {
     }
     await refreshSavedIndexes();
   }
+}
+
+function nativeJobEventFingerprint(event: NativeJobEvent) {
+  return [
+    event.job_id,
+    event.status,
+    event.files_scanned,
+    event.bytes_scanned,
+    event.current_path ?? "",
+    event.message ?? "",
+  ].join("|");
 }
 
 function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): ScanState {
@@ -759,10 +895,6 @@ function getProgress(scan: ScanState) {
 function makeDuplicateHint(scan: ScanState) {
   const reclaimable = scan.duplicateCandidates.reduce((sum, candidate) => sum + candidate.reclaimableBytes, 0);
   return reclaimable > 0 ? `${formatBytes(reclaimable)} possible duplicates found` : "Duplicate scan ready after indexing";
-}
-
-function wait(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function formatDate(epochSeconds: number) {
