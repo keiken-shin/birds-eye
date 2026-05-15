@@ -379,9 +379,13 @@ mod tests {
 
         let events = events.lock().unwrap();
 
-        assert!(
-            events.iter().any(|e| matches!(e.status, JobStatusDto::Running))
-        );
+        assert!(events.iter().any(|e| {
+            matches!(e.status, JobStatusDto::Running)
+                && e.message
+                    .as_deref()
+                    .map(|message| message.contains("progress"))
+                    .unwrap_or(false)
+        }));
 
         assert!(
             events.iter().any(|e| matches!(e.status, JobStatusDto::Completed))
