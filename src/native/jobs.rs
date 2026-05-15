@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+pub type JobEventListener = Arc<dyn Fn(JobEventDto) + Send + Sync + 'static>;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct StartScanJobRequest {
     pub root: PathBuf,
@@ -61,6 +63,14 @@ impl ScanJobManager {
     }
 
     pub fn start_scan_job(&self, request: StartScanJobRequest) -> Result<StartScanJobResponse, String> {
+        self.start_scan_job_with_listener(request, None)
+    }
+
+    pub fn start_scan_job_with_listener(
+        &self,
+        request: StartScanJobRequest,
+        listener: Option<JobEventListener>,
+    ) -> Result<StartScanJobResponse, String> {
         let job_id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let scanner = Scanner::new(ScanOptions::new(request.root));
         let controller = scanner.controller();
@@ -87,6 +97,7 @@ impl ScanJobManager {
                         &jobs,
                         job_id,
                         JobEventDto::failed(job_id, format!("failed to open index: {error:?}")),
+                        listener.as_ref(),
                     );
                     return;
                 }
@@ -98,6 +109,7 @@ impl ScanJobManager {
                         &jobs,
                         job_id,
                         JobEventDto::running_from_stats(job_id, "finalizing index", &report.stats),
+                        listener.as_ref(),
                     );
                 }
 
@@ -106,13 +118,14 @@ impl ScanJobManager {
                         &jobs,
                         job_id,
                         JobEventDto::failed(job_id, format!("failed to write index: {error:?}")),
+                        listener.as_ref(),
                     );
                     return;
                 }
 
                 let terminal = matches!(event, ScanEvent::Finished(_) | ScanEvent::Cancelled(_));
                 if let Some(event) = JobEventDto::from_scan_event(job_id, &event) {
-                    push_event(&jobs, job_id, event);
+                    push_event(&jobs, job_id, event, listener.as_ref());
                 }
 
                 if terminal {
@@ -250,12 +263,21 @@ impl JobEventDto {
     }
 }
 
-fn push_event(jobs: &Arc<Mutex<HashMap<u64, JobState>>>, job_id: u64, event: JobEventDto) {
+fn push_event(
+    jobs: &Arc<Mutex<HashMap<u64, JobState>>>,
+    job_id: u64,
+    event: JobEventDto,
+    listener: Option<&JobEventListener>,
+) {
     if let Ok(mut jobs) = jobs.lock() {
         if let Some(job) = jobs.get_mut(&job_id) {
             job.status = event.status.clone();
-            job.events.push(event);
+            job.events.push(event.clone());
         }
+    }
+
+    if let Some(listener) = listener {
+        listener(event);
     }
 }
 
@@ -324,6 +346,50 @@ mod tests {
 
         let status = manager.job_status(response.job_id).expect("missing status");
         assert!(matches!(status, JobStatusDto::Cancelled | JobStatusDto::Completed));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn listener_receives_progress_and_terminal_events() {
+        let root = test_root("listener");
+        let data_root = root.join("data");
+        let index_path = root.join("index.sqlite");
+
+        fs::create_dir_all(&data_root).unwrap();
+        write_file(&data_root.join("file.bin"), b"hello");
+
+        let manager = ScanJobManager::new();
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+
+        let response = manager
+            .start_scan_job_with_listener(
+                StartScanJobRequest {
+                    root: data_root,
+                    index_path,
+                },
+                Some(Arc::new(move |event| {
+                    captured.lock().unwrap().push(event);
+                })),
+            )
+            .unwrap();
+
+        wait_for_terminal(&manager, response.job_id);
+
+        let events = events.lock().unwrap();
+
+        assert!(events.iter().any(|e| {
+            matches!(e.status, JobStatusDto::Running) && e.message.contains("progress")
+        }));
+
+        assert!(
+            events.iter().any(|e| matches!(e.status, JobStatusDto::Completed))
+        );
+
+        let buffered = manager.job_events_since(response.job_id, 0).unwrap();
+        assert!(!buffered.is_empty());
+
         cleanup(&root);
     }
 
