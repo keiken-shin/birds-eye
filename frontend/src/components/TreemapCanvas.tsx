@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { categories, formatBytes, lastSegment, type CategoryKey, type FolderStats } from "../domain";
 
 type TreemapFolder = FolderStats & { displayBytes: number };

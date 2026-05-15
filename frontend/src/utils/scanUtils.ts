@@ -1,5 +1,4 @@
 import {
-  categories,
   emptyCategories,
   emptyFolderCategories,
   lastSegment,

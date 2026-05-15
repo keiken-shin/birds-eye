@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { listNativeIndexes, NativeIndexEntry } from "../nativeClient";
+import { listNativeIndexes, type NativeIndexEntry } from "../nativeClient";
 
 export function useSavedIndexes({
   nativeRuntime,

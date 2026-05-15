@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
-import { queryNativeDuplicateFiles, NativeDuplicateFile } from "../nativeClient";
-import { ScanState } from "../domain";
+import { queryNativeDuplicateFiles, type NativeDuplicateFile } from "../nativeClient";
+import type { ScanState } from "../domain";
 
 type DuplicateCandidate = ScanState["duplicateCandidates"][number];
 
