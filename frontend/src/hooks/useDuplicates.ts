@@ -14,6 +14,7 @@ export function useDuplicates({
   duplicateFiles: NativeDuplicateFile[];
   selectedDuplicateGroup: number | null;
   selectDuplicateCandidate: (candidate: DuplicateCandidate) => Promise<void>;
+  clearDuplicates: () => void;
 } {
   const [duplicateFiles, setDuplicateFiles] = useState<NativeDuplicateFile[]>([]);
   const [selectedDuplicateGroup, setSelectedDuplicateGroup] = useState<number | null>(null);
@@ -30,5 +31,10 @@ export function useDuplicates({
     }
   }, [currentIndexPath, setRuntimeMessage]);
 
-  return { duplicateFiles, selectedDuplicateGroup, selectDuplicateCandidate };
+  const clearDuplicates = useCallback(() => {
+    setDuplicateFiles([]);
+    setSelectedDuplicateGroup(null);
+  }, []);
+
+  return { duplicateFiles, selectedDuplicateGroup, selectDuplicateCandidate, clearDuplicates };
 }

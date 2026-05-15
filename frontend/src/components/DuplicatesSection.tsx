@@ -32,33 +32,35 @@ export function DuplicatesSection({
       {duplicateCandidates.length === 0 ? (
         <div className="empty-state compact">Files with identical sizes will appear here as duplicate candidates.</div>
       ) : (
-        <ScrollableRows compact>
-          {duplicateCandidates.map((candidate) => (
-            <button
-              className={`duplicate-row ${selectedDuplicateGroup === candidate.id ? "active" : ""}`}
-              key={candidate.id ?? candidate.size}
-              type="button"
-              onClick={() => void selectDuplicateCandidate(candidate)}
-            >
-              <div>
-                <strong>{formatBytes(candidate.reclaimableBytes)} reclaimable</strong>
-                <span>{formatCount(candidate.files)} files at {formatBytes(candidate.size)} each</span>
-              </div>
-              <small>{candidate.samples.join(" | ")}</small>
-            </button>
-          ))}
-        </ScrollableRows>
-      )}
-      {duplicateFiles.length > 0 && (
-        <div className="duplicate-file-list">
-          {duplicateFiles.map((file) => (
-            <div className="folder-row file-row" key={file.path}>
-              <span>{file.path}</span>
-              <strong>{formatBytes(file.size)}</strong>
-              <small>{file.modified_at ? formatDate(file.modified_at) : "-"}</small>
+        <>
+          <ScrollableRows compact>
+            {duplicateCandidates.map((candidate) => (
+              <button
+                className={`duplicate-row ${selectedDuplicateGroup === candidate.id ? "active" : ""}`}
+                key={candidate.id ?? candidate.size}
+                type="button"
+                onClick={() => void selectDuplicateCandidate(candidate)}
+              >
+                <div>
+                  <strong>{formatBytes(candidate.reclaimableBytes)} reclaimable</strong>
+                  <span>{formatCount(candidate.files)} files at {formatBytes(candidate.size)} each</span>
+                </div>
+                <small>{candidate.samples.join(" | ")}</small>
+              </button>
+            ))}
+          </ScrollableRows>
+          {duplicateFiles.length > 0 && (
+            <div className="duplicate-file-list">
+              {duplicateFiles.map((file) => (
+                <div className="folder-row file-row" key={file.path}>
+                  <span>{file.path}</span>
+                  <strong>{formatBytes(file.size)}</strong>
+                  <small>{file.modified_at ? formatDate(file.modified_at) : "-"}</small>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </section>
   );
