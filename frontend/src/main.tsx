@@ -18,8 +18,6 @@ import {
 import { motion } from "framer-motion";
 import {
   categories,
-  emptyCategories,
-  emptyFolderCategories,
   formatBytes,
   formatCount,
   initialScanState,
@@ -44,10 +42,16 @@ import {
   nativeJobEvents,
   type NativeDuplicateFile,
   type NativeIndexEntry,
-  type NativeIndexOverview,
   type NativeJobEvent,
   type NativeSearchResult,
 } from "./nativeClient";
+import { parentPath, isDescendantPath } from "./utils/pathUtils";
+import {
+  nativeJobEventFingerprint,
+  mergeNativeOverview,
+  mediaKindFromCategory,
+} from "./utils/scanUtils";
+import { getProgress, makeDuplicateHint, makeCategoryHint, formatDate } from "./utils/displayUtils";
 import { TreemapCanvas } from "./TreemapCanvas";
 import logoUrl from "./assets/birds-eye-logo.svg";
 import "./styles.css";
@@ -781,92 +785,6 @@ function App() {
   }
 }
 
-function nativeJobEventFingerprint(event: NativeJobEvent) {
-  return [
-    event.job_id,
-    event.status,
-    event.files_scanned,
-    event.bytes_scanned,
-    event.current_path ?? "",
-    event.message ?? "",
-  ].join("|");
-}
-
-function mergeNativeOverview(scan: ScanState, overview: NativeIndexOverview): ScanState {
-  const folderCategoryMap = new Map<string, ReturnType<typeof emptyFolderCategories>>();
-  for (const media of overview.folder_media) {
-    const categories = folderCategoryMap.get(media.folder_path) ?? emptyFolderCategories();
-    categories[categoryFromMediaKind(media.media_kind)] += media.total_bytes;
-    folderCategoryMap.set(media.folder_path, categories);
-  }
-
-  const folders = overview.folders.map((folder) => ({
-    path: folder.path,
-    files: folder.total_files,
-    bytes: folder.total_bytes,
-    categories: folderCategoryMap.get(folder.path) ?? emptyFolderCategories(),
-  }));
-  const largestFiles = overview.files.map((file) => ({
-    path: file.path,
-    name: lastSegment(file.path),
-    folder: file.path.includes("\\") ? file.path.slice(0, file.path.lastIndexOf("\\")) : file.path.slice(0, file.path.lastIndexOf("/")),
-    extension: file.extension ?? "(none)",
-    bytes: file.size,
-    category: categoryFromMediaKind(file.media_kind),
-    modified: 0,
-  }));
-  const extensions = overview.extensions.map((extension) => ({
-    extension: extension.extension,
-    files: extension.file_count,
-    bytes: extension.total_bytes,
-  }));
-  const duplicateCandidates = overview.duplicate_groups.map((group) => ({
-    id: group.id,
-    size: group.size,
-    files: group.file_count,
-    reclaimableBytes: group.reclaimable_bytes,
-    samples: [`confidence ${(group.confidence * 100).toFixed(0)}%`],
-    confidence: "size-match" as const,
-  }));
-  const categoryTotals = emptyCategories();
-  for (const media of overview.media) {
-    const category = categoryFromMediaKind(media.media_kind);
-    categoryTotals[category].files += media.file_count;
-    categoryTotals[category].bytes += media.total_bytes;
-  }
-
-  return {
-    ...scan,
-    folders,
-    largestFiles,
-    extensions,
-    duplicateCandidates,
-    categories: categoryTotals,
-  };
-}
-
-function categoryFromMediaKind(kind: string): CategoryKey {
-  if (kind === "photo") return "photos";
-  if (kind === "video") return "videos";
-  if (kind === "music") return "music";
-  if (kind === "archive") return "archives";
-  if (kind === "document") return "documents";
-  if (kind === "code") return "code";
-  if (kind === "installer") return "installers";
-  if (kind === "model") return "models";
-  return "other";
-}
-
-function mediaKindFromCategory(category: CategoryKey) {
-  if (category === "photos") return "photo";
-  if (category === "videos") return "video";
-  if (category === "archives") return "archive";
-  if (category === "documents") return "document";
-  if (category === "installers") return "installer";
-  if (category === "models") return "model";
-  return category === "other" ? "other" : category;
-}
-
 function Treemap({ folders, onSelect }: { folders: Array<FolderStats & { displayBytes: number }>; onSelect: (folder: FolderStats & { displayBytes: number }) => void }) {
   if (folders.length === 0) {
     return <div className="treemap-empty">No indexed folders yet</div>;
@@ -885,42 +803,6 @@ function Recommendation({ text }: { text: string }) {
 
 function postWorker(worker: Worker | null, message: ScanWorkerCommand) {
   worker?.postMessage(message);
-}
-
-function getProgress(scan: ScanState) {
-  if (scan.totalFiles === 0) return 0;
-  return Math.min(100, (scan.processedFiles / scan.totalFiles) * 100);
-}
-
-function makeDuplicateHint(scan: ScanState) {
-  const reclaimable = scan.duplicateCandidates.reduce((sum, candidate) => sum + candidate.reclaimableBytes, 0);
-  return reclaimable > 0 ? `${formatBytes(reclaimable)} possible duplicates found` : "Duplicate scan ready after indexing";
-}
-
-function formatDate(epochSeconds: number) {
-  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(epochSeconds * 1000));
-}
-
-function normalizePath(path: string) {
-  return path.replace(/[\\/]+$/, "");
-}
-
-function parentPath(path: string) {
-  const normalized = normalizePath(path);
-  const index = Math.max(normalized.lastIndexOf("\\"), normalized.lastIndexOf("/"));
-  return index > 0 ? normalized.slice(0, index) : null;
-}
-
-function isDescendantPath(path: string, parent: string) {
-  const normalizedPath = normalizePath(path);
-  const normalizedParent = normalizePath(parent);
-  if (normalizedPath === normalizedParent) return false;
-  return normalizedPath.startsWith(`${normalizedParent}\\`) || normalizedPath.startsWith(`${normalizedParent}/`);
-}
-
-function makeCategoryHint(scan: ScanState, category: CategoryKey, label: string) {
-  const bytes = scan.categories[category].bytes;
-  return bytes > 0 ? `${formatBytes(bytes)} ${label} detected` : `${categories[category].label} analysis pending`;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
