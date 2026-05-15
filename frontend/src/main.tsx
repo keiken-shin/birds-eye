@@ -52,7 +52,7 @@ import {
   mediaKindFromCategory,
 } from "./utils/scanUtils";
 import { getProgress, makeDuplicateHint, makeCategoryHint, formatDate } from "./utils/displayUtils";
-import { TreemapCanvas } from "./TreemapCanvas";
+import { TreemapCanvas } from "./components/TreemapCanvas";
 import logoUrl from "./assets/birds-eye-logo.svg";
 import "./styles.css";
 
