@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { listNativeIndexes, NativeIndexEntry } from "../nativeClient";
 
 export function useSavedIndexes({
@@ -13,7 +13,7 @@ export function useSavedIndexes({
 } {
   const [savedIndexes, setSavedIndexes] = useState<NativeIndexEntry[]>([]);
 
-  async function refreshSavedIndexes() {
+  const refreshSavedIndexes = useCallback(async () => {
     try {
       setSavedIndexes(await listNativeIndexes());
     } catch (error) {
@@ -21,13 +21,13 @@ export function useSavedIndexes({
         error instanceof Error ? error.message : "Failed to list indexes",
       );
     }
-  }
+  }, [setRuntimeMessage]);
 
   useEffect(() => {
     if (nativeRuntime) {
       void refreshSavedIndexes();
     }
-  }, [nativeRuntime]);
+  }, [nativeRuntime, refreshSavedIndexes]);
 
   return { savedIndexes, refreshSavedIndexes };
 }
