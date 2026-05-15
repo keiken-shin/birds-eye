@@ -719,7 +719,9 @@ function App() {
       await handleNativeJobEvent(event);
     }
 
-    setRuntimeMessage("Native index mode");
+    if (nativeJobRef.current?.jobId === jobId) {
+      setRuntimeMessage("Native index mode");
+    }
 
     window.location.hash = "scan";
   }
