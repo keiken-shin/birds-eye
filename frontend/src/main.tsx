@@ -9,9 +9,7 @@ import { useScan } from "./hooks/useScan";
 import { useSearch } from "./hooks/useSearch";
 import { useDuplicates } from "./hooks/useDuplicates";
 
-import { Sidebar } from "./components/Sidebar";
-import { TopBar } from "./components/TopBar";
-import { ScanStrip } from "./components/ScanStrip";
+import { BottomCommandRail, LandingPage, StorageReadout } from "./components/LandingPage";
 import { MetricGrid } from "./components/MetricGrid";
 import { FilterBar } from "./components/FilterBar";
 import { AnalysisSection } from "./components/AnalysisSection";
@@ -83,19 +81,21 @@ function App() {
 
   return (
     <main className="app-shell">
-      <Sidebar />
+      <LandingPage
+        scan={scan}
+        runtimeMessage={runtimeMessage}
+        nativeRuntime={nativeRuntime}
+        savedIndexes={savedIndexes}
+        fileInputRef={fileInputRef}
+        openFolderPicker={openFolderPicker}
+        handleFiles={handleFiles}
+        pauseScan={pauseScan}
+        resumeScan={resumeScan}
+        cancelScan={cancelScan}
+        clearScan={clearScan}
+      />
       <section className="workspace">
-        <TopBar
-          scan={scan}
-          fileInputRef={fileInputRef}
-          openFolderPicker={openFolderPicker}
-          handleFiles={handleFiles}
-          pauseScan={pauseScan}
-          resumeScan={resumeScan}
-          cancelScan={cancelScan}
-          clearScan={clearScan}
-        />
-        <ScanStrip scan={scan} runtimeMessage={runtimeMessage} />
+        <StorageReadout scan={scan} />
         <MetricGrid scan={scan} />
         <FilterBar filter={filter} setFilter={setFilter} />
         <AnalysisSection
@@ -125,6 +125,7 @@ function App() {
           removeSavedIndex={removeSavedIndex}
         />
       </section>
+      <BottomCommandRail openFolderPicker={openFolderPicker} />
     </main>
   );
 }

@@ -11,7 +11,7 @@ interface SearchPanelProps {
 
 export function SearchPanel({ searchQuery, setSearchQuery, searchResults }: SearchPanelProps) {
   return (
-    <section className="folder-table search-panel">
+    <section className="folder-table search-panel" id="search">
       <div className="panel-header">
         <h2>File Search</h2>
         <span><Search size={14} /> {formatCount(searchResults.length)} matches</span>
