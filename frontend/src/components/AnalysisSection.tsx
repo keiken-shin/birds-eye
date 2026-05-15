@@ -51,11 +51,17 @@ export function AnalysisSection({ filteredFolders, focusedFolder, setFocusedFold
       </div>
 
       <aside className="recommendations">
-        <h2>Cleanup Intelligence</h2>
+        <div className="panel-header compact">
+          <h2>Cleanup Intelligence</h2>
+          <span>Read-only</span>
+        </div>
         <Recommendation text={makeDuplicateHint(scan)} />
         <Recommendation text={makeCategoryHint(scan, "installers", "installer cache")} />
         <Recommendation text={makeCategoryHint(scan, "archives", "archive payloads")} />
         <Recommendation text={makeCategoryHint(scan, "videos", "video library")} />
+        <button className="coming-soon-row" type="button" disabled>
+          Suggested moves engine - coming soon
+        </button>
       </aside>
     </section>
   );
