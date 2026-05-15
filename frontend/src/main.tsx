@@ -41,6 +41,7 @@ import {
   queryNativeDuplicateFiles,
   searchNativeIndex,
   startNativeScan,
+  nativeJobEvents,
   type NativeDuplicateFile,
   type NativeIndexEntry,
   type NativeIndexOverview,
@@ -55,6 +56,8 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const nativeJobRef = useRef<{ jobId: number; indexPath: string } | null>(null);
+  const isWaitingForJobId = useRef(false);
+  const lastEventFingerprint = useRef<string | null>(null);
   const [scan, setScan] = useState<ScanState>(initialScanState);
   const [filter, setFilter] = useState<CategoryKey | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -182,6 +185,15 @@ function App() {
       setDuplicateFiles([]);
       setSelectedDuplicateGroup(null);
       setRuntimeMessage("Native scan starting");
+
+      // Block pushed events until we've assigned the job ref and drained buffered events.
+      // Events can be emitted before startNativeScan resolves, so set this flag first.
+      isWaitingForJobId.current = true;
+      lastEventFingerprint.current = null;
+
+      const { jobId, indexPath } = await startNativeScan(folder);
+      nativeJobRef.current = { jobId, indexPath };
+
       setScan({
         ...initialScanState,
         status: "scanning",
@@ -190,17 +202,32 @@ function App() {
         currentPath: folder,
       });
 
-      const { jobId, indexPath } = await startNativeScan(folder);
-      nativeJobRef.current = { jobId, indexPath };
+      // We can now accept pushed events. Then drain any buffered events that arrived
+      // while startNativeScan was in-flight. Duplicate push/buffer events are ignored
+      // by the fingerprint check in handleNativeJobEvent.
+      isWaitingForJobId.current = false;
+
+      const missedEvents = await nativeJobEvents(jobId, 0);
+      for (const event of missedEvents) {
+        await handleNativeJobEvent(event);
+      }
+
       setRuntimeMessage("Native index mode");
     } catch (error) {
+      isWaitingForJobId.current = false;
+      nativeJobRef.current = null;
       setRuntimeMessage(error instanceof Error ? error.message : "Native scan failed");
       setScan((current) => ({ ...current, status: "cancelled" }));
     }
   }
 
   async function handleNativeJobEvent(event: NativeJobEvent) {
-    if (nativeJobRef.current?.jobId !== event.job_id) return;
+    if (isWaitingForJobId.current || nativeJobRef.current?.jobId !== event.job_id) return;
+
+    // Fingerprint the event to avoid processing the same event twice (e.g., from missed events fetch and push)
+    const fingerprint = `${event.job_id}-${event.status}-${event.files_scanned}-${event.bytes_scanned}-${event.current_path}`;
+    if (lastEventFingerprint.current === fingerprint) return;
+    lastEventFingerprint.current = fingerprint;
 
     if (event.status === "Failed") {
       setRuntimeMessage(event.message);
@@ -210,7 +237,7 @@ function App() {
 
     setScan((current) => ({
       ...current,
-      status: event.status === "Completed" ? "complete" : event.status === "Cancelled" ? "cancelled" : "scanning",
+      status: event.status === "Completed" ? "complete" : event.status === "Cancelled" || event.status === "Failed" ? "cancelled" : "scanning",
       processedFiles: event.files_scanned,
       totalFiles: Math.max(current.totalFiles, event.files_scanned),
       processedBytes: event.bytes_scanned,
@@ -295,6 +322,8 @@ function App() {
   function clearScan() {
     stopWorker();
     nativeJobRef.current = null;
+    isWaitingForJobId.current = false;
+    lastEventFingerprint.current = null;
     setFilter("all");
     setFocusedFolder(null);
     setSearchQuery("");
@@ -642,10 +671,34 @@ function App() {
 
   async function rescanSavedIndex(entry: NativeIndexEntry) {
     if (!entry.root_path) return;
-    const { jobId, indexPath } = await startNativeScan(entry.root_path);
-    nativeJobRef.current = { jobId, indexPath };
+
+    stopWorker();
+    setFilter("all");
+    setFocusedFolder(null);
+    setSearchQuery("");
+    setSearchResults([]);
     setCurrentIndexPath(null);
+    setDuplicateFiles([]);
+    setSelectedDuplicateGroup(null);
     setRuntimeMessage("Native rescan starting");
+
+    // Block pushed events until we've assigned the job ref and drained buffered events.
+    isWaitingForJobId.current = true;
+    lastEventFingerprint.current = null;
+
+    let jobId: number;
+    let indexPath: string;
+    try {
+      ({ jobId, indexPath } = await startNativeScan(entry.root_path));
+    } catch (error) {
+      isWaitingForJobId.current = false;
+      setRuntimeMessage(error instanceof Error ? error.message : "Native rescan failed");
+      setScan((current) => ({ ...current, status: "cancelled" }));
+      window.location.hash = "scan";
+      return;
+    }
+    nativeJobRef.current = { jobId, indexPath };
+
     setScan({
       ...initialScanState,
       status: "scanning",
@@ -653,6 +706,19 @@ function App() {
       startedAt: performance.now(),
       currentPath: entry.root_path,
     });
+
+    // We can now accept pushed events. Then drain any buffered events that arrived
+    // while startNativeScan was in-flight. Duplicate push/buffer events are ignored
+    // by the fingerprint check in handleNativeJobEvent.
+    isWaitingForJobId.current = false;
+
+    const missedEvents = await nativeJobEvents(jobId, 0);
+    for (const event of missedEvents) {
+      await handleNativeJobEvent(event);
+    }
+
+    setRuntimeMessage("Native index mode");
+
     window.location.hash = "scan";
   }
 
