@@ -737,6 +737,7 @@ function App() {
     try {
       ({ jobId, indexPath } = await startNativeScan(entry.root_path));
     } catch (error) {
+      nativeJobRef.current = null;
       isWaitingForJobId.current = false;
       setRuntimeMessage(error instanceof Error ? error.message : "Native rescan failed");
       setScan((current) => ({ ...current, status: "cancelled" }));
