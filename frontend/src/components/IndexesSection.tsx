@@ -19,7 +19,7 @@ export function IndexesSection({
   removeSavedIndex,
 }: IndexesSectionProps) {
   return (
-    <section className="folder-table" id="settings">
+    <section className="folder-table" id="library">
       <div className="panel-header">
         <h2>Saved Indexes</h2>
         <span>
