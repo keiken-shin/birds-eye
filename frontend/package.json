@@ -13,6 +13,7 @@
     "tauri:build:app": "cd .. && frontend\\node_modules\\.bin\\tauri.cmd build --no-bundle"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.3.0",
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@vitejs/plugin-react": "^5.0.0",

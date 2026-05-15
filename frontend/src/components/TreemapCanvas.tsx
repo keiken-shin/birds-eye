@@ -62,10 +62,10 @@ export function TreemapCanvas({ folders, onSelect }: { folders: TreemapFolder[];
   }
 
   return (
-    <div className="treemap-canvas-wrap" ref={wrapRef}>
+    <div className="relative min-h-[360px] overflow-hidden border border-[#f4f1ea]/10 bg-[#050607]" ref={wrapRef}>
       <canvas
         aria-label="Space distribution treemap"
-        className="treemap-canvas"
+        className="block min-h-[360px] w-full cursor-pointer"
         onMouseLeave={() => setHover(null)}
         onMouseMove={(event) => {
           const canvas = canvasRef.current;
@@ -88,10 +88,13 @@ export function TreemapCanvas({ folders, onSelect }: { folders: TreemapFolder[];
         ref={canvasRef}
       />
       {hover && (
-        <div className="treemap-tooltip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
-          <strong>{hover.folder.path}</strong>
-          <span>{formatBytes(hover.folder.displayBytes)}</span>
-          <span>{hover.folder.files.toLocaleString()} files</span>
+        <div
+          className="pointer-events-none absolute z-[4] grid max-w-80 gap-1 border border-[#f4f1ea]/30 bg-[#050607]/95 px-3 py-2.5 text-xs text-[#f4f1ea] shadow-[0_18px_48px_rgba(0,0,0,0.42)]"
+          style={{ left: hover.x + 14, top: hover.y + 14 }}
+        >
+          <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{hover.folder.path}</strong>
+          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{formatBytes(hover.folder.displayBytes)}</span>
+          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{hover.folder.files.toLocaleString()} files</span>
         </div>
       )}
     </div>

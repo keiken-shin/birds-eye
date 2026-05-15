@@ -80,7 +80,7 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className="relative block min-h-screen overflow-x-hidden bg-[#050607] bg-[radial-gradient(circle,rgba(255,255,255,0.13)_1px,transparent_1.3px)] bg-[length:24px_24px] text-[#f4f1ea] before:pointer-events-none before:absolute before:bottom-0 before:right-0 before:h-[40rem] before:w-[40rem] before:bg-[radial-gradient(circle_at_82%_82%,rgba(244,241,234,0.10),transparent_22rem)]">
       <LandingPage
         scan={scan}
         runtimeMessage={runtimeMessage}
@@ -94,11 +94,11 @@ function App() {
         cancelScan={cancelScan}
         clearScan={clearScan}
       />
-      <section className="workspace">
-        <header className="workspace-intro" id="workspace">
-          <p className="eyebrow">Workspace / storage intelligence</p>
-          <h2>Indexed terrain and cleanup surfaces</h2>
-          <span>Treemap, search, duplicate candidates, and saved local indexes remain live below the launch interface.</span>
+      <section className="relative z-[1] mx-auto max-w-[1440px] min-w-0 px-[42px] pb-[118px] max-sm:px-4 max-sm:pb-28">
+        <header className="mb-[18px] grid gap-2 border-t border-[#f4f1ea]/20 pt-5" id="workspace">
+          <p className="m-0 text-[13px] font-bold uppercase text-[#00d0c4]">Workspace / storage intelligence</p>
+          <h2 className="max-w-[860px] text-[clamp(28px,3vw,46px)] font-black uppercase leading-[0.95] text-[#f4f1ea]">Indexed terrain and cleanup surfaces</h2>
+          <span className="max-w-[760px] text-sm leading-normal text-[#9a9a94]">Treemap, search, duplicate candidates, and saved local indexes remain live below the launch interface.</span>
         </header>
         <StorageReadout scan={scan} />
         <MetricGrid scan={scan} />
