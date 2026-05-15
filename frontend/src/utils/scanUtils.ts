@@ -93,6 +93,3 @@ export function mediaKindFromCategory(category: CategoryKey): string {
   if (category === "models") return "model";
   return category === "other" ? "other" : category;
 }
-
-// Re-export categories so callers that previously accessed it via this module can still do so.
-export { categories };
