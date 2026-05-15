@@ -212,7 +212,9 @@ function App() {
         await handleNativeJobEvent(event);
       }
 
-      setRuntimeMessage("Native index mode");
+      if (nativeJobRef.current?.jobId === jobId) {
+        setRuntimeMessage("Native index mode");
+      }
     } catch (error) {
       isWaitingForJobId.current = false;
       nativeJobRef.current = null;
