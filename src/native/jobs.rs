@@ -349,6 +349,50 @@ mod tests {
         cleanup(&root);
     }
 
+    #[test]
+    fn listener_receives_progress_and_terminal_events() {
+        let root = test_root("listener");
+        let data_root = root.join("data");
+        let index_path = root.join("index.sqlite");
+
+        fs::create_dir_all(&data_root).unwrap();
+        write_file(&data_root.join("file.bin"), b"hello");
+
+        let manager = ScanJobManager::new();
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+
+        let response = manager
+            .start_scan_job_with_listener(
+                StartScanJobRequest {
+                    root: data_root,
+                    index_path,
+                },
+                Some(Arc::new(move |event| {
+                    captured.lock().unwrap().push(event);
+                })),
+            )
+            .unwrap();
+
+        wait_for_terminal(&manager, response.job_id);
+
+        let events = events.lock().unwrap();
+
+        assert!(
+            events.iter().any(|e| matches!(e.status, JobStatusDto::Running))
+        );
+
+        assert!(
+            events.iter().any(|e| matches!(e.status, JobStatusDto::Completed))
+        );
+
+        let buffered = manager.job_events_since(response.job_id, 0).unwrap();
+        assert!(!buffered.is_empty());
+
+        cleanup(&root);
+    }
+
     fn wait_for_terminal(manager: &ScanJobManager, job_id: u64) {
         for _ in 0..80 {
             let status = manager.job_status(job_id).expect("missing status");
