@@ -132,6 +132,8 @@ export function useScan({
     workerRef.current = null;
   }
 
+  const handleNativeJobEventRef = useRef<(event: NativeJobEvent, options?: { replay?: boolean }) => Promise<void>>(async () => {});
+
   async function handleNativeJobEvent(event: NativeJobEvent, options: { replay?: boolean } = {}) {
     if (nativeJobRef.current?.jobId !== event.job_id) return;
     if (isWaitingForJobId.current && !options.replay) return;
@@ -171,6 +173,7 @@ export function useScan({
       clearNativeEventState(event.job_id);
     }
   }
+  handleNativeJobEventRef.current = handleNativeJobEvent;
 
   async function startNativeFolderScan() {
     try {
@@ -221,7 +224,7 @@ export function useScan({
 
     let unlisten: (() => void) | null = null;
     void listenNativeJobEvents((event) => {
-      void handleNativeJobEvent(event);
+      void handleNativeJobEventRef.current?.(event);
     }).then((cleanup) => {
       unlisten = cleanup;
     });
@@ -229,7 +232,6 @@ export function useScan({
     return () => {
       unlisten?.();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nativeRuntime]);
 
   const openFolderPicker = useCallback(() => {
@@ -242,7 +244,6 @@ export function useScan({
     input.setAttribute("webkitdirectory", "");
     input.setAttribute("directory", "");
     input.click();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nativeRuntime]);
 
   const handleFiles = useCallback((fileList: FileList | null) => {
