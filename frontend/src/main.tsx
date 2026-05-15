@@ -34,7 +34,7 @@ function App() {
     currentIndexPath,
     fileInputRef,
     openFolderPicker,
-    handleFiles,
+    handleFiles: handleFilesBase,
     pauseScan, resumeScan, cancelScan,
     clearScan: clearScanBase,
     openSavedIndex,
@@ -64,6 +64,14 @@ function App() {
     clearDuplicates();
     clearScanBase();
   }, [clearScanBase, setSearchQuery, clearDuplicates]);
+
+  // In browser-mode currentIndexPath stays null, so the useEffect below never
+  // re-fires between scans. Wrap handleFiles to clear stale state explicitly.
+  const handleFiles = useCallback((fileList: FileList | null) => {
+    setSearchQuery("");
+    clearDuplicates();
+    handleFilesBase(fileList);
+  }, [handleFilesBase, setSearchQuery, clearDuplicates]);
 
   async function removeSavedIndex(entry: NativeIndexEntry) {
     await deleteNativeIndex(entry.index_path);

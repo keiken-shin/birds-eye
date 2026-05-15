@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type React from "react";
 import {
   cancelNativeScan,
   chooseNativeFolder,
@@ -376,6 +377,9 @@ export function useScan({
     }
 
     window.location.hash = "scan";
+    // handleNativeJobEvent is intentionally omitted — it only reads refs and stable setters,
+    // so the stale closure is harmless. Rebuilding rescanSavedIndex on every render
+    // would cause the listener to rebind unnecessarily.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setRuntimeMessage]);
 
