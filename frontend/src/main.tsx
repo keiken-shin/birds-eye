@@ -95,6 +95,11 @@ function App() {
         clearScan={clearScan}
       />
       <section className="workspace">
+        <header className="workspace-intro" id="workspace">
+          <p className="eyebrow">Workspace / storage intelligence</p>
+          <h2>Indexed terrain and cleanup surfaces</h2>
+          <span>Treemap, search, duplicate candidates, and saved local indexes remain live below the launch interface.</span>
+        </header>
         <StorageReadout scan={scan} />
         <MetricGrid scan={scan} />
         <FilterBar filter={filter} setFilter={setFilter} />

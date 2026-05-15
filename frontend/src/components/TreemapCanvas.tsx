@@ -134,8 +134,18 @@ function layoutTreemap(folders: TreemapFolder[], x: number, y: number, width: nu
 
 function drawTreemap(context: CanvasRenderingContext2D, rects: Rect[], width: number, height: number) {
   context.clearRect(0, 0, width, height);
-  context.fillStyle = "rgba(0, 0, 0, 0.24)";
+  context.fillStyle = "rgba(5, 6, 7, 0.88)";
   context.fillRect(0, 0, width, height);
+
+  context.strokeStyle = "rgba(244, 241, 234, 0.08)";
+  context.lineWidth = 1;
+  for (let x = 24; x < width; x += 24) {
+    for (let y = 24; y < height; y += 24) {
+      context.beginPath();
+      context.arc(x, y, 1, 0, Math.PI * 2);
+      context.stroke();
+    }
+  }
 
   for (const rect of rects) {
     const inset = 2;
@@ -145,27 +155,45 @@ function drawTreemap(context: CanvasRenderingContext2D, rects: Rect[], width: nu
     const h = Math.max(0, rect.height - inset * 2);
     if (w <= 0 || h <= 0) continue;
 
-    const gradient = context.createLinearGradient(x, y, x + w, y + h);
-    gradient.addColorStop(0, rect.color);
-    gradient.addColorStop(1, "rgba(255, 255, 255, 0.08)");
-    context.fillStyle = gradient;
+    context.fillStyle = makeStorageFill(rect.color, context, x, y, w, h);
     context.fillRect(x, y, w, h);
-    context.strokeStyle = "rgba(255, 255, 255, 0.18)";
+    context.strokeStyle = "rgba(244, 241, 234, 0.22)";
     context.strokeRect(x, y, w, h);
 
+    context.fillStyle = rect.color;
+    context.globalAlpha = 0.72;
+    context.fillRect(x, y, Math.min(w, 4), Math.min(h, 22));
+    context.globalAlpha = 1;
+
     if (w > 72 && h > 42) {
-      context.fillStyle = "rgba(255, 255, 255, 0.92)";
-      context.font = "700 13px Inter, Segoe UI, sans-serif";
+      context.fillStyle = "rgba(244, 241, 234, 0.92)";
+      context.font = "800 12px Inter, Segoe UI, sans-serif";
       context.fillText(trimToWidth(context, lastSegment(rect.folder.path), w - 14), x + 8, y + h - 24);
-      context.fillStyle = "rgba(255, 255, 255, 0.72)";
-      context.font = "12px Inter, Segoe UI, sans-serif";
+      context.fillStyle = "rgba(244, 241, 234, 0.62)";
+      context.font = "11px Consolas, Liberation Mono, monospace";
       context.fillText(formatBytes(rect.folder.displayBytes), x + 8, y + h - 8);
     } else if (w > 44 && h > 24) {
-      context.fillStyle = "rgba(255, 255, 255, 0.88)";
-      context.font = "700 10px Inter, Segoe UI, sans-serif";
+      context.fillStyle = "rgba(244, 241, 234, 0.88)";
+      context.font = "800 10px Inter, Segoe UI, sans-serif";
       context.fillText(trimToWidth(context, lastSegment(rect.folder.path), w - 8), x + 4, y + h - 7);
     }
   }
+}
+
+function makeStorageFill(
+  color: string,
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  const gradient = context.createLinearGradient(x, y, x + width, y + height);
+  gradient.addColorStop(0, "rgba(244, 241, 234, 0.18)");
+  gradient.addColorStop(0.08, color);
+  gradient.addColorStop(0.09, "rgba(30, 33, 37, 0.92)");
+  gradient.addColorStop(1, "rgba(8, 10, 13, 0.94)");
+  return gradient;
 }
 
 function trimToWidth(context: CanvasRenderingContext2D, text: string, maxWidth: number) {
