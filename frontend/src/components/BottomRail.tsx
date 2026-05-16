@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { Settings } from "lucide-react";
 import { QueuePopover } from "./QueuePopover";
+import { SettingsPopover } from "./SettingsPopover";
 import { useScanContext } from "../context/ScanContext";
 
 const itemBase =
@@ -35,6 +36,15 @@ export function BottomRail() {
       >
         Library
       </NavLink>
+      <NavLink
+        to="/scan"
+        className={({ isActive }) => `${itemBase} relative${isActive ? ` ${activeClass}` : ""}`}
+      >
+        Scan
+        {hasActiveScans && (
+          <span className="absolute right-2 top-2 h-1.5 w-1.5 animate-pulse rounded-full bg-[#00d0c4]" />
+        )}
+      </NavLink>
       <QueuePopover>
         <button className={`${itemBase} relative`} type="button">
           Queue ▾
@@ -43,14 +53,11 @@ export function BottomRail() {
           )}
         </button>
       </QueuePopover>
-      <button
-        className={`${itemBase} cursor-not-allowed opacity-50`}
-        type="button"
-        disabled
-        title="Settings polish is coming soon"
-      >
-        <Settings size={15} /> Settings
-      </button>
+      <SettingsPopover>
+        <button className={itemBase} type="button">
+          <Settings size={15} /> Settings
+        </button>
+      </SettingsPopover>
     </nav>
   );
 }
