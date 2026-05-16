@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Eye, FolderOpen, Search, X } from "lucide-react";
+import { Eye, FolderOpen, Search, SlidersHorizontal, X } from "lucide-react";
 import { useSearch } from "../hooks/useSearch";
 import { formatBytes, type CategoryKey, type ScanState, type SearchFilters } from "../domain";
 import { categories } from "../domain";
@@ -160,13 +160,14 @@ export function CommandPalette({
             onChange={(e) => setSearchQuery(e.target.value)}
           />
           <button
-            className={`${mono} border px-2 py-1 ${
-              filtersOpen ? "border-[#00d0c4]/40 text-[#00d0c4]" : "border-white/10 text-white/30"
+            className={`grid h-7 w-7 place-items-center border ${
+              filtersOpen ? "border-[#00d0c4]/40 text-[#00d0c4]" : "border-white/10 text-white/30 hover:text-white/60"
             }`}
             type="button"
+            title="Toggle filters"
             onClick={() => setFiltersOpen((v) => !v)}
           >
-            Filters
+            <SlidersHorizontal size={13} />
           </button>
           <button
             className="grid h-6 w-6 place-items-center text-white/30 hover:text-white/60"

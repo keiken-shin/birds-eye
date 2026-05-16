@@ -45,12 +45,13 @@ describe("useSearch filter forwarding", () => {
       await Promise.resolve();
     });
 
+    // CategoryKey "photos" maps to native media_kind "photo"
     expect(invoke).toHaveBeenCalledWith(
       "search_files",
       expect.objectContaining({
         request: expect.objectContaining({
           query: "sunset",
-          kinds: ["photos"],
+          kinds: ["photo"],
           min_bytes: 1024 * 1024,
         }),
       })

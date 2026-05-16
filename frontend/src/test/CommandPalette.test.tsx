@@ -31,9 +31,9 @@ describe("CommandPalette", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("shows FILTERS toggle button when open", () => {
+  it("shows filters toggle button when open", () => {
     render(<CommandPalette {...props} />);
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    expect(screen.getByText(/filters/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/toggle filters/i)).toBeInTheDocument();
   });
 });

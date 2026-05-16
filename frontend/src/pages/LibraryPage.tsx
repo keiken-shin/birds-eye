@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Trash2 } from "lucide-react";
+import { FolderOpen, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { useScanContext } from "../context/ScanContext";
 import { deleteNativeIndex } from "../nativeClient";
 import type { NativeIndexEntry } from "../nativeClient";
@@ -9,8 +9,14 @@ import { formatBytes, formatCount } from "../domain";
 const mono = "font-mono text-[11px] uppercase";
 
 export function LibraryPage() {
-  const { savedIndexes, refreshSavedIndexes, openSavedIndex, currentIndexPath, clearScan } =
-    useScanContext();
+  const {
+    savedIndexes,
+    refreshSavedIndexes,
+    openSavedIndex,
+    rescanSavedIndex,
+    workspaceIndexPath,
+    clearScan,
+  } = useScanContext();
   const [filterQuery, setFilterQuery] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -29,9 +35,14 @@ export function LibraryPage() {
     navigate("/workspace");
   }
 
+  async function handleRescan(entry: NativeIndexEntry) {
+    await rescanSavedIndex(entry);
+    navigate("/scan");
+  }
+
   async function handleDelete(entry: NativeIndexEntry) {
     await deleteNativeIndex(entry.index_path);
-    if (currentIndexPath === entry.index_path) clearScan();
+    if (workspaceIndexPath === entry.index_path) clearScan();
     await refreshSavedIndexes();
     setConfirmDelete(null);
   }
@@ -69,6 +80,7 @@ export function LibraryPage() {
             entry={entry}
             isConfirmingDelete={confirmDelete === entry.index_path}
             onLoad={() => handleLoad(entry)}
+            onRescan={() => handleRescan(entry)}
             onDeleteRequest={() => setConfirmDelete(entry.index_path)}
             onDeleteConfirm={() => handleDelete(entry)}
             onDeleteCancel={() => setConfirmDelete(null)}
@@ -83,6 +95,7 @@ function LibraryRow({
   entry,
   isConfirmingDelete,
   onLoad,
+  onRescan,
   onDeleteRequest,
   onDeleteConfirm,
   onDeleteCancel,
@@ -90,15 +103,17 @@ function LibraryRow({
   entry: NativeIndexEntry;
   isConfirmingDelete: boolean;
   onLoad: () => void;
+  onRescan: () => void;
   onDeleteRequest: () => void;
   onDeleteConfirm: () => void;
   onDeleteCancel: () => void;
 }) {
-  const mono = "font-mono text-[11px] uppercase";
   const label = entry.root_path ?? entry.index_path;
   const scannedAt = entry.last_scanned_at
     ? new Date(entry.last_scanned_at * 1000).toLocaleDateString()
     : "—";
+
+  const iconBtn = "grid h-8 w-8 place-items-center border border-white/15 text-[#9a9a94] transition-colors";
 
   return (
     <div className="flex items-center justify-between gap-4 border-b border-white/7 bg-white/[0.02] px-4 py-3 last:border-b-0">
@@ -108,7 +123,7 @@ function LibraryRow({
           {formatBytes(entry.bytes_scanned)} · {formatCount(entry.files_scanned)} files · {scannedAt}
         </p>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 items-center gap-1.5">
         {isConfirmingDelete ? (
           <>
             <span className={`${mono} text-[#ff6b6b]`}>Delete?</span>
@@ -120,24 +135,36 @@ function LibraryRow({
               Yes
             </button>
             <button
-              className="border border-white/15 px-3 py-1 font-mono text-[9px] font-black uppercase text-[#9a9a94]"
+              className="grid h-7 w-7 place-items-center border border-white/15 text-[#9a9a94] hover:text-white/60"
               type="button"
               onClick={onDeleteCancel}
+              title="Cancel"
             >
-              No
+              <X size={12} />
             </button>
           </>
         ) : (
           <>
             <button
-              className="border border-[#f4f1ea]/40 px-4 py-1.5 font-mono text-[10px] font-black uppercase text-[#f4f1ea]"
+              className={`${iconBtn} hover:border-[#00d0c4]/40 hover:text-[#00d0c4]`}
               type="button"
               onClick={onLoad}
+              title="Load into workspace"
             >
-              Load
+              <FolderOpen size={13} />
             </button>
+            {entry.root_path && (
+              <button
+                className={`${iconBtn} hover:border-white/30 hover:text-[#f4f1ea]`}
+                type="button"
+                onClick={onRescan}
+                title="Rescan"
+              >
+                <RefreshCw size={13} />
+              </button>
+            )}
             <button
-              className="grid h-8 w-8 place-items-center border border-white/15 text-[#9a9a94] hover:border-[#ff6b6b]/40 hover:text-[#ff6b6b]"
+              className={`${iconBtn} hover:border-[#ff6b6b]/40 hover:text-[#ff6b6b]`}
               type="button"
               onClick={onDeleteRequest}
               title="Delete index"
