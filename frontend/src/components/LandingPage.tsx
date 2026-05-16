@@ -102,7 +102,7 @@ export function LandingPage({
             <Database size={17} /> Open Library
           </Link>
           <ConfigDropdown>
-            <button className={iconButton} type="button" aria-label="Scan configuration">
+            <button className={`${iconButton} cursor-pointer`} type="button" aria-label="Scan configuration">
               <Settings2 size={18} />
             </button>
           </ConfigDropdown>
