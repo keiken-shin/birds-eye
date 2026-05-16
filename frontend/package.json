@@ -10,7 +10,10 @@
     "tauri": "cd .. && frontend\\node_modules\\.bin\\tauri.cmd",
     "tauri:dev": "cd .. && frontend\\node_modules\\.bin\\tauri.cmd dev",
     "tauri:build": "cd .. && frontend\\node_modules\\.bin\\tauri.cmd build",
-    "tauri:build:app": "cd .. && frontend\\node_modules\\.bin\\tauri.cmd build --no-bundle"
+    "tauri:build:app": "cd .. && frontend\\node_modules\\.bin\\tauri.cmd build --no-bundle",
+    "test": "vitest",
+    "test:run": "vitest run --passWithNoTests",
+    "coverage": "vitest run --coverage --passWithNoTests"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",
@@ -27,7 +30,13 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3"
+    "@types/react-dom": "^19.2.3",
+    "@vitest/coverage-v8": "^4.1.6",
+    "jsdom": "^29.1.1",
+    "vitest": "^4.1.6"
   }
 }
