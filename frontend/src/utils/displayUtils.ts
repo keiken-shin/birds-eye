@@ -1,4 +1,4 @@
-import { categories, formatBytes, type CategoryKey, type ScanState } from "../domain";
+import { categories, formatBytes, formatCount, type CategoryKey, type ScanState } from "../domain";
 
 export function getProgress(scan: ScanState): number {
   if (scan.totalFiles === 0) return 0;
@@ -17,4 +17,12 @@ export function makeCategoryHint(scan: ScanState, category: CategoryKey, label: 
 
 export function formatDate(epochSeconds: number): string {
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(epochSeconds * 1000));
+}
+
+export function formatThroughput(processedFiles: number, processedBytes: number, elapsedMs: number): string {
+  if (elapsedMs <= 0 || processedFiles === 0) return "—";
+  const seconds = elapsedMs / 1000;
+  const filesPerSec = Math.round(processedFiles / seconds);
+  const bytesPerSec = processedBytes / seconds;
+  return `${formatCount(filesPerSec)} files/s · ${formatBytes(bytesPerSec)}/s`;
 }
