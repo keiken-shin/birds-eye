@@ -5,6 +5,7 @@ import type { ScanState } from "../domain";
 import { useScanContext } from "../context/ScanContext";
 import { ConfigDropdown } from "./ConfigDropdown";
 import logoUrl from "../assets/birds-eye-logo.svg";
+import { ProceduralStorageField } from "./ProceduralStorageField";
 
 interface LandingPageProps {
   scan: ScanState;
@@ -109,41 +110,5 @@ export function LandingPage({
         </div>
       </div>
     </section>
-  );
-}
-
-function ProceduralStorageField() {
-  return (
-    <div className="relative min-h-56 overflow-hidden border-y border-y-white/15 bg-[radial-gradient(circle,rgba(244,241,234,0.18)_1px,transparent_1.4px)] bg-[length:18px_18px] max-sm:min-h-[166px]" aria-hidden="true">
-      <div className="absolute inset-x-[12%] inset-y-[26px] left-0 border border-l-0 border-white/10" />
-      <div className="absolute left-[5%] top-[28%] h-[44%] w-[18%] bg-[#f4f1ea] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.42)] max-sm:left-[8%] max-sm:top-[32%] max-sm:h-[36%] max-sm:w-[24%]" />
-      <div className="absolute left-[26%] top-[35%] h-[27%] w-[12%] bg-[#00d0c4]/70 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.42)] max-sm:left-[36%] max-sm:w-[18%]" />
-      <div className="absolute left-[41%] top-[20%] h-[56%] w-[22%] border border-white/20 bg-[#202328] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.42)] max-sm:left-[58%] max-sm:w-[26%]" />
-      <div className="absolute left-[66%] top-[42%] h-[24%] w-[10%] bg-[#b7ff5c]/70 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.42)] max-sm:hidden" />
-      <div className="absolute left-[79%] top-[24%] h-[48%] w-[17%] border border-white/20 bg-[#0c0e12] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.42)] max-sm:hidden" />
-      <svg className="absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 900 240" focusable="false">
-        <path d="M74 108 C182 38, 246 186, 372 92 S600 130, 780 58" fill="none" stroke="rgba(244,241,234,0.38)" strokeDasharray="5 7" strokeWidth="1.4" />
-        <path d="M96 150 C226 208, 342 54, 502 150 S682 78, 836 168" fill="none" stroke="rgba(0,208,196,0.42)" strokeDasharray="3 8" strokeWidth="1.2" />
-        <circle cx="74" cy="108" r="5" fill="#f4f1ea" />
-        <circle cx="372" cy="92" r="5" fill="#00d0c4" />
-        <circle cx="780" cy="58" r="5" fill="#b7ff5c" />
-        <circle cx="502" cy="150" r="5" fill="#f4f1ea" />
-      </svg>
-      <span className="absolute bottom-4 left-[18px] bg-[#f4f1ea] px-2 py-1.5 font-mono text-[11px] uppercase font-extrabold text-[#050607] max-sm:bottom-3 max-sm:left-3 max-sm:max-w-[calc(100%-24px)]">
-        Procedural storage field
-      </span>
-      <span className="font-mono text-[11px] uppercase absolute bottom-4 right-[18px] text-[#9a9a94] max-sm:hidden">folders / density / duplicate vectors</span>
-    </div>
-  );
-}
-
-export function StorageReadout({ scan }: { scan: ScanState }) {
-  const mono = "font-mono text-[11px] uppercase";
-  return (
-    <div className="mb-3.5 flex flex-wrap gap-2.5" aria-label="Current scan readout">
-      <span className={`${mono} border border-white/15 px-2.5 py-2 text-[#9a9a94]`}>{scan.processedFiles.toLocaleString()} files</span>
-      <span className={`${mono} border border-white/15 px-2.5 py-2 text-[#9a9a94]`}>{scan.processedBytes > 0 ? `${(scan.processedBytes / 1073741824).toFixed(2)} GB` : "0 B"} scanned</span>
-      <span className={`${mono} border border-white/15 px-2.5 py-2 text-[#9a9a94]`}>{scan.folders.length} folders</span>
-    </div>
   );
 }
