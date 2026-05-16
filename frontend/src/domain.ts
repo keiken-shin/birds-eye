@@ -192,3 +192,25 @@ export function formatCount(value: number) {
 export function lastSegment(path: string) {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
+
+export type SearchFilters = {
+  kinds?: CategoryKey[];
+  extensions?: string[];
+  minBytes?: number;
+  maxBytes?: number;
+  useRegex?: boolean;
+};
+
+export type QueueItemStatus = "scanning" | "done" | "loaded";
+
+export type QueueItem = {
+  id: string;
+  rootName: string;
+  status: QueueItemStatus;
+  progress: number;
+  indexPath: string;
+  totalFiles?: number;
+  totalBytes?: number;
+  elapsedMs?: number;
+  loadedAt?: number;
+};

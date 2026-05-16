@@ -327,7 +327,6 @@ export function useScan({
     }));
     setCurrentIndexPath(entry.index_path);
     setRuntimeMessage("Saved index loaded");
-    window.location.hash = "dashboard";
   }, [setRuntimeMessage]);
 
   const rescanSavedIndex = useCallback(async (entry: NativeIndexEntry) => {
@@ -351,7 +350,6 @@ export function useScan({
       isWaitingForJobId.current = false;
       setRuntimeMessage(error instanceof Error ? error.message : "Native rescan failed");
       setScan((current) => ({ ...current, status: "cancelled" }));
-      window.location.hash = "scan";
       return;
     }
     nativeJobRef.current = { jobId, indexPath };
@@ -376,7 +374,6 @@ export function useScan({
       setRuntimeMessage("Native index mode");
     }
 
-    window.location.hash = "scan";
     // handleNativeJobEvent is intentionally omitted — it only reads refs and stable setters,
     // so the stale closure is harmless. Rebuilding rescanSavedIndex on every render
     // would cause the listener to rebind unnecessarily.
