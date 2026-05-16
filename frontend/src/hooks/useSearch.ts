@@ -38,8 +38,16 @@ export function useSearch({
     }
 
     if (!nativeRuntime || !currentIndexPath) {
+      const f = filtersRef.current;
       const browserMatches = largestFiles
-        .filter((file) => file.path.toLowerCase().includes(trimmedQuery.toLowerCase()))
+        .filter((file) => {
+          if (!file.path.toLowerCase().includes(trimmedQuery.toLowerCase())) return false;
+          if (f?.kinds?.length && !f.kinds.includes(file.category)) return false;
+          if (f?.extensions?.length && !f.extensions.some((ext) => file.extension?.toLowerCase() === ext.toLowerCase())) return false;
+          if (f?.minBytes !== undefined && file.bytes < f.minBytes) return false;
+          if (f?.maxBytes !== undefined && file.bytes > f.maxBytes) return false;
+          return true;
+        })
         .slice(0, 24)
         .map((file) => ({
           path: file.path,
@@ -54,7 +62,12 @@ export function useSearch({
     }
 
     const handle = window.setTimeout(() => {
-      void searchNativeIndex(currentIndexPath, trimmedQuery, 24, filtersRef.current)
+      const f = filtersRef.current;
+      // CategoryKey values must be mapped to native media_kind strings expected by the Rust backend
+      const nativeFilters = f
+        ? { ...f, kinds: f.kinds?.map(mediaKindFromCategory) }
+        : undefined;
+      void searchNativeIndex(currentIndexPath, trimmedQuery, 24, nativeFilters)
         .then(setSearchResults)
         .catch((error) => {
           setRuntimeMessageRef.current(error instanceof Error ? error.message : "Search failed");
