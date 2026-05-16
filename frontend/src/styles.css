@@ -33,3 +33,7 @@ a {
 button {
   user-select: none;
 }
+
+@utility mono {
+  @apply !font-mono !text-xs uppercase;
+}

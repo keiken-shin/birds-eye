@@ -6,8 +6,6 @@ import { useScanContext } from "../context/ScanContext";
 type Theme = "dark" | "light" | "system";
 type Layer = "main" | "shortcuts";
 
-const mono = "font-mono text-[11px] uppercase";
-
 const SHORTCUTS: { keys: string; action: string }[] = [
   { keys: "Ctrl+K", action: "Command palette" },
   { keys: "Ctrl+/", action: "Focus search" },
@@ -64,7 +62,7 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
             {/* Layer 1: Main settings */}
             <div style={{ width: "280px" }} className="shrink-0">
               <div className="border-b border-white/7 px-[14px] py-[10px]">
-                <span className={`${mono} tracking-[2px] text-white/50`}>Settings</span>
+                <span className={`mono tracking-[2px] text-white/50`}>Settings</span>
               </div>
 
               <div className="px-[14px] py-[12px] grid gap-[14px]">
@@ -77,7 +75,7 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
                         key={t}
                         type="button"
                         onClick={() => setTheme(t)}
-                        className={`flex-1 border py-[6px] font-mono text-[10px] uppercase transition-colors ${
+                        className={`flex-1 border py-[6px] font-mono !text-xs uppercase transition-colors ${
                           theme === t
                             ? "border-[#00d0c4]/40 bg-[#00d0c4]/10 text-[#00d0c4]"
                             : "border-white/10 text-white/30 hover:border-white/20 hover:text-white/50"
@@ -96,7 +94,7 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
                 onClick={() => setLayer("shortcuts")}
                 className="w-full flex items-center justify-between border-t border-white/7 px-[14px] py-[12px] hover:bg-white/[0.04] transition-colors"
               >
-                <span className={`${mono} text-white/40`}>Keyboard Shortcuts</span>
+                <span className={`mono text-white/40`}>Keyboard Shortcuts</span>
                 <ChevronRight size={13} className="text-white/25" />
               </button>
             </div>
@@ -112,14 +110,14 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
                 >
                   <ArrowLeft size={13} />
                 </button>
-                <span className={`${mono} tracking-[2px] text-white/50`}>Keyboard Shortcuts</span>
+                <span className={`mono tracking-[2px] text-white/50`}>Keyboard Shortcuts</span>
               </div>
 
               <div className="px-[14px] py-[10px] grid gap-[2px]">
                 {SHORTCUTS.map(({ keys, action }) => (
                   <div key={keys} className="flex items-center justify-between py-[6px] border-b border-white/5 last:border-0">
                     <span className="font-mono text-[10px] bg-white/8 px-[8px] py-[3px] text-[#f4f1ea]/60">{keys}</span>
-                    <span className={`${mono} text-white/30`}>{action}</span>
+                    <span className={`mono text-white/30`}>{action}</span>
                   </div>
                 ))}
               </div>

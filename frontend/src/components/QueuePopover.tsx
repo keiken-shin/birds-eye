@@ -6,7 +6,7 @@ import { useScanContext } from "../context/ScanContext";
 import { formatBytes, formatCount } from "../domain";
 import type { QueueItem } from "../domain";
 
-const mono = "font-mono text-[11px] uppercase";
+// const mono = "font-mono text-[8px] uppercase";
 
 export function QueuePopover({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -50,24 +50,22 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
           aria-label="Scan queue"
         >
           <div className="flex items-center justify-between border-b border-white/7 px-[14px] py-[10px]">
-            <span className={`${mono} tracking-[2px] text-white/50`}>Scan Queue</span>
+            <span className="mono tracking-[2px] text-white/50">Scan Queue</span>
             <div className="flex items-center gap-3">
-              {queueItems.length > 0 && (
-                <Link
-                  to="/scan"
-                  onClick={() => setOpen(false)}
-                  className={`${mono} text-[#00d0c4]/60 hover:text-[#00d0c4] no-underline`}
-                >
-                  View All →
-                </Link>
-              )}
-              <span className={`${mono} text-white/20`}>{queueItems.length} items</span>
+              <span className={`mono text-white/20`}>{queueItems.length} items</span>
+              <Link
+                to="/scan"
+                onClick={() => setOpen(false)}
+                className={`mono text-[#00d0c4]/60 hover:text-[#00d0c4] no-underline`}
+              >
+                View All →
+              </Link>
             </div>
           </div>
 
           {queueItems.length === 0 && (
             <div className="px-[14px] py-5 text-center">
-              <span className={`${mono} text-white/20`}>No scans in queue</span>
+              <span className={`mono text-white/20`}>No scans in queue</span>
             </div>
           )}
 
@@ -76,7 +74,7 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
           ))}
 
           <div className="border-t border-white/5 px-[14px] py-2">
-            <span className={`${mono} text-white/15`}>Completed scans saved to Library</span>
+            <span className={`mono text-white/15`}>Completed scans saved to Library</span>
           </div>
         </div>
       )}
@@ -149,13 +147,13 @@ function QueueItemRow({
             </button>
           )}
           {item.status === "scanning" && (
-            <span className={`${mono} text-[#00d0c4]`}>{scan.status === "paused" ? "paused" : "scanning"}</span>
+            <span className={`mono text-[#00d0c4]`}>{scan.status === "paused" ? "paused" : "scanning"}</span>
           )}
           {item.status === "done" && (
-            <span className={`${mono} text-[#b7ff5c]`}>done</span>
+            <span className={`mono text-[#b7ff5c]`}>done</span>
           )}
           {item.status === "loaded" && (
-            <span className={`${mono} text-white/30`}>loaded ✓</span>
+            <span className={`mono text-white/30`}>loaded ✓</span>
           )}
         </div>
       </div>
@@ -165,13 +163,13 @@ function QueueItemRow({
           <div className="mb-1 h-[2px] bg-white/6">
             <div className="h-full bg-[#00d0c4]" style={{ width: `${item.progress}%` }} />
           </div>
-          <span className={`${mono} text-white/30`}>{item.progress}%</span>
+          <span className={`mono text-white/30`}>{item.progress}%</span>
         </>
       )}
 
       {item.status === "done" && (
         <div className="mt-[6px] flex items-center justify-between">
-          <span className={`${mono} text-white/30`}>
+          <span className={`mono text-white/30`}>
             {item.totalFiles ? formatCount(item.totalFiles) : "—"} files
             {item.totalBytes ? ` · ${formatBytes(item.totalBytes)}` : ""}
           </span>
@@ -186,7 +184,7 @@ function QueueItemRow({
       )}
 
       {item.status === "loaded" && (
-        <span className={`${mono} text-white/20`}>removing in {countdown}s…</span>
+        <span className={`mono text-white/20`}>removing in {countdown}s…</span>
       )}
     </div>
   );

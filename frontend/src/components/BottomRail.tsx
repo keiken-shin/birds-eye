@@ -1,12 +1,18 @@
 import { NavLink } from "react-router-dom";
-import { Settings } from "lucide-react";
+import {
+  House,
+  LibraryBig,
+  ListOrdered,
+  Settings,
+  Blocks,
+} from "lucide-react";
 import { QueuePopover } from "./QueuePopover";
 import { SettingsPopover } from "./SettingsPopover";
 import { useScanContext } from "../context/ScanContext";
 
 const itemBase =
-  "inline-flex min-h-[52px] min-w-[106px] items-center justify-center gap-1.5 border-r border-white/15 px-3 font-mono text-[11px] font-black uppercase text-[#9a9a94] no-underline last:border-r-0";
-const activeClass = "text-[#00d0c4] border-b border-b-[#00d0c4]";
+  "inline-flex min-h-[52px] min-w-[106px] items-center justify-center gap-1.5 border-r border-white/15 px-3 font-mono text-[11px] font-black uppercase text-[#9a9a94] no-underline last:border-r";
+const activeClass = "!text-[#00d0c4] border-b border-b-[#00d0c4]";
 
 export function BottomRail() {
   const { queueItems } = useScanContext();
@@ -21,32 +27,35 @@ export function BottomRail() {
         to="/"
         end
         className={({ isActive }) => `${itemBase}${isActive ? ` ${activeClass}` : ""}`}
+        title="Home"
       >
-        Home
+        <House size={20} />
       </NavLink>
       <NavLink
         to="/workspace"
         className={({ isActive }) => `${itemBase}${isActive ? ` ${activeClass}` : ""}`}
+        title="Workspace"
       >
-        Workspace
+        <Blocks size={20} />
       </NavLink>
       <NavLink
         to="/library"
         className={({ isActive }) => `${itemBase}${isActive ? ` ${activeClass}` : ""}`}
+        title="Library"
       >
-        Library
+        <LibraryBig size={20} />
       </NavLink>
       <QueuePopover>
-        <button className={`${itemBase} relative`} type="button">
-          Queue ▾
+        <button className={`${itemBase} cursor-pointer relative`} type="button" title="Queue">
+          <ListOrdered size={20} />
           {hasActiveScans && (
             <span className="absolute right-2 top-2 h-1.5 w-1.5 animate-pulse rounded-full bg-[#00d0c4]" />
           )}
         </button>
       </QueuePopover>
       <SettingsPopover>
-        <button className={itemBase} type="button">
-          <Settings size={15} /> Settings
+        <button className={`${itemBase} cursor-pointer`} type="button" title="Settings">
+          <Settings size={20} />
         </button>
       </SettingsPopover>
     </nav>

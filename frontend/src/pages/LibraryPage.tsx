@@ -113,7 +113,7 @@ function LibraryRow({
     ? new Date(entry.last_scanned_at * 1000).toLocaleDateString()
     : "—";
 
-  const iconBtn = "grid h-8 w-8 place-items-center border border-white/15 text-[#9a9a94] transition-colors";
+  const iconBtn = "cursor-pointer grid h-8 w-8 place-items-center border border-white/15 text-[#9a9a94] transition-colors";
 
   return (
     <div className="flex items-center justify-between gap-4 border-b border-white/7 bg-white/[0.02] px-4 py-3 last:border-b-0">
@@ -128,14 +128,14 @@ function LibraryRow({
           <>
             <span className={`${mono} text-[#ff6b6b]`}>Delete?</span>
             <button
-              className="border border-[#ff6b6b]/40 bg-[#ff6b6b]/10 px-3 py-1 font-mono text-[9px] font-black uppercase text-[#ff6b6b]"
+              className="cursor-pointer !text-xs border border-[#ff6b6b]/40 bg-[#ff6b6b]/10 px-3 py-1 font-mono text-[9px] font-black uppercase text-[#ff6b6b]"
               type="button"
               onClick={onDeleteConfirm}
             >
               Yes
             </button>
             <button
-              className="grid h-7 w-7 place-items-center border border-white/15 text-[#9a9a94] hover:text-white/60"
+              className="cursor-pointer grid h-7 w-7 place-items-center border border-white/15 text-[#9a9a94] hover:text-white/60"
               type="button"
               onClick={onDeleteCancel}
               title="Cancel"
