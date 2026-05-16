@@ -1,5 +1,5 @@
 import type React from "react";
-import { Database, FolderOpen, Pause, Play, Search, Settings, Square, Trash2 } from "lucide-react";
+import { Database, FolderOpen, Pause, Play, Square, Trash2 } from "lucide-react";
 import { formatBytes, formatCount, type ScanState } from "../domain";
 import { getProgress } from "../utils/displayUtils";
 import type { NativeIndexEntry } from "../nativeClient";
@@ -224,29 +224,6 @@ function QueueRow({
         <div className={`h-full ${fill}`} style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
       </div>
     </div>
-  );
-}
-
-export function BottomCommandRail({ openFolderPicker }: { openFolderPicker: () => void }) {
-  const item = "inline-flex min-h-[52px] min-w-[106px] items-center justify-center gap-1.5 border-r border-white/15 px-3 font-mono text-[11px] font-black uppercase text-[#9a9a94] no-underline last:border-r-0";
-  return (
-    <nav className="fixed bottom-7 left-1/2 z-20 flex max-w-[calc(100vw-28px)] -translate-x-1/2 border border-[#f4f1ea]/30 bg-[#07090d] shadow-[0_18px_70px_rgba(0,0,0,0.58)] before:pointer-events-none before:absolute before:-left-[7px] before:-top-[7px] before:h-4 before:w-4 before:border-l-2 before:border-t-2 before:border-[#f4f1ea] after:pointer-events-none after:absolute after:-bottom-[7px] after:-right-[7px] after:h-4 after:w-4 after:border-b-2 after:border-r-2 after:border-[#f4f1ea] max-sm:sticky max-sm:bottom-3 max-sm:left-2 max-sm:right-2 max-sm:mx-2 max-sm:mb-3 max-sm:overflow-x-auto max-sm:translate-x-0" aria-label="Primary commands">
-      <button className={`${item} bg-[#f4f1ea] text-[#050607]`} type="button" onClick={openFolderPicker}>
-        <FolderOpen size={16} /> New Scan
-      </button>
-      <a className={item} href="#scan-queue">
-        <Square size={14} /> Queue
-      </a>
-      <a className={item} href="#search">
-        <Search size={15} /> Search
-      </a>
-      <a className={item} href="#library">
-        <Database size={15} /> Library
-      </a>
-      <button className={`${item} cursor-not-allowed opacity-50`} type="button" disabled title="Settings polish is coming soon">
-        <Settings size={15} /> Settings
-      </button>
-    </nav>
   );
 }
 
