@@ -50,15 +50,13 @@ export function CommandPalette({
     useRegex: useRegex || undefined,
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { searchQuery, setSearchQuery, searchResults } = useSearch({
     currentIndexPath,
     nativeRuntime,
     largestFiles: scan.largestFiles,
     setRuntimeMessage: () => {},
-    ...(filters as any),
     filters,
-  } as any);
+  });
 
   const close = useCallback(() => {
     setOpen(false);
