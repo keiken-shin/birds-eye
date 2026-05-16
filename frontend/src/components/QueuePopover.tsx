@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type React from "react";
 import { useNavigate } from "react-router-dom";
+import { Pause, Play, Square } from "lucide-react";
 import { useScanContext } from "../context/ScanContext";
 import { formatBytes, formatCount } from "../domain";
 import type { QueueItem } from "../domain";
@@ -14,7 +15,6 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
   const { queueItems, loadQueueItem } = useScanContext();
   const navigate = useNavigate();
 
-  // Close on outside click
   useEffect(() => {
     function handleClick(event: MouseEvent) {
       if (
@@ -39,6 +39,14 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
     [loadQueueItem, navigate]
   );
 
+  const handleView = useCallback(
+    (id: string) => {
+      navigate(`/scan/${id}`);
+      setOpen(false);
+    },
+    [navigate]
+  );
+
   return (
     <div className="relative" ref={triggerRef}>
       <div onClick={() => setOpen((v) => !v)}>{children}</div>
@@ -61,7 +69,7 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
           )}
 
           {queueItems.map((item) => (
-            <QueueItemRow key={item.id} item={item} onLoad={handleLoad} />
+            <QueueItemRow key={item.id} item={item} onLoad={handleLoad} onView={handleView} />
           ))}
 
           <div className="border-t border-white/5 px-[14px] py-2">
@@ -76,11 +84,14 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
 function QueueItemRow({
   item,
   onLoad,
+  onView,
 }: {
   item: QueueItem;
   onLoad: (id: string) => void;
+  onView: (id: string) => void;
 }) {
   const [countdown, setCountdown] = useState(5);
+  const { pauseScan, resumeScan, cancelScan, scan } = useScanContext();
 
   useEffect(() => {
     if (item.status !== "loaded") return;
@@ -97,13 +108,19 @@ function QueueItemRow({
       ? "bg-[#b7ff5c]"
       : "bg-white/20";
 
+  const iconBtn =
+    "grid h-[22px] w-[22px] place-items-center border border-white/10 bg-black/20 text-white/30 hover:bg-white/10 hover:text-white/70";
+
+  const isScanning = item.status === "scanning" && scan.status === "scanning";
+  const isPaused = item.status === "scanning" && scan.status === "paused";
+
   return (
     <div
       className={`border-b border-white/5 px-[14px] py-[10px] transition-opacity ${
         item.status === "loaded" ? "opacity-45" : ""
       }`}
     >
-      <div className="mb-[6px] flex items-center justify-between">
+      <div className="mb-[6px] flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <div className={`h-[6px] w-[6px] shrink-0 rounded-full ${dotColor}`} />
           <span
@@ -114,15 +131,32 @@ function QueueItemRow({
             {item.rootName}
           </span>
         </div>
-        {item.status === "scanning" && (
-          <span className={`${mono} shrink-0 text-[#00d0c4]`}>scanning</span>
-        )}
-        {item.status === "done" && (
-          <span className={`${mono} shrink-0 text-[#b7ff5c]`}>done</span>
-        )}
-        {item.status === "loaded" && (
-          <span className={`${mono} shrink-0 text-white/30`}>loaded ✓</span>
-        )}
+        <div className="flex items-center gap-[4px] shrink-0">
+          {isScanning && (
+            <button className={iconBtn} type="button" onClick={pauseScan} title="Pause">
+              <Pause size={10} />
+            </button>
+          )}
+          {isPaused && (
+            <button className={iconBtn} type="button" onClick={resumeScan} title="Resume">
+              <Play size={10} />
+            </button>
+          )}
+          {(isScanning || isPaused) && (
+            <button className={`${iconBtn} hover:text-[#ff6b6b]`} type="button" onClick={cancelScan} title="Stop">
+              <Square size={10} />
+            </button>
+          )}
+          {item.status === "scanning" && (
+            <span className={`${mono} text-[#00d0c4]`}>{scan.status === "paused" ? "paused" : "scanning"}</span>
+          )}
+          {item.status === "done" && (
+            <span className={`${mono} text-[#b7ff5c]`}>done</span>
+          )}
+          {item.status === "loaded" && (
+            <span className={`${mono} text-white/30`}>loaded ✓</span>
+          )}
+        </div>
       </div>
 
       {item.status === "scanning" && (
@@ -134,19 +168,33 @@ function QueueItemRow({
         </>
       )}
 
-      {item.status === "done" && (
-        <div className="flex items-center justify-between">
-          <span className={`${mono} text-white/30`}>
-            {item.totalFiles ? formatCount(item.totalFiles) : "—"} files
-            {item.totalBytes ? ` · ${formatBytes(item.totalBytes)}` : ""}
-          </span>
-          <button
-            className="border border-[#b7ff5c]/30 bg-[#b7ff5c]/10 px-[10px] py-[3px] font-mono text-[9px] font-black uppercase tracking-[1px] text-[#b7ff5c]"
-            type="button"
-            onClick={() => onLoad(item.id)}
-          >
-            Load →
-          </button>
+      {(item.status === "scanning" || item.status === "done") && (
+        <div className="mt-[6px] flex items-center justify-between">
+          {item.status === "done" && (
+            <span className={`${mono} text-white/30`}>
+              {item.totalFiles ? formatCount(item.totalFiles) : "—"} files
+              {item.totalBytes ? ` · ${formatBytes(item.totalBytes)}` : ""}
+            </span>
+          )}
+          {item.status === "scanning" && <span />}
+          <div className="flex items-center gap-[6px]">
+            {item.status === "done" && (
+              <button
+                className="border border-[#b7ff5c]/30 bg-[#b7ff5c]/10 px-[10px] py-[3px] font-mono text-[9px] font-black uppercase tracking-[1px] text-[#b7ff5c]"
+                type="button"
+                onClick={() => onLoad(item.id)}
+              >
+                Load →
+              </button>
+            )}
+            <button
+              className="border border-white/10 bg-white/5 px-[10px] py-[3px] font-mono text-[9px] font-black uppercase tracking-[1px] text-white/40 hover:text-white/70"
+              type="button"
+              onClick={() => onView(item.id)}
+            >
+              View →
+            </button>
+          </div>
         </div>
       )}
 
