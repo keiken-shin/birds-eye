@@ -61,7 +61,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
       activeQueueIdRef.current = id;
       setQueueItems((items) => [
         ...items,
-        { id, rootName: scanApi.scan.rootName, status: "scanning", progress: 0, indexPath: "" },
+        { id, rootName: scanApi.scan.rootName, status: "scanning", progress: 0, indexPath: "", logs: [] },
       ]);
     }
 

@@ -203,6 +203,12 @@ export type SearchFilters = {
 
 export type QueueItemStatus = "scanning" | "done" | "loaded";
 
+export type ScanLogEntry = {
+  ts: number;
+  level: "info" | "warn" | "error";
+  message: string;
+};
+
 export type QueueItem = {
   id: string;
   rootName: string;
@@ -211,6 +217,8 @@ export type QueueItem = {
   indexPath: string;
   totalFiles?: number;
   totalBytes?: number;
+  foldersScanned?: number;
   elapsedMs?: number;
   loadedAt?: number;
+  logs: ScanLogEntry[];
 };
