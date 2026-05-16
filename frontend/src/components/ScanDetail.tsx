@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Pause, Square, Trash2, ChevronRight } from "lucide-react";
+import { Pause, Play, Square, Trash2, ChevronRight } from "lucide-react";
 import { useScanContext } from "../context/ScanContext";
 import { ScanMetrics } from "./ScanMetrics";
 import { ScanLog } from "./ScanLog";
@@ -13,7 +13,7 @@ const iconBtn =
   "grid h-[30px] w-[30px] place-items-center border border-white/15 bg-black/20 text-[#f4f1ea]/60 hover:bg-white/10 hover:text-[#f4f1ea]";
 
 export function ScanDetail({ id }: ScanDetailProps) {
-  const { queueItems, scan, activeQueueId, pauseScan, cancelScan, deleteQueueItem } = useScanContext();
+  const { queueItems, scan, activeQueueId, pauseScan, resumeScan, cancelScan, deleteQueueItem } = useScanContext();
   const navigate = useNavigate();
 
   const item = queueItems.find((q) => q.id === id);
@@ -51,10 +51,20 @@ export function ScanDetail({ id }: ScanDetailProps) {
           <span className={`font-mono text-[10px] uppercase shrink-0 ${statusColor}`}>{item.status}</span>
         </div>
         <div className="flex items-center gap-[6px] shrink-0">
-          {item.status === "scanning" && (
+          {isActive && scan.status === "scanning" && (
             <>
               <button className={iconBtn} type="button" onClick={pauseScan} title="Pause scan">
                 <Pause size={13} />
+              </button>
+              <button className={`${iconBtn} hover:text-[#ff6b6b]`} type="button" onClick={cancelScan} title="Stop scan">
+                <Square size={13} />
+              </button>
+            </>
+          )}
+          {isActive && scan.status === "paused" && (
+            <>
+              <button className={iconBtn} type="button" onClick={resumeScan} title="Resume scan">
+                <Play size={13} />
               </button>
               <button className={`${iconBtn} hover:text-[#ff6b6b]`} type="button" onClick={cancelScan} title="Stop scan">
                 <Square size={13} />
