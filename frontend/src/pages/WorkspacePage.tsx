@@ -1,7 +1,7 @@
 import { useMemo, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useScanContext } from "../context/ScanContext";
-import { StorageReadout } from "../components/LandingPage";
+import { StorageReadout } from "../components/StorageReadout";
 import { MetricGrid } from "../components/MetricGrid";
 import { FilterBar } from "../components/FilterBar";
 import { AnalysisSection } from "../components/AnalysisSection";
