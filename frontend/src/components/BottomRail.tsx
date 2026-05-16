@@ -36,15 +36,6 @@ export function BottomRail() {
       >
         Library
       </NavLink>
-      <NavLink
-        to="/scan"
-        className={({ isActive }) => `${itemBase} relative${isActive ? ` ${activeClass}` : ""}`}
-      >
-        Scan
-        {hasActiveScans && (
-          <span className="absolute right-2 top-2 h-1.5 w-1.5 animate-pulse rounded-full bg-[#00d0c4]" />
-        )}
-      </NavLink>
       <QueuePopover>
         <button className={`${itemBase} relative`} type="button">
           Queue ▾

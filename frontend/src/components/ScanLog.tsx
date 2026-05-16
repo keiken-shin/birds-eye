@@ -7,14 +7,13 @@ interface ScanLogProps {
 }
 
 export function ScanLog({ entries, isActive }: ScanLogProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
   useEffect(() => {
-    if (autoScroll && bottomRef.current) {
-      bottomRef.current.scrollIntoView?.({ behavior: "smooth" });
-    }
+    if (!autoScroll) return;
+    const el = containerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [entries, autoScroll]);
 
   function handleScroll() {
@@ -39,7 +38,8 @@ export function ScanLog({ entries, isActive }: ScanLogProps) {
             type="button"
             onClick={() => {
               setAutoScroll(true);
-              bottomRef.current?.scrollIntoView?.({ behavior: "smooth" });
+              const el = containerRef.current;
+              if (el) el.scrollTop = el.scrollHeight;
             }}
           >
             ↓ resume scroll
@@ -59,7 +59,6 @@ export function ScanLog({ entries, isActive }: ScanLogProps) {
             <LogLine key={`${entry.ts}-${i}`} entry={entry} />
           ))
         )}
-        <div ref={bottomRef} />
       </div>
     </div>
   );

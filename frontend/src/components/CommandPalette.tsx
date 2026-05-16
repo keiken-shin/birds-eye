@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Search, X } from "lucide-react";
+import { Eye, FolderOpen, Search, X } from "lucide-react";
 import { useSearch } from "../hooks/useSearch";
 import { formatBytes, type CategoryKey, type ScanState, type SearchFilters } from "../domain";
 import { categories } from "../domain";
@@ -94,7 +94,6 @@ export function CommandPalette({
       if (event.key === "Enter") {
         const focused = searchResults[focusedIndex];
         if (focused) {
-          // trigger preview programmatically
           void (async () => {
             try {
               const { invoke } = await import("@tauri-apps/api/core");
@@ -180,7 +179,7 @@ export function CommandPalette({
 
         {/* Filters row */}
         {filtersOpen && (
-          <div className="border-b border-white/10 px-4 py-3 space-y-3">
+          <div className="border-b border-white/10 px-4 py-3 space-y-2.5">
             {/* Kind pills */}
             <div className="flex flex-wrap gap-1.5">
               {ALL_KINDS.map((kind) => (
@@ -198,25 +197,25 @@ export function CommandPalette({
                 </button>
               ))}
             </div>
-            {/* Extension + size */}
-            <div className="flex flex-wrap gap-3">
+            {/* Extension + size range — uniform height */}
+            <div className="flex flex-wrap items-center gap-2">
               <input
-                className="w-40 border border-white/10 bg-transparent px-2 py-1 font-mono text-[10px] text-[#f4f1ea] placeholder-white/20 outline-none"
+                className="h-7 w-36 border border-white/10 bg-transparent px-2 font-mono text-[10px] text-[#f4f1ea] placeholder-white/20 outline-none"
                 placeholder=".tsx .rs .pdf"
                 value={extInput}
                 onChange={(e) => setExtInput(e.target.value)}
               />
               <div className="flex items-center gap-1">
                 <input
-                  className="w-16 border border-white/10 bg-transparent px-2 py-1 font-mono text-[10px] text-[#f4f1ea] placeholder-white/20 outline-none"
+                  className="h-7 w-14 border border-white/10 bg-transparent px-2 font-mono text-[10px] text-[#f4f1ea] placeholder-white/20 outline-none"
                   placeholder="min"
                   value={minSizeVal}
                   onChange={(e) => setMinSizeVal(e.target.value)}
                 />
                 <SizeUnitSelect value={minSizeUnit} onChange={setMinSizeUnit} />
-                <span className={`${mono} text-white/20`}>→</span>
+                <span className="px-1 font-mono text-[10px] text-white/20">→</span>
                 <input
-                  className="w-16 border border-white/10 bg-transparent px-2 py-1 font-mono text-[10px] text-[#f4f1ea] placeholder-white/20 outline-none"
+                  className="h-7 w-14 border border-white/10 bg-transparent px-2 font-mono text-[10px] text-[#f4f1ea] placeholder-white/20 outline-none"
                   placeholder="max"
                   value={maxSizeVal}
                   onChange={(e) => setMaxSizeVal(e.target.value)}
@@ -224,7 +223,7 @@ export function CommandPalette({
                 <SizeUnitSelect value={maxSizeUnit} onChange={setMaxSizeUnit} />
               </div>
               <button
-                className={`${mono} border px-2 py-1 ${
+                className={`h-7 border px-2 font-mono text-[10px] ${
                   useRegex
                     ? "border-[#b7ff5c]/40 bg-[#b7ff5c]/10 text-[#b7ff5c]"
                     : "border-white/10 text-white/30"
@@ -259,9 +258,23 @@ export function CommandPalette({
                 <p className="truncate text-[12px] font-bold text-[#f4f1ea]">{result.path}</p>
                 <p className={`${mono} text-[#9a9a94]`}>{formatBytes(result.size)}</p>
               </div>
-              <div className="flex shrink-0 gap-1.5">
-                <ResultAction label="Preview" path={result.path} action="preview" />
-                <ResultAction label="Reveal" path={result.path} action="reveal" />
+              <div className="flex shrink-0 gap-1.5 ml-3">
+                <button
+                  className="grid h-7 w-7 place-items-center border border-white/10 text-white/20 cursor-not-allowed"
+                  type="button"
+                  disabled
+                  title="Preview (coming soon)"
+                >
+                  <Eye size={12} />
+                </button>
+                <button
+                  className="grid h-7 w-7 place-items-center border border-white/10 text-white/20 cursor-not-allowed"
+                  type="button"
+                  disabled
+                  title="Reveal in folder (coming soon)"
+                >
+                  <FolderOpen size={12} />
+                </button>
               </div>
             </div>
           ))}
@@ -269,7 +282,7 @@ export function CommandPalette({
 
         <div className="border-t border-white/7 px-4 py-2">
           <span className={`${mono} text-white/15`}>
-            ↑↓ navigate · Enter preview · Esc close
+            ↑↓ navigate · Enter open · Esc close
           </span>
         </div>
       </div>
@@ -286,7 +299,7 @@ function SizeUnitSelect({
 }) {
   return (
     <select
-      className="border border-white/10 bg-[#07090d] px-1 py-1 font-mono text-[10px] text-[#9a9a94] outline-none"
+      className="h-7 border border-white/10 bg-[#07090d] px-1 font-mono text-[10px] text-[#9a9a94] outline-none"
       value={value}
       onChange={(e) => onChange(e.target.value as SizeUnit)}
     >
@@ -294,40 +307,5 @@ function SizeUnitSelect({
       <option>MB</option>
       <option>GB</option>
     </select>
-  );
-}
-
-function ResultAction({
-  label,
-  path,
-  action,
-}: {
-  label: string;
-  path: string;
-  action: "preview" | "reveal";
-}) {
-  async function handleClick() {
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      if (action === "preview") {
-        await invoke("plugin:opener|open_path", { path });
-      } else {
-        const folder =
-          path.substring(0, Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/")) + 1) || path;
-        await invoke("plugin:opener|reveal_item_in_dir", { path: folder });
-      }
-    } catch {
-      // Degrades silently in browser mode or before opener plugin is installed
-    }
-  }
-
-  return (
-    <button
-      className="border border-white/10 px-2 py-0.5 font-mono text-[9px] font-black uppercase text-white/30 hover:border-white/25 hover:text-white/60"
-      type="button"
-      onClick={handleClick}
-    >
-      {label}
-    </button>
   );
 }

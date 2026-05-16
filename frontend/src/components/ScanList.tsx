@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { Trash2 } from "lucide-react";
 import { useScanContext } from "../context/ScanContext";
 import type { QueueItem } from "../domain";
 
@@ -39,6 +40,7 @@ export function ScanList({ selectedId }: ScanListProps) {
 }
 
 function ScanListItem({ item, isSelected }: { item: QueueItem; isSelected: boolean }) {
+  const { deleteQueueItem } = useScanContext();
   const dotColor =
     item.status === "scanning"
       ? "bg-[#00d0c4] animate-pulse shadow-[0_0_6px_#00d0c4]"
@@ -53,7 +55,7 @@ function ScanListItem({ item, isSelected }: { item: QueueItem; isSelected: boole
     : null;
 
   return (
-    <li>
+    <li className="group relative">
       <Link
         to={`/scan/${item.id}`}
         className={`flex items-start gap-[10px] border-b border-white/5 px-[16px] py-[12px] transition-colors hover:bg-white/[0.04] ${
@@ -76,6 +78,19 @@ function ScanListItem({ item, isSelected }: { item: QueueItem; isSelected: boole
           )}
         </div>
       </Link>
+      {(item.status === "done" || item.status === "loaded") && (
+        <button
+          className="absolute right-[10px] top-1/2 -translate-y-1/2 grid h-[22px] w-[22px] place-items-center text-white/0 transition-colors group-hover:text-[#ff6b6b]/40 hover:!text-[#ff6b6b]"
+          type="button"
+          title="Delete scan"
+          onClick={(e) => {
+            e.preventDefault();
+            deleteQueueItem(item.id);
+          }}
+        >
+          <Trash2 size={12} />
+        </button>
+      )}
     </li>
   );
 }
