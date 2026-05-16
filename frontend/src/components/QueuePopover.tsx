@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type React from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Pause, Play, Square } from "lucide-react";
 import { useScanContext } from "../context/ScanContext";
 import { formatBytes, formatCount } from "../domain";
@@ -39,14 +39,6 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
     [loadQueueItem, navigate]
   );
 
-  const handleView = useCallback(
-    (id: string) => {
-      navigate(`/scan/${id}`);
-      setOpen(false);
-    },
-    [navigate]
-  );
-
   return (
     <div className="relative" ref={triggerRef}>
       <div onClick={() => setOpen((v) => !v)}>{children}</div>
@@ -59,7 +51,18 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
         >
           <div className="flex items-center justify-between border-b border-white/7 px-[14px] py-[10px]">
             <span className={`${mono} tracking-[2px] text-white/50`}>Scan Queue</span>
-            <span className={`${mono} text-white/20`}>{queueItems.length} items</span>
+            <div className="flex items-center gap-3">
+              {queueItems.length > 0 && (
+                <Link
+                  to="/scan"
+                  onClick={() => setOpen(false)}
+                  className={`${mono} text-[#00d0c4]/60 hover:text-[#00d0c4] no-underline`}
+                >
+                  View All →
+                </Link>
+              )}
+              <span className={`${mono} text-white/20`}>{queueItems.length} items</span>
+            </div>
           </div>
 
           {queueItems.length === 0 && (
@@ -69,7 +72,7 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
           )}
 
           {queueItems.map((item) => (
-            <QueueItemRow key={item.id} item={item} onLoad={handleLoad} onView={handleView} />
+            <QueueItemRow key={item.id} item={item} onLoad={handleLoad} />
           ))}
 
           <div className="border-t border-white/5 px-[14px] py-2">
@@ -84,11 +87,9 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
 function QueueItemRow({
   item,
   onLoad,
-  onView,
 }: {
   item: QueueItem;
   onLoad: (id: string) => void;
-  onView: (id: string) => void;
 }) {
   const [countdown, setCountdown] = useState(5);
   const { pauseScan, resumeScan, cancelScan, scan } = useScanContext();
@@ -168,33 +169,19 @@ function QueueItemRow({
         </>
       )}
 
-      {(item.status === "scanning" || item.status === "done") && (
+      {item.status === "done" && (
         <div className="mt-[6px] flex items-center justify-between">
-          {item.status === "done" && (
-            <span className={`${mono} text-white/30`}>
-              {item.totalFiles ? formatCount(item.totalFiles) : "—"} files
-              {item.totalBytes ? ` · ${formatBytes(item.totalBytes)}` : ""}
-            </span>
-          )}
-          {item.status === "scanning" && <span />}
-          <div className="flex items-center gap-[6px]">
-            {item.status === "done" && (
-              <button
-                className="border border-[#b7ff5c]/30 bg-[#b7ff5c]/10 px-[10px] py-[3px] font-mono text-[9px] font-black uppercase tracking-[1px] text-[#b7ff5c]"
-                type="button"
-                onClick={() => onLoad(item.id)}
-              >
-                Load →
-              </button>
-            )}
-            <button
-              className="border border-white/10 bg-white/5 px-[10px] py-[3px] font-mono text-[9px] font-black uppercase tracking-[1px] text-white/40 hover:text-white/70"
-              type="button"
-              onClick={() => onView(item.id)}
-            >
-              View →
-            </button>
-          </div>
+          <span className={`${mono} text-white/30`}>
+            {item.totalFiles ? formatCount(item.totalFiles) : "—"} files
+            {item.totalBytes ? ` · ${formatBytes(item.totalBytes)}` : ""}
+          </span>
+          <button
+            className="border border-[#b7ff5c]/30 bg-[#b7ff5c]/10 px-[10px] py-[3px] font-mono text-[9px] font-black uppercase tracking-[1px] text-[#b7ff5c]"
+            type="button"
+            onClick={() => onLoad(item.id)}
+          >
+            Load →
+          </button>
         </div>
       )}
 

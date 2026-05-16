@@ -73,7 +73,7 @@ export function ScanDetail({ id }: ScanDetailProps) {
           )}
           {(item.status === "done" || item.status === "loaded") && (
             <button
-              className={`${iconBtn} hover:text-[#ff6b6b]`}
+              className="flex items-center gap-1.5 border border-[#ff6b6b]/20 px-2 py-1 font-mono text-[9px] font-black uppercase tracking-[1px] text-[#ff6b6b]/50 hover:border-[#ff6b6b]/50 hover:text-[#ff6b6b]"
               type="button"
               onClick={() => {
                 deleteQueueItem(id);
@@ -81,7 +81,8 @@ export function ScanDetail({ id }: ScanDetailProps) {
               }}
               title="Delete scan record"
             >
-              <Trash2 size={13} />
+              <Trash2 size={10} />
+              Delete
             </button>
           )}
           <button

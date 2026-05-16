@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useMemo, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useScanContext } from "../context/ScanContext";
 import { StorageReadout } from "../components/LandingPage";
@@ -10,29 +10,55 @@ import { DetailGrid } from "../components/DetailGrid";
 import { DuplicatesSection } from "../components/DuplicatesSection";
 import { CommandPalette } from "../components/CommandPalette";
 import { useDuplicates } from "../hooks/useDuplicates";
+import { parentPath, isDescendantPath } from "../utils/pathUtils";
 
 export function WorkspacePage() {
   const {
-    scan,
+    workspaceScan,
+    workspaceIndexPath,
     filter,
     setFilter,
     focusedFolder,
     setFocusedFolder,
-    filteredFolders,
-    sortedFolders,
-    currentIndexPath,
     nativeRuntime,
     setRuntimeMessage,
   } = useScanContext();
 
   const { duplicateFiles, selectedDuplicateGroup, selectDuplicateCandidate, clearDuplicates } =
-    useDuplicates({ currentIndexPath, setRuntimeMessage });
+    useDuplicates({ currentIndexPath: workspaceIndexPath, setRuntimeMessage });
 
   useEffect(() => {
-    if (currentIndexPath === null) clearDuplicates();
-  }, [currentIndexPath, clearDuplicates]);
+    if (workspaceIndexPath === null) clearDuplicates();
+  }, [workspaceIndexPath, clearDuplicates]);
 
-  if (scan.status === "idle" || !currentIndexPath) {
+  // Derive sorted/filtered folders from the frozen workspace snapshot
+  const workspaceSortedFolders = useMemo(() => {
+    if (!workspaceScan) return [];
+    return [...workspaceScan.folders].sort((a, b) => b.bytes - a.bytes);
+  }, [workspaceScan]);
+
+  const workspaceFilteredFolders = useMemo(() => {
+    if (!workspaceScan) return [];
+    const categoryFolders =
+      filter === "all"
+        ? workspaceScan.folders.map((folder) => ({ ...folder, displayBytes: folder.bytes }))
+        : workspaceScan.folders
+            .filter((folder) => folder.categories[filter] > 0)
+            .map((folder) => ({ ...folder, displayBytes: folder.categories[filter] }));
+
+    if (!focusedFolder) {
+      return categoryFolders.sort((a, b) => b.displayBytes - a.displayBytes).slice(0, 48);
+    }
+
+    const childFolders = categoryFolders.filter((f) => parentPath(f.path) === focusedFolder);
+    const descendantFolders = categoryFolders.filter(
+      (f) => f.path !== focusedFolder && isDescendantPath(f.path, focusedFolder)
+    );
+    const focused = childFolders.length > 0 ? childFolders : descendantFolders;
+    return focused.sort((a, b) => b.displayBytes - a.displayBytes).slice(0, 48);
+  }, [filter, focusedFolder, workspaceScan]);
+
+  if (!workspaceScan || !workspaceIndexPath) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 pb-32">
         <p className="font-mono text-[11px] uppercase tracking-[2px] text-white/30">No Scan Loaded</p>
@@ -59,7 +85,7 @@ export function WorkspacePage() {
 
   return (
     <>
-      <CommandPalette currentIndexPath={currentIndexPath} nativeRuntime={nativeRuntime} scan={scan} />
+      <CommandPalette currentIndexPath={workspaceIndexPath} nativeRuntime={nativeRuntime} scan={workspaceScan} />
       <section className="relative z-[1] mx-auto max-w-[1440px] min-w-0 px-[42px] pb-[118px] max-sm:px-4 max-sm:pb-28">
         <header className="mb-[18px] grid gap-2 border-t border-[#f4f1ea]/20 pt-5">
           <p className="m-0 text-[13px] font-bold uppercase text-[#00d0c4]">Workspace / storage intelligence</p>
@@ -71,19 +97,19 @@ export function WorkspacePage() {
             <kbd className="border border-white/15 px-1 font-mono text-[10px] text-white/40">Ctrl+K</kbd> to search files.
           </span>
         </header>
-        <StorageReadout scan={scan} />
-        <MetricGrid scan={scan} />
+        <StorageReadout scan={workspaceScan} />
+        <MetricGrid scan={workspaceScan} />
         <FilterBar filter={filter} setFilter={setFilter} />
         <AnalysisSection
-          filteredFolders={filteredFolders}
+          filteredFolders={workspaceFilteredFolders}
           focusedFolder={focusedFolder}
           setFocusedFolder={setFocusedFolder}
-          scan={scan}
+          scan={workspaceScan}
         />
-        <FoldersTable sortedFolders={sortedFolders} />
-        <DetailGrid largestFiles={scan.largestFiles} extensions={scan.extensions} />
+        <FoldersTable sortedFolders={workspaceSortedFolders} />
+        <DetailGrid largestFiles={workspaceScan.largestFiles} extensions={workspaceScan.extensions} />
         <DuplicatesSection
-          duplicateCandidates={scan.duplicateCandidates}
+          duplicateCandidates={workspaceScan.duplicateCandidates}
           selectedDuplicateGroup={selectedDuplicateGroup}
           selectDuplicateCandidate={selectDuplicateCandidate}
           duplicateFiles={duplicateFiles}

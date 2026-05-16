@@ -13,6 +13,8 @@ type ScanContextValue = {
   savedIndexes: NativeIndexEntry[];
   refreshSavedIndexes: () => Promise<void>;
   scan: ScanState;
+  workspaceScan: ScanState | null;
+  workspaceIndexPath: string | null;
   filter: CategoryKey | "all";
   setFilter: React.Dispatch<React.SetStateAction<CategoryKey | "all">>;
   focusedFolder: string | null;

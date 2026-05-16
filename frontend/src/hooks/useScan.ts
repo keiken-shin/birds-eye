@@ -42,6 +42,8 @@ export function useScan({
   refreshSavedIndexes: () => Promise<void>;
 }): {
   scan: ScanState;
+  workspaceScan: ScanState | null;
+  workspaceIndexPath: string | null;
   filter: CategoryKey | "all";
   setFilter: React.Dispatch<React.SetStateAction<CategoryKey | "all">>;
   focusedFolder: string | null;
@@ -65,6 +67,10 @@ export function useScan({
   const isWaitingForJobId = useRef(false);
   const nativeEventStateRef = useRef(new Map<number, NativeEventState>());
   const [scan, setScan] = useState<ScanState>(initialScanState);
+  const scanRef = useRef(scan);
+  scanRef.current = scan;
+  const [workspaceScan, setWorkspaceScan] = useState<ScanState | null>(null);
+  const [workspaceIndexPath, setWorkspaceIndexPath] = useState<string | null>(null);
   const [filter, setFilter] = useState<CategoryKey | "all">("all");
   const [currentIndexPath, setCurrentIndexPath] = useState<string | null>(null);
   const [focusedFolder, setFocusedFolder] = useState<string | null>(null);
@@ -315,7 +321,8 @@ export function useScan({
 
   const openSavedIndex = useCallback(async (entry: NativeIndexEntry) => {
     const overview = await queryNativeIndex(entry.index_path, 1000);
-    setScan((current) => ({
+    const current = scanRef.current;
+    const loadedState: ScanState = {
       ...mergeNativeOverview(current.status === "idle" ? initialScanState : current, overview),
       status: "complete",
       rootName: entry.root_path ? lastSegment(entry.root_path) : "Saved index",
@@ -324,7 +331,10 @@ export function useScan({
       processedBytes: entry.bytes_scanned,
       totalBytes: entry.bytes_scanned,
       currentPath: entry.root_path ?? entry.index_path,
-    }));
+    };
+    setScan(loadedState);
+    setWorkspaceScan(loadedState);
+    setWorkspaceIndexPath(entry.index_path);
     setCurrentIndexPath(entry.index_path);
     setRuntimeMessage("Saved index loaded");
   }, [setRuntimeMessage]);
@@ -382,6 +392,8 @@ export function useScan({
 
   return {
     scan,
+    workspaceScan,
+    workspaceIndexPath,
     filter,
     setFilter,
     focusedFolder,
