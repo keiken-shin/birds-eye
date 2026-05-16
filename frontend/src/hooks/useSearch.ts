@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { searchNativeIndex, type NativeSearchResult } from "../nativeClient";
-import { type ScanState } from "../domain";
+import { type ScanState, type SearchFilters } from "../domain";
 import { mediaKindFromCategory } from "../utils/scanUtils";
 
 export function useSearch({
@@ -8,11 +8,13 @@ export function useSearch({
   nativeRuntime,
   largestFiles,
   setRuntimeMessage,
+  filters,
 }: {
   currentIndexPath: string | null;
   nativeRuntime: boolean;
   largestFiles: ScanState["largestFiles"];
   setRuntimeMessage: React.Dispatch<React.SetStateAction<string>>;
+  filters?: SearchFilters;
 }): {
   searchQuery: string;
   setSearchQuery: React.Dispatch<React.SetStateAction<string>>;
@@ -20,6 +22,13 @@ export function useSearch({
 } {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<NativeSearchResult[]>([]);
+  // Use refs for unstable callback/object props to avoid infinite re-render loops when
+  // callers pass new references on each render (e.g. inline arrow functions or object literals).
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
+  const filtersKey = JSON.stringify(filters);
+  const setRuntimeMessageRef = useRef(setRuntimeMessage);
+  setRuntimeMessageRef.current = setRuntimeMessage;
 
   useEffect(() => {
     const trimmedQuery = searchQuery.trim();
@@ -45,16 +54,17 @@ export function useSearch({
     }
 
     const handle = window.setTimeout(() => {
-      void searchNativeIndex(currentIndexPath, trimmedQuery, 24)
+      void searchNativeIndex(currentIndexPath, trimmedQuery, 24, filtersRef.current)
         .then(setSearchResults)
         .catch((error) => {
-          setRuntimeMessage(error instanceof Error ? error.message : "Search failed");
+          setRuntimeMessageRef.current(error instanceof Error ? error.message : "Search failed");
           setSearchResults([]);
         });
     }, 180);
 
     return () => window.clearTimeout(handle);
-  }, [currentIndexPath, nativeRuntime, largestFiles, searchQuery, setRuntimeMessage]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndexPath, nativeRuntime, largestFiles, searchQuery, filtersKey]);
 
   return { searchQuery, setSearchQuery, searchResults };
 }

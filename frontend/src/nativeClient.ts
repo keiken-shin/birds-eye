@@ -103,12 +103,28 @@ export async function queryNativeIndex(indexPath: string, limit: number) {
   });
 }
 
-export async function searchNativeIndex(indexPath: string, query: string, limit: number) {
+export async function searchNativeIndex(
+  indexPath: string,
+  query: string,
+  limit: number,
+  filters?: {
+    kinds?: string[];
+    extensions?: string[];
+    minBytes?: number;
+    maxBytes?: number;
+    useRegex?: boolean;
+  }
+) {
   return invoke<NativeSearchResult[]>("search_files", {
     request: {
       index_path: indexPath,
       query,
       limit,
+      kinds: filters?.kinds ?? null,
+      extensions: filters?.extensions ?? null,
+      min_bytes: filters?.minBytes ?? null,
+      max_bytes: filters?.maxBytes ?? null,
+      use_regex: filters?.useRegex ?? null,
     },
   });
 }
