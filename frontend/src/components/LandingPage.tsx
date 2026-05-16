@@ -1,4 +1,5 @@
 import type React from "react";
+import { Link } from "react-router-dom";
 import { Database, FolderOpen, Pause, Play, Square, Trash2 } from "lucide-react";
 import { formatBytes, formatCount, type ScanState } from "../domain";
 import { getProgress } from "../utils/displayUtils";
@@ -97,9 +98,9 @@ export function LandingPage({
             <button className={primaryButton} type="button" onClick={openFolderPicker}>
               <FolderOpen size={18} /> Start Local Scan
             </button>
-            <a className={outlineButton} href="#library">
+            <Link to="/library" className={outlineButton}>
               <Database size={17} /> Open Library
-            </a>
+            </Link>
             {scan.status === "scanning" && (
               <button className={iconButton} type="button" onClick={pauseScan} title="Pause scan">
                 <Pause size={18} />

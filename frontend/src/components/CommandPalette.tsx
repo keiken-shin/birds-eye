@@ -91,10 +91,24 @@ export function CommandPalette({
         event.preventDefault();
         setFocusedIndex((i) => Math.max(i - 1, 0));
       }
+      if (event.key === "Enter") {
+        const focused = searchResults[focusedIndex];
+        if (focused) {
+          // trigger preview programmatically
+          void (async () => {
+            try {
+              const { invoke } = await import("@tauri-apps/api/core");
+              await invoke("plugin:opener|open_path", { path: focused.path });
+            } catch {
+              // silently degrade
+            }
+          })();
+        }
+      }
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [open, close, searchResults.length]);
+  }, [open, close, searchResults, focusedIndex]);
 
   useEffect(() => {
     if (open) {
