@@ -28,6 +28,16 @@ pub struct SearchFilesRequest {
     pub index_path: PathBuf,
     pub query: String,
     pub limit: usize,
+    #[serde(default)]
+    pub extensions: Option<Vec<String>>,
+    #[serde(default)]
+    pub kinds: Option<Vec<String>>,
+    #[serde(default)]
+    pub min_bytes: Option<u64>,
+    #[serde(default)]
+    pub max_bytes: Option<u64>,
+    #[serde(default)]
+    pub use_regex: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -223,7 +233,15 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
 pub fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultDto>, String> {
     let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
     let results = writer
-        .search_files(&request.query, request.limit)
+        .search_files_filtered(
+            &request.query,
+            request.limit,
+            request.extensions.as_deref(),
+            request.kinds.as_deref(),
+            request.min_bytes,
+            request.max_bytes,
+            request.use_regex.unwrap_or(false),
+        )
         .map_err(|error| format!("{error:?}"))?
         .into_iter()
         .map(|file| FileSearchResultDto {
@@ -350,6 +368,11 @@ mod tests {
             index_path,
             query: "report".to_owned(),
             limit: 10,
+            extensions: None,
+            kinds: None,
+            min_bytes: None,
+            max_bytes: None,
+            use_regex: None,
         })
         .expect("search command failed");
 
@@ -396,6 +419,93 @@ mod tests {
         .expect("duplicate group files command failed");
 
         assert_eq!(files.len(), 2);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn search_files_with_extension_filter() {
+        let root = test_root("search-ext-filter");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("create dirs");
+        write_file(&root.join("data").join("report.pdf"), &[1; 48]);
+        write_file(&root.join("data").join("video.mp4"), &[2; 64]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+        }).expect("scan failed");
+
+        let results = search_files(SearchFilesRequest {
+            index_path: index_path.clone(),
+            query: String::new(),
+            limit: 10,
+            extensions: Some(vec!["pdf".to_owned()]),
+            kinds: None,
+            min_bytes: None,
+            max_bytes: None,
+            use_regex: None,
+        }).expect("search failed");
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].name.ends_with(".pdf"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn search_files_with_size_filter() {
+        let root = test_root("search-size-filter");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("create dirs");
+        write_file(&root.join("data").join("small.txt"), &[1; 10]);
+        write_file(&root.join("data").join("large.txt"), &[2; 200]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+        }).expect("scan failed");
+
+        let results = search_files(SearchFilesRequest {
+            index_path,
+            query: String::new(),
+            limit: 10,
+            extensions: None,
+            kinds: None,
+            min_bytes: Some(100),
+            max_bytes: None,
+            use_regex: None,
+        }).expect("search failed");
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].name.contains("large"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn search_files_with_regex_query() {
+        let root = test_root("search-regex");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("create dirs");
+        write_file(&root.join("data").join("report_2024.pdf"), &[1; 48]);
+        write_file(&root.join("data").join("notes.txt"), &[2; 24]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+        }).expect("scan failed");
+
+        let results = search_files(SearchFilesRequest {
+            index_path,
+            query: r"report_\d{4}".to_owned(),
+            limit: 10,
+            extensions: None,
+            kinds: None,
+            min_bytes: None,
+            max_bytes: None,
+            use_regex: Some(true),
+        }).expect("search failed");
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].name.starts_with("report_"));
         cleanup(&root);
     }
 
