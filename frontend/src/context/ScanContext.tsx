@@ -30,7 +30,11 @@ type ScanContextValue = {
   openSavedIndex: (entry: NativeIndexEntry) => Promise<void>;
   rescanSavedIndex: (entry: NativeIndexEntry) => Promise<void>;
   queueItems: QueueItem[];
+  activeQueueId: string | null;
   loadQueueItem: (id: string) => Promise<void>;
+  deleteQueueItem: (id: string) => void;
+  theme: "dark" | "light" | "system";
+  setTheme: React.Dispatch<React.SetStateAction<"dark" | "light" | "system">>;
 };
 
 const ScanContext = createContext<ScanContextValue | null>(null);
@@ -47,8 +51,10 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
   const scanApi = useScan({ nativeRuntime, setRuntimeMessage, refreshSavedIndexes });
 
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
+  const [theme, setTheme] = useState<"dark" | "light" | "system">("dark");
   const activeQueueIdRef = useRef<string | null>(null);
   const prevStatusRef = useRef(scanApi.scan.status);
+  const prevFolderRef = useRef<string>("");
 
   // Add queue item when scan starts, update on progress, resolve on complete/cancel
   useEffect(() => {
@@ -59,15 +65,24 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     if (prev === "idle" && current === "scanning") {
       const id = crypto.randomUUID();
       activeQueueIdRef.current = id;
+      prevFolderRef.current = "";
       setQueueItems((items) => [
         ...items,
-        { id, rootName: scanApi.scan.rootName, status: "scanning", progress: 0, indexPath: "", logs: [] },
+        {
+          id,
+          rootName: scanApi.scan.rootName,
+          status: "scanning",
+          progress: 0,
+          indexPath: "",
+          logs: [{ ts: Date.now(), level: "info" as const, message: `scan started: ${scanApi.scan.rootName}` }],
+        },
       ]);
     }
 
     if (prev !== "complete" && current === "complete" && activeQueueIdRef.current && scanApi.currentIndexPath) {
       const id = activeQueueIdRef.current;
       activeQueueIdRef.current = null;
+      const summary = `scan complete — ${scanApi.scan.totalFiles.toLocaleString()} files, ${scanApi.scan.totalBytes > 0 ? `${(scanApi.scan.totalBytes / 1073741824).toFixed(2)} GB` : "0 B"}`;
       setQueueItems((items) =>
         items.map((item) =>
           item.id === id
@@ -78,7 +93,9 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
                 indexPath: scanApi.currentIndexPath!,
                 totalFiles: scanApi.scan.totalFiles,
                 totalBytes: scanApi.scan.totalBytes,
+                foldersScanned: scanApi.scan.folders.length,
                 elapsedMs: scanApi.scan.elapsedMs,
+                logs: [...item.logs, { ts: Date.now(), level: "info" as const, message: summary }].slice(-2000),
               }
             : item
         )
@@ -88,11 +105,24 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     if (current === "cancelled" && activeQueueIdRef.current) {
       const id = activeQueueIdRef.current;
       activeQueueIdRef.current = null;
-      setQueueItems((items) => items.filter((item) => item.id !== id));
+      setQueueItems((items) =>
+        items.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                logs: [...item.logs, { ts: Date.now(), level: "warn" as const, message: "scan cancelled" }].slice(-2000),
+              }
+            : item
+        )
+      );
+      // Brief delay so the cancelled log entry is visible before item is removed
+      setTimeout(() => {
+        setQueueItems((items) => items.filter((item) => item.id !== id));
+      }, 1500);
     }
   }, [scanApi.scan.status]);
 
-  // Update progress on active scanning item
+  // Update progress and root name on active scanning item
   useEffect(() => {
     const id = activeQueueIdRef.current;
     if (!id || scanApi.scan.status !== "scanning") return;
@@ -107,6 +137,28 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     );
   }, [scanApi.scan.processedFiles, scanApi.scan.totalFiles, scanApi.scan.status]);
 
+  // Accumulate folder-level log entries (one entry per new folder entered)
+  useEffect(() => {
+    const id = activeQueueIdRef.current;
+    if (!id || scanApi.scan.status !== "scanning") return;
+    const currentPath = scanApi.scan.currentPath;
+    if (!currentPath || currentPath === "-") return;
+    const parts = currentPath.split(/[\\/]/);
+    const folder = parts.length > 1 ? parts.slice(0, -1).join("\\") : currentPath;
+    if (folder === prevFolderRef.current) return;
+    prevFolderRef.current = folder;
+    setQueueItems((items) =>
+      items.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              logs: [...item.logs, { ts: Date.now(), level: "info" as const, message: `scanning  ${currentPath}` }].slice(-2000),
+            }
+          : item
+      )
+    );
+  }, [scanApi.scan.currentPath, scanApi.scan.status]);
+
   const loadQueueItem = useCallback(
     async (id: string) => {
       const item = queueItems.find((q) => q.id === id);
@@ -118,7 +170,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         last_status: "Completed",
         last_scanned_at: null,
         files_scanned: item.totalFiles ?? 0,
-        folders_scanned: 0,
+        folders_scanned: item.foldersScanned ?? 0,
         bytes_scanned: item.totalBytes ?? 0,
       });
 
@@ -133,6 +185,10 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     [queueItems, scanApi]
   );
 
+  const deleteQueueItem = useCallback((id: string) => {
+    setQueueItems((items) => items.filter((item) => item.id !== id));
+  }, []);
+
   return (
     <ScanContext.Provider
       value={{
@@ -143,7 +199,11 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         refreshSavedIndexes,
         ...scanApi,
         queueItems,
+        activeQueueId: activeQueueIdRef.current,
         loadQueueItem,
+        deleteQueueItem,
+        theme,
+        setTheme,
       }}
     >
       {children}
