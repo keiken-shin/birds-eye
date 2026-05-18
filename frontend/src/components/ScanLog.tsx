@@ -9,14 +9,20 @@ interface ScanLogProps {
 export function ScanLog({ entries, isActive }: ScanLogProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const programmaticScroll = useRef(false);
 
   useEffect(() => {
     if (!autoScroll) return;
     const el = containerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    programmaticScroll.current = true;
+    el.scrollTop = el.scrollHeight;
+    // Reset flag after the scroll event has had a chance to fire
+    requestAnimationFrame(() => { programmaticScroll.current = false; });
   }, [entries, autoScroll]);
 
   function handleScroll() {
+    if (programmaticScroll.current) return;
     const el = containerRef.current;
     if (!el) return;
     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 16;

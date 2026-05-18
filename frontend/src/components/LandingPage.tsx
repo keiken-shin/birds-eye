@@ -37,11 +37,14 @@ export function LandingPage({
     openFolderPicker();
   }
 
-  // Navigate to scan page once a new queue item is created
+  const prevActiveQueueId = React.useRef<string | null>(activeQueueId ?? null);
+
+  // Navigate to scan page only when a new scan starts, not on every mount
   React.useEffect(() => {
-    if (activeQueueId) {
+    if (activeQueueId && activeQueueId !== prevActiveQueueId.current) {
       navigate(`/scan/${activeQueueId}`);
     }
+    prevActiveQueueId.current = activeQueueId ?? null;
   }, [activeQueueId, navigate]);
 
   return (

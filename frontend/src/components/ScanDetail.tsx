@@ -33,11 +33,13 @@ export function ScanDetail({ id }: ScanDetailProps) {
   const processedBytes = isActive ? scan.processedBytes : item.totalBytes ?? 0;
   const foldersCount = isActive ? scan.folders.length : item.foldersScanned ?? 0;
   const elapsedMs = isActive ? scan.elapsedMs : item.elapsedMs ?? 0;
-  const progress = item.progress;
+
 
   const statusColor =
     item.status === "scanning"
       ? "text-accent"
+      : item.status === "finalizing"
+      ? "text-yellow-400"
       : item.status === "done"
       ? "text-success"
       : "text-white/30";
@@ -71,20 +73,18 @@ export function ScanDetail({ id }: ScanDetailProps) {
               </button>
             </>
           )}
-          {(item.status === "done" || item.status === "loaded") && (
-            <button
-              className="flex items-center gap-1.5 border border-danger/20 px-2 py-1 font-mono text-9 font-black uppercase tracking-[1px] text-danger/50 hover:border-danger/50 hover:text-danger"
-              type="button"
-              onClick={() => {
-                deleteQueueItem(id);
-                navigate("/scan");
-              }}
-              title="Delete scan record"
-            >
-              <Trash2 size={10} />
-              Delete
-            </button>
-          )}
+          <button
+            className="flex items-center gap-1.5 border border-danger/20 px-2 py-1.5 font-mono text-9 font-black uppercase tracking-[1px] text-danger/50 hover:border-danger/50 hover:text-danger"
+            type="button"
+            onClick={() => {
+              if (isActive) cancelScan();
+              deleteQueueItem(id);
+              navigate("/scan");
+            }}
+            title="Delete scan record"
+          >
+            <Trash2 size={16} />
+          </button>
           <button
             className={iconBtn}
             type="button"
@@ -97,11 +97,16 @@ export function ScanDetail({ id }: ScanDetailProps) {
       </div>
 
       {/* Progress bar */}
-      <div className="h-[3px] bg-white/6">
-        <div
-          className={`h-full transition-all ${item.status === "scanning" ? "bg-accent" : "bg-success"}`}
-          style={{ width: `${progress}%` }}
-        />
+      <div className="h-[3px] bg-white/6 overflow-hidden">
+        {item.status === "scanning" && (
+          <div className="h-full w-1/3 animate-[slide_1.4s_ease-in-out_infinite]" style={{ backgroundImage: "linear-gradient(90deg, transparent, var(--color-accent), transparent)" }} />
+        )}
+        {item.status === "finalizing" && (
+          <div className="h-full w-full bg-yellow-400/60 animate-pulse" />
+        )}
+        {item.status === "done" && (
+          <div className="h-full w-full bg-success" />
+        )}
       </div>
 
       {/* Metrics */}

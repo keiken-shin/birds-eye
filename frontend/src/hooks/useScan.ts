@@ -146,15 +146,18 @@ export function useScan({
     if (isWaitingForJobId.current && !options.replay) return;
     if (shouldIgnoreNativeJobEvent(event)) return;
 
+    const isFinalizing = event.message === "finalizing index";
+
     if (event.status === "Failed") {
       setRuntimeMessage(event.message);
-    } else if (event.message === "finalizing index") {
+    } else if (isFinalizing) {
       setRuntimeMessage("Finalizing index");
     }
 
     setScan((current) => ({
       ...current,
       status: event.status === "Completed" ? "complete" : event.status === "Cancelled" || event.status === "Failed" ? "cancelled" : "scanning",
+      finalizing: isFinalizing,
       processedFiles: Math.max(current.processedFiles, event.files_scanned),
       totalFiles: Math.max(current.totalFiles, event.files_scanned),
       processedBytes: Math.max(current.processedBytes, event.bytes_scanned),

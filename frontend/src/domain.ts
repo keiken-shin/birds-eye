@@ -51,6 +51,7 @@ export type ScanStatus = "idle" | "scanning" | "paused" | "complete" | "cancelle
 
 export type ScanState = {
   status: ScanStatus;
+  finalizing: boolean;
   rootName: string;
   totalFiles: number;
   processedFiles: number;
@@ -143,6 +144,7 @@ export const emptyFolderCategories = (): Record<CategoryKey, number> =>
 
 export const initialScanState: ScanState = {
   status: "idle",
+  finalizing: false,
   rootName: "No folder selected",
   totalFiles: 0,
   processedFiles: 0,
@@ -201,7 +203,7 @@ export type SearchFilters = {
   useRegex?: boolean;
 };
 
-export type QueueItemStatus = "scanning" | "done" | "loaded";
+export type QueueItemStatus = "scanning" | "finalizing" | "done" | "loaded";
 
 export type ScanLogEntry = {
   ts: number;

@@ -124,20 +124,17 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     }
   }, [scanApi.scan.status]);
 
-  // Update progress and root name on active scanning item
+  // Update progress, status and root name on active scanning item
   useEffect(() => {
     const id = activeQueueIdRef.current;
     if (!id || scanApi.scan.status !== "scanning") return;
-    const progress =
-      scanApi.scan.totalFiles > 0
-        ? Math.round((scanApi.scan.processedFiles / scanApi.scan.totalFiles) * 100)
-        : 0;
+    const status: import("../domain").QueueItemStatus = scanApi.scan.finalizing ? "finalizing" : "scanning";
     setQueueItems((items) =>
       items.map((item) =>
-        item.id === id ? { ...item, progress, rootName: scanApi.scan.rootName } : item
+        item.id === id ? { ...item, status, rootName: scanApi.scan.rootName } : item
       )
     );
-  }, [scanApi.scan.processedFiles, scanApi.scan.totalFiles, scanApi.scan.status]);
+  }, [scanApi.scan.processedFiles, scanApi.scan.totalFiles, scanApi.scan.finalizing, scanApi.scan.status]);
 
   // Accumulate folder-level log entries (one entry per new folder entered)
   useEffect(() => {
