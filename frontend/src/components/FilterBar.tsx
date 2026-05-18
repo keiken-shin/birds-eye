@@ -8,21 +8,31 @@ interface FilterBarProps {
 
 export function FilterBar({ filter, setFilter }: FilterBarProps) {
   return (
-    <section className="filter-bar" aria-label="Category filters">
-      <button className={filter === "all" ? "active" : ""} type="button" onClick={() => setFilter("all")}>
+    <section className="mb-4.5 flex flex-wrap gap-2 border-y border-primary/10 py-3" aria-label="Category filters">
+      <button className={filterButtonClass(filter === "all")} type="button" onClick={() => setFilter("all")}>
         All
       </button>
       {(Object.keys(categories) as CategoryKey[]).map((key) => (
         <button
-          className={filter === key ? "active" : ""}
+          className={filterButtonClass(filter === key)}
           key={key}
           type="button"
           onClick={() => setFilter(key)}
         >
-          <span style={{ background: categories[key].color }} />
+          <span className="h-2.5 w-2.5" style={{ background: categories[key].color }} />
           {categories[key].label}
         </button>
       ))}
     </section>
   );
 }
+
+function filterButtonClass(active: boolean) {
+  return [
+    "inline-flex min-h-[42px] cursor-pointer items-center gap-2 border px-3 font-mono text-11 font-extrabold uppercase",
+    active ? "border-primary bg-primary text-base" : "border-white/15 bg-black/20 text-muted hover:bg-white/10 hover:text-primary",
+  ].join(" ");
+}
+
+
+
