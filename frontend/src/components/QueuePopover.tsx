@@ -90,7 +90,7 @@ function QueueItemRow({
   onLoad: (id: string) => void;
 }) {
   const [countdown, setCountdown] = useState(5);
-  const { pauseScan, resumeScan, cancelScan, scan } = useScanContext();
+  const { nativeRuntime, pauseScan, resumeScan, cancelScan, scan } = useScanContext();
 
   useEffect(() => {
     if (item.status !== "loaded") return;
@@ -112,8 +112,8 @@ function QueueItemRow({
   const iconBtn =
     "grid h-[22px] w-[22px] place-items-center border border-white/10 bg-black/20 text-white/30 hover:bg-white/10 hover:text-white/70";
 
-  const isScanning = (item.status === "scanning" || item.status === "finalizing") && scan.status === "scanning";
-  const isPaused = (item.status === "scanning" || item.status === "finalizing") && scan.status === "paused";
+  const isScanning = !nativeRuntime && (item.status === "scanning" || item.status === "finalizing") && scan.status === "scanning";
+  const isPaused = !nativeRuntime && (item.status === "scanning" || item.status === "finalizing") && scan.status === "paused";
 
   return (
     <div
@@ -168,7 +168,7 @@ function QueueItemRow({
           {item.status === "finalizing" ? (
             <div className="h-full w-full bg-yellow-400/60 animate-pulse" />
           ) : (
-            <div className="h-full w-1/3 bg-accent animate-[slide_1.4s_ease-in-out_infinite]" style={{ backgroundImage: "linear-gradient(90deg, transparent, var(--color-accent), transparent)" }} />
+            <div className="h-full bg-accent transition-[width] duration-200" style={{ width: `${item.progress}%` }} />
           )}
         </div>
       )}
@@ -179,13 +179,15 @@ function QueueItemRow({
             {item.totalFiles ? formatCount(item.totalFiles) : "—"} files
             {item.totalBytes ? ` · ${formatBytes(item.totalBytes)}` : ""}
           </span>
-          <button
-            className="border border-success/30 bg-success/10 px-2.5 py-[3px] font-mono text-9 font-black uppercase tracking-[1px] text-success"
-            type="button"
-            onClick={() => onLoad(item.id)}
-          >
-            Load →
-          </button>
+          {item.indexPath && (
+            <button
+              className="border border-success/30 bg-success/10 px-2.5 py-[3px] font-mono text-9 font-black uppercase tracking-[1px] text-success"
+              type="button"
+              onClick={() => onLoad(item.id)}
+            >
+              Load →
+            </button>
+          )}
         </div>
       )}
 

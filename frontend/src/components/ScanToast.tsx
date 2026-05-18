@@ -24,7 +24,7 @@ export function ScanToast() {
     for (const item of queueItems) {
       if (item.status === "done") {
         const prevItem = prev.find((p) => p.id === item.id);
-        if (prevItem?.status === "scanning") {
+        if (prevItem && prevItem.status !== "done" && prevItem.status !== "loaded") {
           setToast({ id: item.id, name: item.rootName });
           if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
           dismissTimerRef.current = setTimeout(() => setToast(null), 10000);

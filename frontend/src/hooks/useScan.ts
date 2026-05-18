@@ -291,11 +291,13 @@ export function useScan({
   }, []);
 
   const pauseScan = useCallback(() => {
+    if (!workerRef.current) return;
     postWorker(workerRef.current, { type: "pause" });
     setScan((current) => ({ ...current, status: "paused" }));
   }, []);
 
   const resumeScan = useCallback(() => {
+    if (!workerRef.current) return;
     postWorker(workerRef.current, { type: "resume" });
     setScan((current) => ({ ...current, status: "scanning" }));
   }, []);
@@ -316,6 +318,8 @@ export function useScan({
     setFilter("all");
     setFocusedFolder(null);
     setCurrentIndexPath(null);
+    setWorkspaceScan(null);
+    setWorkspaceIndexPath(null);
     setScan(initialScanState);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";

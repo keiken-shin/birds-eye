@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useScanContext } from "../context/ScanContext";
 import { ScanList } from "../components/ScanList";
@@ -10,10 +11,11 @@ export function ScanPage() {
 
   // If URL has an id but the item doesn't exist, redirect to /scan
   const itemExists = id ? queueItems.some((q) => q.id === id) : false;
-  if (id && !itemExists && queueItems.length > 0) {
-    navigate("/scan", { replace: true });
-    return null;
-  }
+  useEffect(() => {
+    if (id && !itemExists && queueItems.length > 0) {
+      navigate("/scan", { replace: true });
+    }
+  }, [id, itemExists, queueItems.length, navigate]);
 
   return (
     <div className="flex min-h-screen pb-32">
