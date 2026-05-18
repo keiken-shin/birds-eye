@@ -46,7 +46,7 @@ export function ScanDetail({ id }: ScanDetailProps) {
     <div className="flex flex-1 flex-col min-h-full border-l border-white/0">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/10 px-[16px] py-[12px] gap-3">
-        <div className="flex items-center gap-[10px] min-w-0">
+        <div className="flex items-center gap-2.5 min-w-0">
           <span className="truncate text-13 font-black uppercase text-primary">{item.rootName}</span>
           <span className={`font-mono text-10 uppercase shrink-0 ${statusColor}`}>{item.status}</span>
         </div>
@@ -120,5 +120,6 @@ export function ScanDetail({ id }: ScanDetailProps) {
     </div>
   );
 }
+
 
 

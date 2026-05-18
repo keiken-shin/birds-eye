@@ -9,7 +9,7 @@ interface DetailGridProps {
 
 export function DetailGrid({ largestFiles, extensions }: DetailGridProps) {
   return (
-    <section className="grid grid-cols-2 gap-[18px] max-[1080px]:grid-cols-1">
+    <section className="grid grid-cols-2 gap-4.5 max-[1080px]:grid-cols-1">
       <div className={panelClass}>
         <div className={panelHeaderClass}>
           <h2 className={panelTitleClass}>Largest Files</h2>
@@ -53,7 +53,7 @@ export function DetailGrid({ largestFiles, extensions }: DetailGridProps) {
   );
 }
 
-const panelClass = "relative mt-5 border border-white/15 bg-white/[0.045] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.28)] before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-[18px] before:w-[18px] before:border-l-2 before:border-t-2 before:border-primary/55";
+const panelClass = "relative mt-5 border border-white/15 bg-white/[0.045] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.28)] before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-4.5 before:w-4.5 before:border-l-2 before:border-t-2 before:border-primary/55";
 const panelHeaderClass = "mb-4 flex items-baseline justify-between gap-4 uppercase";
 const panelTitleClass = "text-17 font-black uppercase text-primary";
 const panelMetaClass = "inline-flex items-center gap-1.5 font-mono text-11 uppercase text-muted";
@@ -62,5 +62,6 @@ const fileRowClass = "grid min-h-12 grid-cols-[minmax(0,1fr)_110px_72px] items-c
 const pathClass = "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-subtle";
 const valueClass = "text-right text-primary max-sm:text-left";
 const smallClass = "text-right font-mono text-muted max-sm:text-left";
+
 
 

@@ -11,3 +11,4 @@ export function StorageReadout({ scan }: { scan: ScanState }) {
   );
 }
 
+

@@ -61,11 +61,11 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
           >
             {/* Layer 1: Main settings */}
             <div style={{ width: "280px" }} className="shrink-0">
-              <div className="border-b border-white/7 px-[14px] py-[10px]">
+              <div className="border-b border-white/7 px-3.5 py-2.5">
                 <span className={`mono tracking-[2px] text-white/50`}>Settings</span>
               </div>
 
-              <div className="px-[14px] py-[12px] grid gap-[14px]">
+              <div className="px-3.5 py-[12px] grid gap-3.5">
                 {/* Theme */}
                 <div>
                   <span className="font-mono text-10 uppercase tracking-[1.5px] text-white/30 block mb-[8px]">Theme</span>
@@ -92,7 +92,7 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 onClick={() => setLayer("shortcuts")}
-                className="w-full flex items-center justify-between border-t border-white/7 px-[14px] py-[12px] hover:bg-white/[0.04] transition-colors"
+                className="w-full flex items-center justify-between border-t border-white/7 px-3.5 py-[12px] hover:bg-white/[0.04] transition-colors"
               >
                 <span className={`mono text-white/40`}>Keyboard Shortcuts</span>
                 <ChevronRight size={13} className="text-white/25" />
@@ -101,7 +101,7 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
 
             {/* Layer 2: Keyboard shortcuts */}
             <div style={{ width: "280px" }} className="shrink-0">
-              <div className="flex items-center gap-[8px] border-b border-white/7 px-[14px] py-[10px]">
+              <div className="flex items-center gap-[8px] border-b border-white/7 px-3.5 py-2.5">
                 <button
                   type="button"
                   onClick={() => setLayer("main")}
@@ -113,7 +113,7 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
                 <span className={`mono tracking-[2px] text-white/50`}>Keyboard Shortcuts</span>
               </div>
 
-              <div className="px-[14px] py-[10px] grid gap-[2px]">
+              <div className="px-3.5 py-2.5 grid gap-[2px]">
                 {SHORTCUTS.map(({ keys, action }) => (
                   <div key={keys} className="flex items-center justify-between py-[6px] border-b border-white/5 last:border-0">
                     <span className="font-mono text-10 bg-white/8 px-[8px] py-[3px] text-primary/60">{keys}</span>
@@ -128,5 +128,6 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
 
 
