@@ -3,7 +3,7 @@ import { Trash2 } from "lucide-react";
 import { useScanContext } from "../context/ScanContext";
 import type { QueueItem } from "../domain";
 
-const mono = "font-mono text-[11px] uppercase";
+const mono = "font-mono text-11 uppercase";
 
 interface ScanListProps {
   selectedId: string | undefined;
@@ -23,7 +23,7 @@ export function ScanList({ selectedId }: ScanListProps) {
           <span className={`${mono} text-white/20`}>No scans yet</span>
           <Link
             to="/"
-            className="border border-white/15 px-4 py-2 font-mono text-[11px] uppercase text-primary hover:bg-white/5"
+            className="border border-white/15 px-4 py-2 font-mono text-11 uppercase text-primary hover:bg-white/5"
           >
             Start Scan
           </Link>
@@ -66,7 +66,7 @@ function ScanListItem({ item, isSelected }: { item: QueueItem; isSelected: boole
           <div className={`h-[7px] w-[7px] rounded-full ${dotColor}`} />
         </div>
         <div className="min-w-0 flex-1 grid gap-[3px]">
-          <span className="truncate text-[12px] font-black uppercase text-primary">{item.rootName}</span>
+          <span className="truncate text-12 font-black uppercase text-primary">{item.rootName}</span>
           <div className="flex items-center justify-between gap-2">
             <span className={`${mono} text-white/30 capitalize`}>{item.status}</span>
             {age && <span className={`${mono} text-white/20`}>{age}</span>}
@@ -101,4 +101,5 @@ function formatAge(ts: number): string {
   if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
   return `${Math.floor(sec / 3600)}h ago`;
 }
+
 

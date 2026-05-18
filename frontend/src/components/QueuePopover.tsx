@@ -123,7 +123,7 @@ function QueueItemRow({
         <div className="flex min-w-0 items-center gap-2">
           <div className={`h-[6px] w-[6px] shrink-0 rounded-full ${dotColor}`} />
           <span
-            className={`truncate text-[10px] font-black text-primary ${
+            className={`truncate text-10 font-black text-primary ${
               item.status === "loaded" ? "line-through" : ""
             }`}
           >
@@ -174,7 +174,7 @@ function QueueItemRow({
             {item.totalBytes ? ` · ${formatBytes(item.totalBytes)}` : ""}
           </span>
           <button
-            className="border border-success/30 bg-success/10 px-[10px] py-[3px] font-mono text-[9px] font-black uppercase tracking-[1px] text-success"
+            className="border border-success/30 bg-success/10 px-[10px] py-[3px] font-mono text-9 font-black uppercase tracking-[1px] text-success"
             type="button"
             onClick={() => onLoad(item.id)}
           >
@@ -189,4 +189,5 @@ function QueueItemRow({
     </div>
   );
 }
+
 

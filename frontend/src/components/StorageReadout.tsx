@@ -1,7 +1,7 @@
 import { ScanState } from "../domain";
 
 export function StorageReadout({ scan }: { scan: ScanState }) {
-  const mono = "font-mono text-[11px] uppercase";
+  const mono = "font-mono text-11 uppercase";
   return (
     <div className="mb-3.5 flex flex-wrap gap-2.5" aria-label="Current scan readout">
       <span className={`${mono} border border-white/15 px-2.5 py-2 text-muted`}>{scan.processedFiles.toLocaleString()} files</span>
@@ -10,3 +10,4 @@ export function StorageReadout({ scan }: { scan: ScanState }) {
     </div>
   );
 }
+

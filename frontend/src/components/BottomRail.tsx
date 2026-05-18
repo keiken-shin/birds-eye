@@ -11,7 +11,7 @@ import { SettingsPopover } from "./SettingsPopover";
 import { useScanContext } from "../context/ScanContext";
 
 const itemBase =
-  "inline-flex min-h-[52px] min-w-[106px] items-center justify-center gap-1.5 border-r border-white/15 px-3 font-mono text-[11px] font-black uppercase text-muted no-underline last:border-r";
+  "inline-flex min-h-[52px] min-w-[106px] items-center justify-center gap-1.5 border-r border-white/15 px-3 font-mono text-11 font-black uppercase text-muted no-underline last:border-r";
 const activeClass = "!text-accent border-b border-b-accent";
 
 export function BottomRail() {
@@ -61,4 +61,5 @@ export function BottomRail() {
     </nav>
   );
 }
+
 

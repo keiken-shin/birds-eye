@@ -6,7 +6,7 @@ import { deleteNativeIndex } from "../nativeClient";
 import type { NativeIndexEntry } from "../nativeClient";
 import { formatBytes, formatCount } from "../domain";
 
-const mono = "font-mono text-[11px] uppercase";
+const mono = "font-mono text-11 uppercase";
 
 export function LibraryPage() {
   const {
@@ -59,7 +59,7 @@ export function LibraryPage() {
         <div className="flex items-center gap-2 border border-white/15 bg-white/[0.025] px-3 py-2">
           <Search size={13} className="shrink-0 text-white/30" />
           <input
-            className="bg-transparent font-mono text-[11px] uppercase tracking-[1px] text-primary placeholder-white/20 outline-none"
+            className="bg-transparent font-mono text-11 uppercase tracking-[1px] text-primary placeholder-white/20 outline-none"
             placeholder="Filter indexes..."
             value={filterQuery}
             onChange={(e) => setFilterQuery(e.target.value)}
@@ -118,7 +118,7 @@ function LibraryRow({
   return (
     <div className="flex items-center justify-between gap-4 border-b border-white/7 bg-white/[0.02] px-4 py-3 last:border-b-0">
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-black text-primary">{label}</p>
+        <p className="truncate text-13 font-black text-primary">{label}</p>
         <p className={`${mono} mt-0.5 text-muted`}>
           {formatBytes(entry.bytes_scanned)} · {formatCount(entry.files_scanned)} files · {scannedAt}
         </p>
@@ -128,7 +128,7 @@ function LibraryRow({
           <>
             <span className={`${mono} text-danger`}>Delete?</span>
             <button
-              className="cursor-pointer !text-xs border border-danger/40 bg-danger/10 px-3 py-1 font-mono text-[9px] font-black uppercase text-danger"
+              className="cursor-pointer !text-xs border border-danger/40 bg-danger/10 px-3 py-1 font-mono text-9 font-black uppercase text-danger"
               type="button"
               onClick={onDeleteConfirm}
             >
@@ -177,4 +177,5 @@ function LibraryRow({
     </div>
   );
 }
+
 

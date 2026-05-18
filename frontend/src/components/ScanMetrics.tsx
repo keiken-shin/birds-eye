@@ -20,8 +20,8 @@ export function ScanMetrics({ processedFiles, totalFiles, processedBytes, folder
         <MetricCard label="Folders" value={foldersCount > 0 ? formatCount(foldersCount) : "—"} />
       </div>
       <div className="border border-white/8 px-[12px] py-[10px]">
-        <span className="font-mono text-[10px] uppercase tracking-[1.5px] text-white/25 block mb-[4px]">Throughput</span>
-        <span className="font-mono text-[12px] text-primary/70">{throughput}</span>
+        <span className="font-mono text-10 uppercase tracking-[1.5px] text-white/25 block mb-[4px]">Throughput</span>
+        <span className="font-mono text-12 text-primary/70">{throughput}</span>
       </div>
     </div>
   );
@@ -30,9 +30,10 @@ export function ScanMetrics({ processedFiles, totalFiles, processedBytes, folder
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="border border-white/8 px-[10px] py-[8px]">
-      <span className="font-mono text-[9px] uppercase tracking-[1.5px] text-white/25 block mb-[4px]">{label}</span>
-      <span className="font-mono text-[12px] font-black text-primary">{value}</span>
+      <span className="font-mono text-9 uppercase tracking-[1.5px] text-white/25 block mb-[4px]">{label}</span>
+      <span className="font-mono text-12 font-black text-primary">{value}</span>
     </div>
   );
 }
+
 

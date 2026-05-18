@@ -24,7 +24,7 @@ export function ScanPage() {
       ) : (
         <div className="flex flex-1 items-center justify-center">
           {queueItems.length > 0 ? (
-            <span className="font-mono text-[11px] uppercase text-white/20">
+            <span className="font-mono text-11 uppercase text-white/20">
               Select a scan from the list to view details.
             </span>
           ) : null}
@@ -33,4 +33,5 @@ export function ScanPage() {
     </div>
   );
 }
+
 

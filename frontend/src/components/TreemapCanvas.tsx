@@ -214,3 +214,4 @@ function getDominantCategory(folder: FolderStats): CategoryKey {
   }, "other");
 }
 
+

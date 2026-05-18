@@ -4,7 +4,7 @@ import { useSearch } from "../hooks/useSearch";
 import { formatBytes, type CategoryKey, type ScanState, type SearchFilters } from "../domain";
 import { categories } from "../domain";
 
-const mono = "font-mono text-[11px] uppercase";
+const mono = "font-mono text-11 uppercase";
 const ALL_KINDS = Object.keys(categories) as CategoryKey[];
 
 type SizeUnit = "KB" | "MB" | "GB";
@@ -154,7 +154,7 @@ export function CommandPalette({
           <Search size={14} className="shrink-0 text-white/30" />
           <input
             ref={inputRef}
-            className="flex-1 bg-transparent font-mono text-[13px] text-primary placeholder-white/20 outline-none"
+            className="flex-1 bg-transparent font-mono text-13 text-primary placeholder-white/20 outline-none"
             placeholder="Search files..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -201,22 +201,22 @@ export function CommandPalette({
             {/* Extension + size range — uniform height */}
             <div className="flex flex-wrap items-center gap-2">
               <input
-                className="h-7 w-36 border border-white/10 bg-transparent px-2 font-mono text-[10px] text-primary placeholder-white/20 outline-none"
+                className="h-7 w-36 border border-white/10 bg-transparent px-2 font-mono text-10 text-primary placeholder-white/20 outline-none"
                 placeholder=".tsx .rs .pdf"
                 value={extInput}
                 onChange={(e) => setExtInput(e.target.value)}
               />
               <div className="flex items-center gap-1">
                 <input
-                  className="h-7 w-14 border border-white/10 bg-transparent px-2 font-mono text-[10px] text-primary placeholder-white/20 outline-none"
+                  className="h-7 w-14 border border-white/10 bg-transparent px-2 font-mono text-10 text-primary placeholder-white/20 outline-none"
                   placeholder="min"
                   value={minSizeVal}
                   onChange={(e) => setMinSizeVal(e.target.value)}
                 />
                 <SizeUnitSelect value={minSizeUnit} onChange={setMinSizeUnit} />
-                <span className="px-1 font-mono text-[10px] text-white/20">→</span>
+                <span className="px-1 font-mono text-10 text-white/20">→</span>
                 <input
-                  className="h-7 w-14 border border-white/10 bg-transparent px-2 font-mono text-[10px] text-primary placeholder-white/20 outline-none"
+                  className="h-7 w-14 border border-white/10 bg-transparent px-2 font-mono text-10 text-primary placeholder-white/20 outline-none"
                   placeholder="max"
                   value={maxSizeVal}
                   onChange={(e) => setMaxSizeVal(e.target.value)}
@@ -224,7 +224,7 @@ export function CommandPalette({
                 <SizeUnitSelect value={maxSizeUnit} onChange={setMaxSizeUnit} />
               </div>
               <button
-                className={`h-7 border px-2 font-mono text-[10px] ${
+                className={`h-7 border px-2 font-mono text-10 ${
                   useRegex
                     ? "border-success/40 bg-success/10 text-success"
                     : "border-white/10 text-white/30"
@@ -256,7 +256,7 @@ export function CommandPalette({
               }`}
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[12px] font-bold text-primary">{result.path}</p>
+                <p className="truncate text-12 font-bold text-primary">{result.path}</p>
                 <p className={`${mono} text-muted`}>{formatBytes(result.size)}</p>
               </div>
               <div className="flex shrink-0 gap-1.5 ml-3">
@@ -300,7 +300,7 @@ function SizeUnitSelect({
 }) {
   return (
     <select
-      className="h-7 border border-white/10 bg-overlay px-1 font-mono text-[10px] text-muted outline-none"
+      className="h-7 border border-white/10 bg-overlay px-1 font-mono text-10 text-muted outline-none"
       value={value}
       onChange={(e) => onChange(e.target.value as SizeUnit)}
     >
@@ -310,4 +310,5 @@ function SizeUnitSelect({
     </select>
   );
 }
+
 

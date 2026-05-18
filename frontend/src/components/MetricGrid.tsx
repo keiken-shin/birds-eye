@@ -23,12 +23,13 @@ export function MetricGrid({ scan }: MetricGridProps) {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <span className="font-mono text-[11px] uppercase text-muted">{metric.label}</span>
+          <span className="font-mono text-11 uppercase text-muted">{metric.label}</span>
           <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-3xl font-black text-primary">{metric.value}</strong>
-          <small className="font-mono text-[11px] uppercase text-muted">{metric.detail}</small>
+          <small className="font-mono text-11 uppercase text-muted">{metric.detail}</small>
         </motion.article>
       ))}
     </section>
   );
 }
+
 

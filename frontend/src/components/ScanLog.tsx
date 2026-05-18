@@ -31,10 +31,10 @@ export function ScanLog({ entries, isActive }: ScanLogProps) {
   return (
     <div className="flex flex-col min-h-0 flex-1">
       <div className="flex items-center justify-between border-b border-white/8 px-[14px] py-[8px]">
-        <span className="font-mono text-[10px] uppercase tracking-[1.5px] text-white/30">Log</span>
+        <span className="font-mono text-10 uppercase tracking-[1.5px] text-white/30">Log</span>
         {!autoScroll && (
           <button
-            className="font-mono text-[9px] uppercase text-accent/60 hover:text-accent"
+            className="font-mono text-9 uppercase text-accent/60 hover:text-accent"
             type="button"
             onClick={() => {
               setAutoScroll(true);
@@ -49,7 +49,7 @@ export function ScanLog({ entries, isActive }: ScanLogProps) {
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto bg-black/40 px-[14px] py-[10px] font-mono text-[11px]"
+        className="flex-1 overflow-y-auto bg-black/40 px-[14px] py-[10px] font-mono text-11"
         style={{ minHeight: "180px", maxHeight: "320px" }}
       >
         {entries.length === 0 ? (
@@ -94,4 +94,5 @@ function LogLine({ entry }: { entry: ScanLogEntry }) {
     </div>
   );
 }
+
 
