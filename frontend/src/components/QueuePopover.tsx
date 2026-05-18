@@ -103,6 +103,8 @@ function QueueItemRow({
   const dotColor =
     item.status === "scanning"
       ? "bg-accent animate-pulse shadow-glow-accent"
+      : item.status === "finalizing"
+      ? "bg-yellow-400 animate-pulse"
       : item.status === "done"
       ? "bg-success"
       : "bg-white/20";
@@ -110,8 +112,8 @@ function QueueItemRow({
   const iconBtn =
     "grid h-[22px] w-[22px] place-items-center border border-white/10 bg-black/20 text-white/30 hover:bg-white/10 hover:text-white/70";
 
-  const isScanning = item.status === "scanning" && scan.status === "scanning";
-  const isPaused = item.status === "scanning" && scan.status === "paused";
+  const isScanning = (item.status === "scanning" || item.status === "finalizing") && scan.status === "scanning";
+  const isPaused = (item.status === "scanning" || item.status === "finalizing") && scan.status === "paused";
 
   return (
     <div
@@ -149,6 +151,9 @@ function QueueItemRow({
           {item.status === "scanning" && (
             <span className={`mono text-accent`}>{scan.status === "paused" ? "paused" : "scanning"}</span>
           )}
+          {item.status === "finalizing" && (
+            <span className="mono text-yellow-400/80">finalizing</span>
+          )}
           {item.status === "done" && (
             <span className={`mono text-success`}>done</span>
           )}
@@ -158,13 +163,14 @@ function QueueItemRow({
         </div>
       </div>
 
-      {item.status === "scanning" && (
-        <>
-          <div className="mb-1 h-[2px] bg-white/6">
-            <div className="h-full bg-accent" style={{ width: `${item.progress}%` }} />
-          </div>
-          <span className={`mono text-white/30`}>{item.progress}%</span>
-        </>
+      {(item.status === "scanning" || item.status === "finalizing") && (
+        <div className="mb-1 h-[2px] bg-white/6 overflow-hidden">
+          {item.status === "finalizing" ? (
+            <div className="h-full w-full bg-yellow-400/60 animate-pulse" />
+          ) : (
+            <div className="h-full w-1/3 bg-accent animate-[slide_1.4s_ease-in-out_infinite]" style={{ backgroundImage: "linear-gradient(90deg, transparent, var(--color-accent), transparent)" }} />
+          )}
+        </div>
       )}
 
       {item.status === "done" && (
