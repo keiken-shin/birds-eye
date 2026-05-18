@@ -30,7 +30,7 @@ export function ScanLog({ entries, isActive }: ScanLogProps) {
 
   return (
     <div className="flex flex-col min-h-0 flex-1">
-      <div className="flex items-center justify-between border-b border-white/8 px-[14px] py-[8px]">
+      <div className="flex items-center justify-between border-b border-white/8 px-3.5 py-[8px]">
         <span className="font-mono text-10 uppercase tracking-[1.5px] text-white/30">Log</span>
         {!autoScroll && (
           <button
@@ -49,7 +49,7 @@ export function ScanLog({ entries, isActive }: ScanLogProps) {
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto bg-black/40 px-[14px] py-[10px] font-mono text-11"
+        className="flex-1 overflow-y-auto bg-black/40 px-3.5 py-2.5 font-mono text-11"
         style={{ minHeight: "180px", maxHeight: "320px" }}
       >
         {entries.length === 0 ? (
@@ -87,12 +87,13 @@ function LogLine({ entry }: { entry: ScanLogEntry }) {
       : "text-white/45";
 
   return (
-    <div className="flex items-baseline gap-[10px] py-[2px]">
+    <div className="flex items-baseline gap-2.5 py-[2px]">
       <span className="shrink-0 text-white/15">{time}</span>
       <span className={`shrink-0 w-[36px] ${levelColor}`}>{entry.level}</span>
       <span className={`break-all ${messageColor}`}>{entry.message}</span>
     </div>
   );
 }
+
 
 

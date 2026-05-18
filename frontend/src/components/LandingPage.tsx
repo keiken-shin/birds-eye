@@ -65,7 +65,7 @@ export function LandingPage({
             <span className={`${mono} text-muted max-sm:max-w-[190px]`}>Storage observatory / local-first</span>
           </div>
         </div>
-        <div className={`${mono} flex items-center gap-[18px] text-muted max-sm:grid max-sm:w-full max-sm:grid-cols-2 max-sm:gap-2`}>
+        <div className={`${mono} flex items-center gap-4.5 text-muted max-sm:grid max-sm:w-full max-sm:grid-cols-2 max-sm:gap-2`}>
           <span>
             Native index <b className="font-extrabold text-success">{nativeRuntime ? "online" : "browser"}</b>
           </span>
@@ -112,5 +112,6 @@ export function LandingPage({
     </section>
   );
 }
+
 
 

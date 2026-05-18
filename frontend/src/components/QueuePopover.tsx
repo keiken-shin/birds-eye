@@ -49,7 +49,7 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
           role="dialog"
           aria-label="Scan queue"
         >
-          <div className="flex items-center justify-between border-b border-white/7 px-[14px] py-[10px]">
+          <div className="flex items-center justify-between border-b border-white/7 px-3.5 py-2.5">
             <span className="mono tracking-[2px] text-white/50">Scan Queue</span>
             <div className="flex items-center gap-3">
               <span className={`mono text-white/20`}>{queueItems.length} items</span>
@@ -64,7 +64,7 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
           </div>
 
           {queueItems.length === 0 && (
-            <div className="px-[14px] py-5 text-center">
+            <div className="px-3.5 py-5 text-center">
               <span className={`mono text-white/20`}>No scans in queue</span>
             </div>
           )}
@@ -73,7 +73,7 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
             <QueueItemRow key={item.id} item={item} onLoad={handleLoad} />
           ))}
 
-          <div className="border-t border-white/5 px-[14px] py-2">
+          <div className="border-t border-white/5 px-3.5 py-2">
             <span className={`mono text-white/15`}>Completed scans saved to Library</span>
           </div>
         </div>
@@ -115,7 +115,7 @@ function QueueItemRow({
 
   return (
     <div
-      className={`border-b border-white/5 px-[14px] py-[10px] transition-opacity ${
+      className={`border-b border-white/5 px-3.5 py-2.5 transition-opacity ${
         item.status === "loaded" ? "opacity-45" : ""
       }`}
     >
@@ -174,7 +174,7 @@ function QueueItemRow({
             {item.totalBytes ? ` · ${formatBytes(item.totalBytes)}` : ""}
           </span>
           <button
-            className="border border-success/30 bg-success/10 px-[10px] py-[3px] font-mono text-9 font-black uppercase tracking-[1px] text-success"
+            className="border border-success/30 bg-success/10 px-2.5 py-[3px] font-mono text-9 font-black uppercase tracking-[1px] text-success"
             type="button"
             onClick={() => onLoad(item.id)}
           >
@@ -189,5 +189,6 @@ function QueueItemRow({
     </div>
   );
 }
+
 
 

@@ -8,7 +8,7 @@ interface FilterBarProps {
 
 export function FilterBar({ filter, setFilter }: FilterBarProps) {
   return (
-    <section className="mb-[18px] flex flex-wrap gap-2 border-y border-primary/10 py-3" aria-label="Category filters">
+    <section className="mb-4.5 flex flex-wrap gap-2 border-y border-primary/10 py-3" aria-label="Category filters">
       <button className={filterButtonClass(filter === "all")} type="button" onClick={() => setFilter("all")}>
         All
       </button>
@@ -33,5 +33,6 @@ function filterButtonClass(active: boolean) {
     active ? "border-primary bg-primary text-base" : "border-white/15 bg-black/20 text-muted hover:bg-white/10 hover:text-primary",
   ].join(" ");
 }
+
 
 

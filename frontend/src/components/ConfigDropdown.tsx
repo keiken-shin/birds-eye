@@ -36,11 +36,11 @@ export function ConfigDropdown({ children }: { children: React.ReactNode }) {
           role="dialog"
           aria-label="Scan configuration"
         >
-          <div className="border-b border-white/7 px-[14px] py-[10px]">
+          <div className="border-b border-white/7 px-3.5 py-2.5">
             <span className={`${mono} tracking-[2px] text-white/50`}>Configuration</span>
           </div>
 
-          <div className="px-[14px] py-[12px] grid gap-[14px]">
+          <div className="px-3.5 py-[12px] grid gap-3.5">
             <ConfigSection label="Scan Source">
               <ConfigOption label="Local Filesystem" active />
               <ConfigOption label="S3 Bucket" disabled hint="coming soon" />
@@ -53,7 +53,7 @@ export function ConfigDropdown({ children }: { children: React.ReactNode }) {
             </ConfigSection>
           </div>
 
-          <div className="border-t border-white/5 px-[14px] py-[8px]">
+          <div className="border-t border-white/5 px-3.5 py-[8px]">
             <span className={`${mono} text-white/15`}>More sources and strategies coming soon</span>
           </div>
         </div>
@@ -84,7 +84,7 @@ function ConfigOption({
 }) {
   return (
     <div
-      className={`flex items-center justify-between px-[10px] py-[7px] border ${
+      className={`flex items-center justify-between px-2.5 py-[7px] border ${
         active
           ? "border-accent/30 bg-accent/8 text-accent"
           : "border-white/8 text-white/30"
@@ -98,5 +98,6 @@ function ConfigOption({
     </div>
   );
 }
+
 
 

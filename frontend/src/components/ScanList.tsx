@@ -58,8 +58,8 @@ function ScanListItem({ item, isSelected }: { item: QueueItem; isSelected: boole
     <li className="group relative">
       <Link
         to={`/scan/${item.id}`}
-        className={`flex items-start gap-[10px] border-b border-white/5 px-[16px] py-[12px] transition-colors hover:bg-white/[0.04] ${
-          isSelected ? "border-l-2 border-l-accent bg-white/[0.06] pl-[14px]" : "border-l-2 border-l-transparent"
+        className={`flex items-start gap-2.5 border-b border-white/5 px-[16px] py-[12px] transition-colors hover:bg-white/[0.04] ${
+          isSelected ? "border-l-2 border-l-accent bg-white/[0.06] pl-3.5" : "border-l-2 border-l-transparent"
         }`}
       >
         <div className="mt-[4px] shrink-0">
@@ -80,7 +80,7 @@ function ScanListItem({ item, isSelected }: { item: QueueItem; isSelected: boole
       </Link>
       {(item.status === "done" || item.status === "loaded") && (
         <button
-          className="absolute right-[10px] top-1/2 -translate-y-1/2 grid h-[22px] w-[22px] place-items-center text-white/0 transition-colors group-hover:text-danger/40 hover:!text-danger"
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 grid h-[22px] w-[22px] place-items-center text-white/0 transition-colors group-hover:text-danger/40 hover:!text-danger"
           type="button"
           title="Delete scan"
           onClick={(e) => {
@@ -101,5 +101,6 @@ function formatAge(ts: number): string {
   if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
   return `${Math.floor(sec / 3600)}h ago`;
 }
+
 
 

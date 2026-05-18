@@ -87,7 +87,7 @@ export function WorkspacePage() {
     <>
       <CommandPalette currentIndexPath={workspaceIndexPath} nativeRuntime={nativeRuntime} scan={workspaceScan} />
       <section className="relative z-[1] mx-auto max-w-[1440px] min-w-0 px-[42px] pb-[118px] max-sm:px-4 max-sm:pb-28">
-        <header className="mb-[18px] grid gap-2 border-t border-primary/20 pt-5">
+        <header className="mb-4.5 grid gap-2 border-t border-primary/20 pt-5">
           <p className="m-0 text-13 font-bold uppercase text-accent">Workspace / storage intelligence</p>
           <h2 className="max-w-[860px] text-[clamp(28px,3vw,46px)] font-black uppercase leading-[0.95] text-primary">
             Indexed terrain and cleanup surfaces
@@ -118,5 +118,6 @@ export function WorkspacePage() {
     </>
   );
 }
+
 
 
