@@ -8,10 +8,8 @@ type Layer = "main" | "shortcuts";
 
 const SHORTCUTS: { keys: string; action: string }[] = [
   { keys: "Ctrl+K", action: "Command palette" },
-  { keys: "Ctrl+/", action: "Focus search" },
   { keys: "Esc", action: "Close overlay / cancel" },
   { keys: "↑ ↓", action: "Navigate results" },
-  { keys: "Enter", action: "Open focused file" },
 ];
 
 export function SettingsPopover({ children }: { children: React.ReactNode }) {

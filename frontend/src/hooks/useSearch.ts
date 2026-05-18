@@ -32,16 +32,33 @@ export function useSearch({
 
   useEffect(() => {
     const trimmedQuery = searchQuery.trim();
-    if (trimmedQuery.length < 2) {
+    const f = filtersRef.current;
+    const hasFilters = Boolean(
+      f?.kinds?.length ||
+        f?.extensions?.length ||
+        f?.minBytes !== undefined ||
+        f?.maxBytes !== undefined
+    );
+
+    if (f?.useRegex && trimmedQuery) {
+      try {
+        new RegExp(trimmedQuery);
+      } catch {
+        setSearchResults([]);
+        return;
+      }
+    }
+
+    if (trimmedQuery.length < 2 && !hasFilters) {
       setSearchResults([]);
       return;
     }
 
     if (!nativeRuntime || !currentIndexPath) {
-      const f = filtersRef.current;
+      const query = trimmedQuery.toLowerCase();
       const browserMatches = largestFiles
         .filter((file) => {
-          if (!file.path.toLowerCase().includes(trimmedQuery.toLowerCase())) return false;
+          if (query && !file.path.toLowerCase().includes(query)) return false;
           if (f?.kinds?.length && !f.kinds.includes(file.category)) return false;
           if (f?.extensions?.length && !f.extensions.some((ext) => file.extension?.toLowerCase() === ext.toLowerCase())) return false;
           if (f?.minBytes !== undefined && file.bytes < f.minBytes) return false;
@@ -62,7 +79,6 @@ export function useSearch({
     }
 
     const handle = window.setTimeout(() => {
-      const f = filtersRef.current;
       // CategoryKey values must be mapped to native media_kind strings expected by the Rust backend
       const nativeFilters = f
         ? { ...f, kinds: f.kinds?.map(mediaKindFromCategory) }

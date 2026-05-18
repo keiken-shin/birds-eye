@@ -76,4 +76,54 @@ describe("useSearch filter forwarding", () => {
 
     expect(invoke).not.toHaveBeenCalled();
   });
+
+  it("calls searchNativeIndex for filter-only searches", async () => {
+    renderHook(() =>
+      useSearch({
+        currentIndexPath: "/fake/index.sqlite",
+        nativeRuntime: true,
+        largestFiles: initialScanState.largestFiles,
+        setRuntimeMessage: () => {},
+        filters: { extensions: ["pdf"] },
+      })
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      "search_files",
+      expect.objectContaining({
+        request: expect.objectContaining({
+          query: "",
+          extensions: ["pdf"],
+        }),
+      })
+    );
+  });
+
+  it("does not call searchNativeIndex for invalid regex filters", async () => {
+    const { result } = renderHook(() =>
+      useSearch({
+        currentIndexPath: "/fake/index.sqlite",
+        nativeRuntime: true,
+        largestFiles: initialScanState.largestFiles,
+        setRuntimeMessage: () => {},
+        filters: { useRegex: true },
+      })
+    );
+
+    act(() => {
+      result.current.setSearchQuery("[");
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+      await Promise.resolve();
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+  });
 });
