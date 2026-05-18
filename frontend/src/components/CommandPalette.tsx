@@ -91,19 +91,6 @@ export function CommandPalette({
         event.preventDefault();
         setFocusedIndex((i) => Math.max(i - 1, 0));
       }
-      if (event.key === "Enter") {
-        const focused = searchResults[focusedIndex];
-        if (focused) {
-          void (async () => {
-            try {
-              const { invoke } = await import("@tauri-apps/api/core");
-              await invoke("plugin:opener|open_path", { path: focused.path });
-            } catch {
-              // silently degrade
-            }
-          })();
-        }
-      }
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
@@ -283,7 +270,7 @@ export function CommandPalette({
 
         <div className="border-t border-white/7 px-4 py-2">
           <span className={`${mono} text-white/15`}>
-            ↑↓ navigate · Enter open · Esc close
+            ↑↓ navigate · Esc close
           </span>
         </div>
       </div>
