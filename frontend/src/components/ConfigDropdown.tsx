@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type React from "react";
 
 const mono = "font-mono text-11 uppercase";
-const panelClass = "border border-white/12 bg-surface shadow-[0_-8px_32px_rgba(0,0,0,0.6)]";
+const panelClass = "border border-white/12 bg-surface shadow-inner";
 
 export function ConfigDropdown({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -98,6 +98,7 @@ function ConfigOption({
     </div>
   );
 }
+
 
 
 

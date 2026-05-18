@@ -18,7 +18,7 @@ export function MetricGrid({ scan }: MetricGridProps) {
     <section className="mb-4.5 grid grid-cols-4 gap-3.5 max-[1080px]:grid-cols-1" aria-label="Scan metrics">
       {metrics.map((metric) => (
         <motion.article
-          className="relative grid min-h-28 gap-2 border border-white/15 bg-[radial-gradient(circle,rgba(244,241,234,0.09)_1px,transparent_1.2px)] bg-[length:18px_18px] p-4.5 shadow-[0_18px_60px_rgba(0,0,0,0.28)] before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-4.5 before:w-4.5 before:border-l-2 before:border-t-2 before:border-primary/55"
+          className="relative grid min-h-28 gap-2 border border-white/15 bg-[radial-gradient(circle,rgba(244,241,234,0.09)_1px,transparent_1.2px)] bg-[length:18px_18px] p-4.5 shadow-overlay before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-4.5 before:w-4.5 before:border-l-2 before:border-t-2 before:border-primary/55"
           key={metric.label}
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -31,6 +31,7 @@ export function MetricGrid({ scan }: MetricGridProps) {
     </section>
   );
 }
+
 
 
 
