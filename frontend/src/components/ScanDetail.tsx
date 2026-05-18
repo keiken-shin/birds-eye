@@ -13,7 +13,7 @@ const iconBtn =
   "grid h-[30px] w-[30px] place-items-center border border-white/15 bg-black/20 text-primary/60 hover:bg-white/10 hover:text-primary";
 
 export function ScanDetail({ id }: ScanDetailProps) {
-  const { queueItems, scan, activeQueueId, pauseScan, resumeScan, cancelScan, deleteQueueItem } = useScanContext();
+  const { nativeRuntime, queueItems, scan, activeQueueId, pauseScan, resumeScan, cancelScan, deleteQueueItem } = useScanContext();
   const navigate = useNavigate();
 
   const item = queueItems.find((q) => q.id === id);
@@ -53,7 +53,7 @@ export function ScanDetail({ id }: ScanDetailProps) {
           <span className={`font-mono text-10 uppercase shrink-0 ${statusColor}`}>{item.status}</span>
         </div>
         <div className="flex items-center gap-[6px] shrink-0">
-          {isActive && scan.status === "scanning" && (
+          {isActive && !nativeRuntime && scan.status === "scanning" && (
             <>
               <button className={iconBtn} type="button" onClick={pauseScan} title="Pause scan">
                 <Pause size={13} />
@@ -63,7 +63,7 @@ export function ScanDetail({ id }: ScanDetailProps) {
               </button>
             </>
           )}
-          {isActive && scan.status === "paused" && (
+          {isActive && !nativeRuntime && scan.status === "paused" && (
             <>
               <button className={iconBtn} type="button" onClick={resumeScan} title="Resume scan">
                 <Play size={13} />
