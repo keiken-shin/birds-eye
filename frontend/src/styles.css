@@ -1,5 +1,31 @@
 @import "tailwindcss";
 
+@theme {
+  /* ── Colors ── */
+  --color-primary: #f4f1ea;
+  --color-muted:   #9a9a94;
+  --color-accent:  #00d0c4;
+  --color-danger:  #ff6b6b;
+  --color-success: #b7ff5c;
+  --color-base:    #050607;
+  --color-surface: #0d0f11;
+  --color-overlay: #07090d;
+  --color-subtle:  #dedbd4;
+
+  /* ── Font sizes ── */
+  --text-9:  0.5625rem;
+  --text-10: 0.625rem;
+  --text-11: 0.6875rem;
+  --text-12: 0.75rem;
+  --text-13: 0.8125rem;
+  --text-17: 1.0625rem;
+
+  /* ── Shadows ── */
+  --shadow-overlay:     0 18px 60px rgba(0,0,0,0.28);
+  --shadow-inner:       0 -8px 32px rgba(0,0,0,0.6);
+  --shadow-glow-accent: 0 0 6px #00d0c4;
+}
+
 :root {
   color-scheme: dark;
   background: #050607;
