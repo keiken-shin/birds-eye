@@ -50,7 +50,7 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
       {open && (
         <div
           ref={panelRef}
-          className="absolute bottom-[calc(100%+10px)] right-0 w-[280px] border border-white/12 bg-surface shadow-[0_-8px_32px_rgba(0,0,0,0.6)] overflow-hidden"
+          className="absolute bottom-[calc(100%+10px)] right-0 w-[280px] border border-white/12 bg-surface shadow-inner overflow-hidden"
           role="dialog"
           aria-label="Settings"
         >
@@ -128,6 +128,7 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
 
 
 

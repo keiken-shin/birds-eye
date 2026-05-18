@@ -72,11 +72,12 @@ export function AnalysisSection({ filteredFolders, focusedFolder, setFocusedFold
   );
 }
 
-const panelClass = "relative border border-white/15 bg-white/[0.045] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.28)] before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-4.5 before:w-4.5 before:border-l-2 before:border-t-2 before:border-primary/55";
+const panelClass = "relative border border-white/15 bg-white/[0.045] p-5 shadow-overlay before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-4.5 before:w-4.5 before:border-l-2 before:border-t-2 before:border-primary/55";
 const panelHeaderClass = "mb-4 flex items-baseline justify-between gap-4 uppercase";
 const panelTitleClass = "text-17 font-black uppercase text-primary";
 const panelMetaClass = "inline-flex items-center gap-1.5 font-mono text-11 uppercase text-muted";
 const emptyClass = "grid min-h-[260px] place-items-center border border-dashed border-primary/20 bg-[radial-gradient(circle,rgba(244,241,234,0.08)_1px,transparent_1.2px)] bg-[length:18px_18px] p-6 text-center text-muted";
+
 
 
 

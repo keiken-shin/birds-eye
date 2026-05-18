@@ -45,7 +45,7 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
       {open && (
         <div
           ref={panelRef}
-          className="absolute bottom-[calc(100%+10px)] right-0 w-[340px] border border-white/12 bg-surface shadow-[0_-8px_32px_rgba(0,0,0,0.6)]"
+          className="absolute bottom-[calc(100%+10px)] right-0 w-[340px] border border-white/12 bg-surface shadow-inner"
           role="dialog"
           aria-label="Scan queue"
         >
@@ -102,7 +102,7 @@ function QueueItemRow({
 
   const dotColor =
     item.status === "scanning"
-      ? "bg-accent animate-pulse shadow-[0_0_6px_#00d0c4]"
+      ? "bg-accent animate-pulse shadow-glow-accent"
       : item.status === "done"
       ? "bg-success"
       : "bg-white/20";
@@ -189,6 +189,7 @@ function QueueItemRow({
     </div>
   );
 }
+
 
 
 

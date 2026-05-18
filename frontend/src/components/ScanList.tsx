@@ -43,7 +43,7 @@ function ScanListItem({ item, isSelected }: { item: QueueItem; isSelected: boole
   const { deleteQueueItem } = useScanContext();
   const dotColor =
     item.status === "scanning"
-      ? "bg-accent animate-pulse shadow-[0_0_6px_#00d0c4]"
+      ? "bg-accent animate-pulse shadow-glow-accent"
       : item.status === "done"
       ? "bg-success"
       : "bg-white/20";
@@ -101,6 +101,7 @@ function formatAge(ts: number): string {
   if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
   return `${Math.floor(sec / 3600)}h ago`;
 }
+
 
 
 
