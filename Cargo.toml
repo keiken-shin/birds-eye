@@ -8,6 +8,7 @@ license = "MIT"
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
+regex = "1"
 
 [lib]
 name = "birds_eye"

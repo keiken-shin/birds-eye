@@ -51,6 +51,7 @@ export type ScanStatus = "idle" | "scanning" | "paused" | "complete" | "cancelle
 
 export type ScanState = {
   status: ScanStatus;
+  finalizing: boolean;
   rootName: string;
   totalFiles: number;
   processedFiles: number;
@@ -143,6 +144,7 @@ export const emptyFolderCategories = (): Record<CategoryKey, number> =>
 
 export const initialScanState: ScanState = {
   status: "idle",
+  finalizing: false,
   rootName: "No folder selected",
   totalFiles: 0,
   processedFiles: 0,
@@ -192,3 +194,33 @@ export function formatCount(value: number) {
 export function lastSegment(path: string) {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
+
+export type SearchFilters = {
+  kinds?: CategoryKey[];
+  extensions?: string[];
+  minBytes?: number;
+  maxBytes?: number;
+  useRegex?: boolean;
+};
+
+export type QueueItemStatus = "scanning" | "finalizing" | "done" | "loaded";
+
+export type ScanLogEntry = {
+  ts: number;
+  level: "info" | "warn" | "error";
+  message: string;
+};
+
+export type QueueItem = {
+  id: string;
+  rootName: string;
+  status: QueueItemStatus;
+  progress: number;
+  indexPath: string;
+  totalFiles?: number;
+  totalBytes?: number;
+  foldersScanned?: number;
+  elapsedMs?: number;
+  loadedAt?: number;
+  logs: ScanLogEntry[];
+};

@@ -42,6 +42,8 @@ export function useScan({
   refreshSavedIndexes: () => Promise<void>;
 }): {
   scan: ScanState;
+  workspaceScan: ScanState | null;
+  workspaceIndexPath: string | null;
   filter: CategoryKey | "all";
   setFilter: React.Dispatch<React.SetStateAction<CategoryKey | "all">>;
   focusedFolder: string | null;
@@ -65,6 +67,10 @@ export function useScan({
   const isWaitingForJobId = useRef(false);
   const nativeEventStateRef = useRef(new Map<number, NativeEventState>());
   const [scan, setScan] = useState<ScanState>(initialScanState);
+  const scanRef = useRef(scan);
+  scanRef.current = scan;
+  const [workspaceScan, setWorkspaceScan] = useState<ScanState | null>(null);
+  const [workspaceIndexPath, setWorkspaceIndexPath] = useState<string | null>(null);
   const [filter, setFilter] = useState<CategoryKey | "all">("all");
   const [currentIndexPath, setCurrentIndexPath] = useState<string | null>(null);
   const [focusedFolder, setFocusedFolder] = useState<string | null>(null);
@@ -140,15 +146,18 @@ export function useScan({
     if (isWaitingForJobId.current && !options.replay) return;
     if (shouldIgnoreNativeJobEvent(event)) return;
 
+    const isFinalizing = event.message === "finalizing index";
+
     if (event.status === "Failed") {
       setRuntimeMessage(event.message);
-    } else if (event.message === "finalizing index") {
+    } else if (isFinalizing) {
       setRuntimeMessage("Finalizing index");
     }
 
     setScan((current) => ({
       ...current,
       status: event.status === "Completed" ? "complete" : event.status === "Cancelled" || event.status === "Failed" ? "cancelled" : "scanning",
+      finalizing: isFinalizing,
       processedFiles: Math.max(current.processedFiles, event.files_scanned),
       totalFiles: Math.max(current.totalFiles, event.files_scanned),
       processedBytes: Math.max(current.processedBytes, event.bytes_scanned),
@@ -282,11 +291,13 @@ export function useScan({
   }, []);
 
   const pauseScan = useCallback(() => {
+    if (!workerRef.current) return;
     postWorker(workerRef.current, { type: "pause" });
     setScan((current) => ({ ...current, status: "paused" }));
   }, []);
 
   const resumeScan = useCallback(() => {
+    if (!workerRef.current) return;
     postWorker(workerRef.current, { type: "resume" });
     setScan((current) => ({ ...current, status: "scanning" }));
   }, []);
@@ -307,6 +318,8 @@ export function useScan({
     setFilter("all");
     setFocusedFolder(null);
     setCurrentIndexPath(null);
+    setWorkspaceScan(null);
+    setWorkspaceIndexPath(null);
     setScan(initialScanState);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -315,7 +328,8 @@ export function useScan({
 
   const openSavedIndex = useCallback(async (entry: NativeIndexEntry) => {
     const overview = await queryNativeIndex(entry.index_path, 1000);
-    setScan((current) => ({
+    const current = scanRef.current;
+    const loadedState: ScanState = {
       ...mergeNativeOverview(current.status === "idle" ? initialScanState : current, overview),
       status: "complete",
       rootName: entry.root_path ? lastSegment(entry.root_path) : "Saved index",
@@ -324,10 +338,12 @@ export function useScan({
       processedBytes: entry.bytes_scanned,
       totalBytes: entry.bytes_scanned,
       currentPath: entry.root_path ?? entry.index_path,
-    }));
+    };
+    setScan(loadedState);
+    setWorkspaceScan(loadedState);
+    setWorkspaceIndexPath(entry.index_path);
     setCurrentIndexPath(entry.index_path);
     setRuntimeMessage("Saved index loaded");
-    window.location.hash = "dashboard";
   }, [setRuntimeMessage]);
 
   const rescanSavedIndex = useCallback(async (entry: NativeIndexEntry) => {
@@ -351,7 +367,6 @@ export function useScan({
       isWaitingForJobId.current = false;
       setRuntimeMessage(error instanceof Error ? error.message : "Native rescan failed");
       setScan((current) => ({ ...current, status: "cancelled" }));
-      window.location.hash = "scan";
       return;
     }
     nativeJobRef.current = { jobId, indexPath };
@@ -376,7 +391,6 @@ export function useScan({
       setRuntimeMessage("Native index mode");
     }
 
-    window.location.hash = "scan";
     // handleNativeJobEvent is intentionally omitted — it only reads refs and stable setters,
     // so the stale closure is harmless. Rebuilding rescanSavedIndex on every render
     // would cause the listener to rebind unnecessarily.
@@ -385,6 +399,8 @@ export function useScan({
 
   return {
     scan,
+    workspaceScan,
+    workspaceIndexPath,
     filter,
     setFilter,
     focusedFolder,

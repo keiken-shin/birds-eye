@@ -113,6 +113,7 @@ async function scanFiles(files: File[]) {
   function snapshot(status: ScanProgressPayload["status"]): ScanProgressPayload {
     return {
       status,
+      finalizing: false,
       rootName,
       totalFiles: files.length,
       processedFiles,

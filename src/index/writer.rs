@@ -1,5 +1,6 @@
 use crate::index::schema::ALL_MIGRATIONS;
 use crate::scanner::{FileRecord, FolderRecord, ScanEvent, ScanStats};
+use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::fs::File;
@@ -204,6 +205,126 @@ impl IndexWriter {
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn search_files_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        extensions: Option<&[String]>,
+        kinds: Option<&[String]>,
+        min_bytes: Option<u64>,
+        max_bytes: Option<u64>,
+        use_regex: bool,
+    ) -> Result<Vec<FileSearchResult>, IndexError> {
+        let trimmed_query = query.trim();
+        let regex = if use_regex && !trimmed_query.is_empty() {
+            match Regex::new(trimmed_query) {
+                Ok(regex) => Some(regex),
+                Err(_) => return Ok(Vec::new()),
+            }
+        } else {
+            None
+        };
+        let mut conditions: Vec<String> = vec!["deleted_at IS NULL".to_owned()];
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        let mut param_index = 1usize;
+
+        // Text / regex query
+        if !trimmed_query.is_empty() && !use_regex {
+            let escaped = escape_like_pattern(trimmed_query);
+            let pattern = format!("%{escaped}%");
+            conditions.push(format!(
+                "(name LIKE ?{param_index} ESCAPE '\\' OR path LIKE ?{param_index} ESCAPE '\\')"
+            ));
+            params.push(Box::new(pattern));
+            param_index += 1;
+        }
+
+        // Extension filter
+        if let Some(exts) = extensions {
+            if !exts.is_empty() {
+                let placeholders: Vec<String> = exts
+                    .iter()
+                    .map(|_| {
+                        let s = format!("?{param_index}");
+                        param_index += 1;
+                        s
+                    })
+                    .collect();
+                conditions.push(format!("extension IN ({})", placeholders.join(",")));
+                for ext in exts {
+                    params.push(Box::new(ext.to_lowercase()));
+                }
+            }
+        }
+
+        // Media kind filter
+        if let Some(ks) = kinds {
+            if !ks.is_empty() {
+                let placeholders: Vec<String> = ks
+                    .iter()
+                    .map(|_| {
+                        let s = format!("?{param_index}");
+                        param_index += 1;
+                        s
+                    })
+                    .collect();
+                conditions.push(format!("media_kind IN ({})", placeholders.join(",")));
+                for k in ks {
+                    params.push(Box::new(k.to_lowercase()));
+                }
+            }
+        }
+
+        // Size range
+        if let Some(min) = min_bytes {
+            conditions.push(format!("size >= ?{param_index}"));
+            params.push(Box::new(min as i64));
+            param_index += 1;
+        }
+        if let Some(max) = max_bytes {
+            conditions.push(format!("size <= ?{param_index}"));
+            params.push(Box::new(max as i64));
+            param_index += 1;
+        }
+
+        let where_clause = conditions.join(" AND ");
+        let limit_clause = if regex.is_some() {
+            String::new()
+        } else {
+            format!(" LIMIT ?{param_index}")
+        };
+        let sql = format!(
+            "SELECT path, name, size, extension, media_kind, modified_at
+             FROM files
+             WHERE {where_clause}
+             ORDER BY size DESC, modified_at DESC{limit_clause}"
+        );
+        if regex.is_none() {
+            params.push(Box::new(limit as i64));
+        }
+
+        let mut statement = self.connection.prepare(&sql)?;
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let rows = statement.query_map(param_refs.as_slice(), |row| {
+            Ok(FileSearchResult {
+                path: row.get(0)?,
+                name: row.get(1)?,
+                size: row.get(2)?,
+                extension: row.get(3)?,
+                media_kind: row.get(4)?,
+                modified_at: row.get(5)?,
+            })
+        })?;
+        let mut results: Vec<FileSearchResult> = rows.collect::<Result<Vec<_>, _>>()?;
+
+        if let Some(re) = regex {
+            results.retain(|file| re.is_match(&file.name) || re.is_match(&file.path));
+            results.truncate(limit);
+        }
+
+        Ok(results)
     }
 
     pub fn extension_summaries(&self, limit: usize) -> Result<Vec<ExtensionSummary>, IndexError> {
