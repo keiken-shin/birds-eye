@@ -212,3 +212,4 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     </ScanContext.Provider>
   );
 }
+

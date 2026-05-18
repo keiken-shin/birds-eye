@@ -50,7 +50,7 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
       {open && (
         <div
           ref={panelRef}
-          className="absolute bottom-[calc(100%+10px)] right-0 w-[280px] border border-white/12 bg-[#0d0f11] shadow-[0_-8px_32px_rgba(0,0,0,0.6)] overflow-hidden"
+          className="absolute bottom-[calc(100%+10px)] right-0 w-[280px] border border-white/12 bg-surface shadow-[0_-8px_32px_rgba(0,0,0,0.6)] overflow-hidden"
           role="dialog"
           aria-label="Settings"
         >
@@ -77,7 +77,7 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
                         onClick={() => setTheme(t)}
                         className={`flex-1 border py-[6px] font-mono !text-xs uppercase transition-colors ${
                           theme === t
-                            ? "border-[#00d0c4]/40 bg-[#00d0c4]/10 text-[#00d0c4]"
+                            ? "border-accent/40 bg-accent/10 text-accent"
                             : "border-white/10 text-white/30 hover:border-white/20 hover:text-white/50"
                         }`}
                       >
@@ -116,7 +116,7 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
               <div className="px-[14px] py-[10px] grid gap-[2px]">
                 {SHORTCUTS.map(({ keys, action }) => (
                   <div key={keys} className="flex items-center justify-between py-[6px] border-b border-white/5 last:border-0">
-                    <span className="font-mono text-[10px] bg-white/8 px-[8px] py-[3px] text-[#f4f1ea]/60">{keys}</span>
+                    <span className="font-mono text-[10px] bg-white/8 px-[8px] py-[3px] text-primary/60">{keys}</span>
                     <span className={`mono text-white/30`}>{action}</span>
                   </div>
                 ))}
@@ -128,3 +128,4 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+

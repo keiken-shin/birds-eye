@@ -35,3 +35,4 @@ describe("ScanList", () => {
     expect(link).toBeInTheDocument();
   });
 });
+

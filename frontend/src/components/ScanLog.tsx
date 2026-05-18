@@ -34,7 +34,7 @@ export function ScanLog({ entries, isActive }: ScanLogProps) {
         <span className="font-mono text-[10px] uppercase tracking-[1.5px] text-white/30">Log</span>
         {!autoScroll && (
           <button
-            className="font-mono text-[9px] uppercase text-[#00d0c4]/60 hover:text-[#00d0c4]"
+            className="font-mono text-[9px] uppercase text-accent/60 hover:text-accent"
             type="button"
             onClick={() => {
               setAutoScroll(true);
@@ -74,14 +74,14 @@ function LogLine({ entry }: { entry: ScanLogEntry }) {
 
   const levelColor =
     entry.level === "error"
-      ? "text-[#ff6b6b]"
+      ? "text-danger"
       : entry.level === "warn"
       ? "text-[#f5c842]"
       : "text-white/25";
 
   const messageColor =
     entry.level === "error"
-      ? "text-[#ff6b6b]/80"
+      ? "text-danger/80"
       : entry.level === "warn"
       ? "text-[#f5c842]/70"
       : "text-white/45";
@@ -94,3 +94,4 @@ function LogLine({ entry }: { entry: ScanLogEntry }) {
     </div>
   );
 }
+

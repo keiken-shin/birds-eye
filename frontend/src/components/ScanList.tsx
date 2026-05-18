@@ -23,7 +23,7 @@ export function ScanList({ selectedId }: ScanListProps) {
           <span className={`${mono} text-white/20`}>No scans yet</span>
           <Link
             to="/"
-            className="border border-white/15 px-4 py-2 font-mono text-[11px] uppercase text-[#f4f1ea] hover:bg-white/5"
+            className="border border-white/15 px-4 py-2 font-mono text-[11px] uppercase text-primary hover:bg-white/5"
           >
             Start Scan
           </Link>
@@ -43,9 +43,9 @@ function ScanListItem({ item, isSelected }: { item: QueueItem; isSelected: boole
   const { deleteQueueItem } = useScanContext();
   const dotColor =
     item.status === "scanning"
-      ? "bg-[#00d0c4] animate-pulse shadow-[0_0_6px_#00d0c4]"
+      ? "bg-accent animate-pulse shadow-[0_0_6px_#00d0c4]"
       : item.status === "done"
-      ? "bg-[#b7ff5c]"
+      ? "bg-success"
       : "bg-white/20";
 
   const age = item.loadedAt
@@ -59,28 +59,28 @@ function ScanListItem({ item, isSelected }: { item: QueueItem; isSelected: boole
       <Link
         to={`/scan/${item.id}`}
         className={`flex items-start gap-[10px] border-b border-white/5 px-[16px] py-[12px] transition-colors hover:bg-white/[0.04] ${
-          isSelected ? "border-l-2 border-l-[#00d0c4] bg-white/[0.06] pl-[14px]" : "border-l-2 border-l-transparent"
+          isSelected ? "border-l-2 border-l-accent bg-white/[0.06] pl-[14px]" : "border-l-2 border-l-transparent"
         }`}
       >
         <div className="mt-[4px] shrink-0">
           <div className={`h-[7px] w-[7px] rounded-full ${dotColor}`} />
         </div>
         <div className="min-w-0 flex-1 grid gap-[3px]">
-          <span className="truncate text-[12px] font-black uppercase text-[#f4f1ea]">{item.rootName}</span>
+          <span className="truncate text-[12px] font-black uppercase text-primary">{item.rootName}</span>
           <div className="flex items-center justify-between gap-2">
             <span className={`${mono} text-white/30 capitalize`}>{item.status}</span>
             {age && <span className={`${mono} text-white/20`}>{age}</span>}
           </div>
           {item.status === "scanning" && (
             <div className="mt-[4px] h-[2px] bg-white/8">
-              <div className="h-full bg-[#00d0c4]" style={{ width: `${item.progress}%` }} />
+              <div className="h-full bg-accent" style={{ width: `${item.progress}%` }} />
             </div>
           )}
         </div>
       </Link>
       {(item.status === "done" || item.status === "loaded") && (
         <button
-          className="absolute right-[10px] top-1/2 -translate-y-1/2 grid h-[22px] w-[22px] place-items-center text-white/0 transition-colors group-hover:text-[#ff6b6b]/40 hover:!text-[#ff6b6b]"
+          className="absolute right-[10px] top-1/2 -translate-y-1/2 grid h-[22px] w-[22px] place-items-center text-white/0 transition-colors group-hover:text-danger/40 hover:!text-danger"
           type="button"
           title="Delete scan"
           onClick={(e) => {
@@ -101,3 +101,4 @@ function formatAge(ts: number): string {
   if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
   return `${Math.floor(sec / 3600)}h ago`;
 }
+

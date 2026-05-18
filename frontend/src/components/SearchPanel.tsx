@@ -16,10 +16,10 @@ export function SearchPanel({ searchQuery, setSearchQuery, searchResults }: Sear
         <h2 className={panelTitleClass}>File Search</h2>
         <span className={panelMetaClass}><Search size={14} /> {formatCount(searchResults.length)} matches</span>
       </div>
-      <label className="flex min-h-11 items-center gap-2.5 border border-[#f4f1ea]/20 bg-black/25 px-3 text-[#9a9a94]">
+      <label className="flex min-h-11 items-center gap-2.5 border border-primary/20 bg-black/25 px-3 text-muted">
         <Search size={16} />
         <input
-          className="w-full min-w-0 border-0 bg-transparent font-inherit text-[#f4f1ea] outline-0 placeholder:text-[#687386]"
+          className="w-full min-w-0 border-0 bg-transparent font-inherit text-primary outline-0 placeholder:text-[#687386]"
           type="search"
           value={searchQuery}
           placeholder="Search indexed paths"
@@ -45,12 +45,13 @@ export function SearchPanel({ searchQuery, setSearchQuery, searchResults }: Sear
   );
 }
 
-const panelClass = "relative mt-5 border border-white/15 bg-white/[0.045] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.28)] before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-[18px] before:w-[18px] before:border-l-2 before:border-t-2 before:border-[#f4f1ea]/55";
+const panelClass = "relative mt-5 border border-white/15 bg-white/[0.045] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.28)] before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-[18px] before:w-[18px] before:border-l-2 before:border-t-2 before:border-primary/55";
 const panelHeaderClass = "mb-1 flex items-baseline justify-between gap-4 uppercase";
-const panelTitleClass = "text-[17px] font-black uppercase text-[#f4f1ea]";
-const panelMetaClass = "inline-flex items-center gap-1.5 font-mono text-[11px] uppercase text-[#9a9a94]";
-const compactEmptyClass = "grid min-h-[150px] place-items-center border border-dashed border-[#f4f1ea]/20 bg-[radial-gradient(circle,rgba(244,241,234,0.08)_1px,transparent_1.2px)] bg-[length:18px_18px] p-6 text-center text-[#9a9a94]";
-const fileRowClass = "grid min-h-12 grid-cols-[minmax(0,1fr)_110px_72px] items-center gap-3 border-t border-[#f4f1ea]/10 max-sm:grid-cols-1 max-sm:gap-1 max-sm:py-2.5";
-const pathClass = "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[#dedbd4]";
-const valueClass = "text-right text-[#f4f1ea] max-sm:text-left";
-const smallClass = "text-right font-mono text-[#9a9a94] max-sm:text-left";
+const panelTitleClass = "text-[17px] font-black uppercase text-primary";
+const panelMetaClass = "inline-flex items-center gap-1.5 font-mono text-[11px] uppercase text-muted";
+const compactEmptyClass = "grid min-h-[150px] place-items-center border border-dashed border-primary/20 bg-[radial-gradient(circle,rgba(244,241,234,0.08)_1px,transparent_1.2px)] bg-[length:18px_18px] p-6 text-center text-muted";
+const fileRowClass = "grid min-h-12 grid-cols-[minmax(0,1fr)_110px_72px] items-center gap-3 border-t border-primary/10 max-sm:grid-cols-1 max-sm:gap-1 max-sm:py-2.5";
+const pathClass = "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-subtle";
+const valueClass = "text-right text-primary max-sm:text-left";
+const smallClass = "text-right font-mono text-muted max-sm:text-left";
+

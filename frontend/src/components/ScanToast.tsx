@@ -55,12 +55,12 @@ export function ScanToast() {
   }
 
   return (
-    <div className="fixed bottom-28 right-5 z-30 flex max-w-[320px] items-start gap-3 border border-[#b7ff5c]/25 bg-[#0d0f11] px-4 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
+    <div className="fixed bottom-28 right-5 z-30 flex max-w-[320px] items-start gap-3 border border-success/25 bg-surface px-4 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
       <div className="min-w-0 flex-1">
-        <p className="font-mono text-[10px] uppercase tracking-[1.5px] text-[#b7ff5c]">Scan complete</p>
-        <p className="mt-0.5 truncate text-[12px] font-black text-[#f4f1ea]">{toast.name}</p>
+        <p className="font-mono text-[10px] uppercase tracking-[1.5px] text-success">Scan complete</p>
+        <p className="mt-0.5 truncate text-[12px] font-black text-primary">{toast.name}</p>
         <button
-          className="mt-2 border border-[#b7ff5c]/30 bg-[#b7ff5c]/10 px-3 py-1 font-mono text-[9px] font-black uppercase tracking-[1px] text-[#b7ff5c] disabled:opacity-40"
+          className="mt-2 border border-success/30 bg-success/10 px-3 py-1 font-mono text-[9px] font-black uppercase tracking-[1px] text-success disabled:opacity-40"
           type="button"
           onClick={handleLoad}
           disabled={loading}
@@ -79,3 +79,4 @@ export function ScanToast() {
     </div>
   );
 }
+

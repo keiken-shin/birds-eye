@@ -63,3 +63,4 @@ describe("ScanContext activeQueueId", () => {
     expect(result.current.activeQueueId).toBeNull();
   });
 });
+

@@ -33,3 +33,4 @@ export function ScanPage() {
     </div>
   );
 }
+

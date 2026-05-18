@@ -62,19 +62,19 @@ export function WorkspacePage() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 pb-32">
         <p className="font-mono text-[11px] uppercase tracking-[2px] text-white/30">No Scan Loaded</p>
-        <p className="max-w-[400px] text-center text-sm text-[#9a9a94]">
+        <p className="max-w-[400px] text-center text-sm text-muted">
           Start a scan from Home or load a saved index from Library.
         </p>
         <div className="flex gap-3">
           <Link
             to="/"
-            className="inline-flex min-h-[42px] items-center justify-center border border-[#f4f1ea]/50 px-5 font-mono text-[11px] font-black uppercase text-[#f4f1ea] no-underline"
+            className="inline-flex min-h-[42px] items-center justify-center border border-primary/50 px-5 font-mono text-[11px] font-black uppercase text-primary no-underline"
           >
             → Go Home
           </Link>
           <Link
             to="/library"
-            className="inline-flex min-h-[42px] items-center justify-center border border-white/15 px-5 font-mono text-[11px] font-black uppercase text-[#9a9a94] no-underline"
+            className="inline-flex min-h-[42px] items-center justify-center border border-white/15 px-5 font-mono text-[11px] font-black uppercase text-muted no-underline"
           >
             → Open Library
           </Link>
@@ -87,12 +87,12 @@ export function WorkspacePage() {
     <>
       <CommandPalette currentIndexPath={workspaceIndexPath} nativeRuntime={nativeRuntime} scan={workspaceScan} />
       <section className="relative z-[1] mx-auto max-w-[1440px] min-w-0 px-[42px] pb-[118px] max-sm:px-4 max-sm:pb-28">
-        <header className="mb-[18px] grid gap-2 border-t border-[#f4f1ea]/20 pt-5">
-          <p className="m-0 text-[13px] font-bold uppercase text-[#00d0c4]">Workspace / storage intelligence</p>
-          <h2 className="max-w-[860px] text-[clamp(28px,3vw,46px)] font-black uppercase leading-[0.95] text-[#f4f1ea]">
+        <header className="mb-[18px] grid gap-2 border-t border-primary/20 pt-5">
+          <p className="m-0 text-[13px] font-bold uppercase text-accent">Workspace / storage intelligence</p>
+          <h2 className="max-w-[860px] text-[clamp(28px,3vw,46px)] font-black uppercase leading-[0.95] text-primary">
             Indexed terrain and cleanup surfaces
           </h2>
-          <span className="max-w-[760px] text-sm leading-normal text-[#9a9a94]">
+          <span className="max-w-[760px] text-sm leading-normal text-muted">
             Treemap, duplicate candidates, and saved local indexes remain live below.{" "}
             <kbd className="border border-white/15 px-1 font-mono text-[10px] text-white/40">Ctrl+K</kbd> to search files.
           </span>
@@ -118,3 +118,4 @@ export function WorkspacePage() {
     </>
   );
 }
+

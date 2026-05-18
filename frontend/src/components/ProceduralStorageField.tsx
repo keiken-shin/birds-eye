@@ -439,12 +439,13 @@ export function ProceduralStorageField() {
   return (
     <div className="relative min-h-56 overflow-hidden border-y border-y-white/15 max-sm:min-h-[166px]" aria-hidden="true">
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-      <span className="absolute bottom-4 left-[18px] bg-[#f4f1ea] px-2 py-1.5 font-mono text-[11px] uppercase font-extrabold text-[#050607] max-sm:bottom-3 max-sm:left-3 max-sm:max-w-[calc(100%-24px)]">
+      <span className="absolute bottom-4 left-[18px] bg-primary px-2 py-1.5 font-mono text-[11px] uppercase font-extrabold text-base max-sm:bottom-3 max-sm:left-3 max-sm:max-w-[calc(100%-24px)]">
         Procedural storage field
       </span>
-      <span className="font-mono text-[11px] uppercase absolute bottom-4 right-[18px] text-[#9a9a94] max-sm:hidden">
+      <span className="font-mono text-[11px] uppercase absolute bottom-4 right-[18px] text-muted max-sm:hidden">
         folders / density / duplicate vectors
       </span>
     </div>
   );
 }
+

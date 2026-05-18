@@ -37,3 +37,4 @@ describe("CommandPalette", () => {
     expect(screen.getByTitle(/toggle filters/i)).toBeInTheDocument();
   });
 });
+
