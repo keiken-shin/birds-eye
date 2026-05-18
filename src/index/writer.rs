@@ -217,13 +217,22 @@ impl IndexWriter {
         max_bytes: Option<u64>,
         use_regex: bool,
     ) -> Result<Vec<FileSearchResult>, IndexError> {
+        let trimmed_query = query.trim();
+        let regex = if use_regex && !trimmed_query.is_empty() {
+            match Regex::new(trimmed_query) {
+                Ok(regex) => Some(regex),
+                Err(_) => return Ok(Vec::new()),
+            }
+        } else {
+            None
+        };
         let mut conditions: Vec<String> = vec!["deleted_at IS NULL".to_owned()];
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         let mut param_index = 1usize;
 
         // Text / regex query
-        if !query.trim().is_empty() && !use_regex {
-            let escaped = escape_like_pattern(query.trim());
+        if !trimmed_query.is_empty() && !use_regex {
+            let escaped = escape_like_pattern(trimmed_query);
             let pattern = format!("%{escaped}%");
             conditions.push(format!(
                 "(name LIKE ?{param_index} ESCAPE '\\' OR path LIKE ?{param_index} ESCAPE '\\')"
@@ -281,14 +290,20 @@ impl IndexWriter {
         }
 
         let where_clause = conditions.join(" AND ");
+        let limit_clause = if regex.is_some() {
+            String::new()
+        } else {
+            format!(" LIMIT ?{param_index}")
+        };
         let sql = format!(
             "SELECT path, name, size, extension, media_kind, modified_at
              FROM files
              WHERE {where_clause}
-             ORDER BY size DESC, modified_at DESC
-             LIMIT ?{param_index}"
+             ORDER BY size DESC, modified_at DESC{limit_clause}"
         );
-        params.push(Box::new(limit as i64));
+        if regex.is_none() {
+            params.push(Box::new(limit as i64));
+        }
 
         let mut statement = self.connection.prepare(&sql)?;
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
@@ -304,12 +319,9 @@ impl IndexWriter {
         })?;
         let mut results: Vec<FileSearchResult> = rows.collect::<Result<Vec<_>, _>>()?;
 
-        // Post-filter for regex (applied after SQL fetch)
-        if use_regex && !query.trim().is_empty() {
-            if let Ok(re) = Regex::new(query.trim()) {
-                results.retain(|file| re.is_match(&file.name) || re.is_match(&file.path));
-            }
-            // If regex is invalid, return empty results (frontend validates before sending)
+        if let Some(re) = regex {
+            results.retain(|file| re.is_match(&file.name) || re.is_match(&file.path));
+            results.truncate(limit);
         }
 
         Ok(results)

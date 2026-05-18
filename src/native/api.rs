@@ -509,6 +509,63 @@ mod tests {
         cleanup(&root);
     }
 
+    #[test]
+    fn search_files_with_regex_checks_beyond_limit_window() {
+        let root = test_root("search-regex-limit");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("create dirs");
+        write_file(&root.join("data").join("large.bin"), &[1; 400]);
+        write_file(&root.join("data").join("medium.bin"), &[2; 300]);
+        write_file(&root.join("data").join("target_2026.txt"), &[3; 10]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+        }).expect("scan failed");
+
+        let results = search_files(SearchFilesRequest {
+            index_path,
+            query: r"target_\d{4}".to_owned(),
+            limit: 1,
+            extensions: None,
+            kinds: None,
+            min_bytes: None,
+            max_bytes: None,
+            use_regex: Some(true),
+        }).expect("search failed");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "target_2026.txt");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn search_files_with_invalid_regex_returns_empty_results() {
+        let root = test_root("search-regex-invalid");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("create dirs");
+        write_file(&root.join("data").join("report.pdf"), &[1; 48]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+        }).expect("scan failed");
+
+        let results = search_files(SearchFilesRequest {
+            index_path,
+            query: "[".to_owned(),
+            limit: 10,
+            extensions: None,
+            kinds: None,
+            min_bytes: None,
+            max_bytes: None,
+            use_regex: Some(true),
+        }).expect("search failed");
+
+        assert!(results.is_empty());
+        cleanup(&root);
+    }
+
     fn test_root(name: &str) -> PathBuf {
         let root = std::env::current_dir()
             .expect("failed to get current dir")
