@@ -47,11 +47,12 @@ export function SearchPanel({ searchQuery, setSearchQuery, searchResults }: Sear
 
 const panelClass = "relative mt-5 border border-white/15 bg-white/[0.045] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.28)] before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-[18px] before:w-[18px] before:border-l-2 before:border-t-2 before:border-primary/55";
 const panelHeaderClass = "mb-1 flex items-baseline justify-between gap-4 uppercase";
-const panelTitleClass = "text-[17px] font-black uppercase text-primary";
-const panelMetaClass = "inline-flex items-center gap-1.5 font-mono text-[11px] uppercase text-muted";
+const panelTitleClass = "text-17 font-black uppercase text-primary";
+const panelMetaClass = "inline-flex items-center gap-1.5 font-mono text-11 uppercase text-muted";
 const compactEmptyClass = "grid min-h-[150px] place-items-center border border-dashed border-primary/20 bg-[radial-gradient(circle,rgba(244,241,234,0.08)_1px,transparent_1.2px)] bg-[length:18px_18px] p-6 text-center text-muted";
 const fileRowClass = "grid min-h-12 grid-cols-[minmax(0,1fr)_110px_72px] items-center gap-3 border-t border-primary/10 max-sm:grid-cols-1 max-sm:gap-1 max-sm:py-2.5";
 const pathClass = "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-subtle";
 const valueClass = "text-right text-primary max-sm:text-left";
 const smallClass = "text-right font-mono text-muted max-sm:text-left";
+
 

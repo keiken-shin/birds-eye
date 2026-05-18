@@ -15,7 +15,7 @@ interface LandingPageProps {
   handleFiles: (fileList: FileList | null) => void;
 }
 
-const mono = "font-mono text-[11px] uppercase";
+const mono = "font-mono text-11 uppercase";
 const primaryButton =
   "inline-flex min-h-[54px] items-center justify-center gap-2 bg-primary px-6 text-sm font-black uppercase text-base";
 const outlineButton =
@@ -80,7 +80,7 @@ export function LandingPage({
       </div>
 
       <div className="relative z-[1]">
-        <p className="mb-0 text-[13px] font-bold uppercase text-accent">Launch interface / scan control</p>
+        <p className="mb-0 text-13 font-bold uppercase text-accent">Launch interface / scan control</p>
         <h1 className="mt-2.5 max-w-[900px] text-[clamp(58px,7vw,96px)] font-black uppercase leading-[0.86] text-primary max-sm:text-[52px]">
           Scan The <span className="block text-transparent [-webkit-text-stroke:1px_#f4f1ea]">Great Expanse</span>
         </h1>
@@ -112,4 +112,5 @@ export function LandingPage({
     </section>
   );
 }
+
 

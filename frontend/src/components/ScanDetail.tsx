@@ -47,8 +47,8 @@ export function ScanDetail({ id }: ScanDetailProps) {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/10 px-[16px] py-[12px] gap-3">
         <div className="flex items-center gap-[10px] min-w-0">
-          <span className="truncate text-[13px] font-black uppercase text-primary">{item.rootName}</span>
-          <span className={`font-mono text-[10px] uppercase shrink-0 ${statusColor}`}>{item.status}</span>
+          <span className="truncate text-13 font-black uppercase text-primary">{item.rootName}</span>
+          <span className={`font-mono text-10 uppercase shrink-0 ${statusColor}`}>{item.status}</span>
         </div>
         <div className="flex items-center gap-[6px] shrink-0">
           {isActive && scan.status === "scanning" && (
@@ -73,7 +73,7 @@ export function ScanDetail({ id }: ScanDetailProps) {
           )}
           {(item.status === "done" || item.status === "loaded") && (
             <button
-              className="flex items-center gap-1.5 border border-danger/20 px-2 py-1 font-mono text-[9px] font-black uppercase tracking-[1px] text-danger/50 hover:border-danger/50 hover:text-danger"
+              className="flex items-center gap-1.5 border border-danger/20 px-2 py-1 font-mono text-9 font-black uppercase tracking-[1px] text-danger/50 hover:border-danger/50 hover:text-danger"
               type="button"
               onClick={() => {
                 deleteQueueItem(id);
@@ -120,4 +120,5 @@ export function ScanDetail({ id }: ScanDetailProps) {
     </div>
   );
 }
+
 

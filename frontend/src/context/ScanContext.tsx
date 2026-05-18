@@ -213,3 +213,4 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+

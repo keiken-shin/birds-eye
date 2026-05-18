@@ -68,7 +68,7 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
               <div className="px-[14px] py-[12px] grid gap-[14px]">
                 {/* Theme */}
                 <div>
-                  <span className="font-mono text-[10px] uppercase tracking-[1.5px] text-white/30 block mb-[8px]">Theme</span>
+                  <span className="font-mono text-10 uppercase tracking-[1.5px] text-white/30 block mb-[8px]">Theme</span>
                   <div className="flex gap-[4px]">
                     {(["dark", "light", "system"] as Theme[]).map((t) => (
                       <button
@@ -116,7 +116,7 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
               <div className="px-[14px] py-[10px] grid gap-[2px]">
                 {SHORTCUTS.map(({ keys, action }) => (
                   <div key={keys} className="flex items-center justify-between py-[6px] border-b border-white/5 last:border-0">
-                    <span className="font-mono text-[10px] bg-white/8 px-[8px] py-[3px] text-primary/60">{keys}</span>
+                    <span className="font-mono text-10 bg-white/8 px-[8px] py-[3px] text-primary/60">{keys}</span>
                     <span className={`mono text-white/30`}>{action}</span>
                   </div>
                 ))}
@@ -128,4 +128,5 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
 

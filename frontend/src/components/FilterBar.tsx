@@ -29,8 +29,9 @@ export function FilterBar({ filter, setFilter }: FilterBarProps) {
 
 function filterButtonClass(active: boolean) {
   return [
-    "inline-flex min-h-[42px] cursor-pointer items-center gap-2 border px-3 font-mono text-[11px] font-extrabold uppercase",
+    "inline-flex min-h-[42px] cursor-pointer items-center gap-2 border px-3 font-mono text-11 font-extrabold uppercase",
     active ? "border-primary bg-primary text-base" : "border-white/15 bg-black/20 text-muted hover:bg-white/10 hover:text-primary",
   ].join(" ");
 }
+
 

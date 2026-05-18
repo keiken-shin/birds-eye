@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type React from "react";
 
-const mono = "font-mono text-[11px] uppercase";
+const mono = "font-mono text-11 uppercase";
 const panelClass = "border border-white/12 bg-surface shadow-[0_-8px_32px_rgba(0,0,0,0.6)]";
 
 export function ConfigDropdown({ children }: { children: React.ReactNode }) {
@@ -65,7 +65,7 @@ export function ConfigDropdown({ children }: { children: React.ReactNode }) {
 function ConfigSection({ label, children }: { children: React.ReactNode; label: string }) {
   return (
     <div>
-      <span className="font-mono text-[10px] uppercase tracking-[1.5px] text-white/30 mb-[6px] block">{label}</span>
+      <span className="font-mono text-10 uppercase tracking-[1.5px] text-white/30 mb-[6px] block">{label}</span>
       <div className="grid gap-[4px]">{children}</div>
     </div>
   );
@@ -90,12 +90,13 @@ function ConfigOption({
           : "border-white/8 text-white/30"
       } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
     >
-      <span className="font-mono text-[11px] uppercase">{label}</span>
+      <span className="font-mono text-11 uppercase">{label}</span>
       <div className="flex items-center gap-2">
         {active && <span className="h-[5px] w-[5px] rounded-full bg-accent" />}
-        {hint && <span className="font-mono text-[9px] uppercase text-white/20">{hint}</span>}
+        {hint && <span className="font-mono text-9 uppercase text-white/20">{hint}</span>}
       </div>
     </div>
   );
 }
+
 
