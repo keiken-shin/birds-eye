@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type React from "react";
 
 const mono = "font-mono text-[11px] uppercase";
-const panelClass = "border border-white/12 bg-[#0d0f11] shadow-[0_-8px_32px_rgba(0,0,0,0.6)]";
+const panelClass = "border border-white/12 bg-surface shadow-[0_-8px_32px_rgba(0,0,0,0.6)]";
 
 export function ConfigDropdown({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -86,15 +86,16 @@ function ConfigOption({
     <div
       className={`flex items-center justify-between px-[10px] py-[7px] border ${
         active
-          ? "border-[#00d0c4]/30 bg-[#00d0c4]/8 text-[#00d0c4]"
+          ? "border-accent/30 bg-accent/8 text-accent"
           : "border-white/8 text-white/30"
       } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
     >
       <span className="font-mono text-[11px] uppercase">{label}</span>
       <div className="flex items-center gap-2">
-        {active && <span className="h-[5px] w-[5px] rounded-full bg-[#00d0c4]" />}
+        {active && <span className="h-[5px] w-[5px] rounded-full bg-accent" />}
         {hint && <span className="font-mono text-[9px] uppercase text-white/20">{hint}</span>}
       </div>
     </div>
   );
 }
+

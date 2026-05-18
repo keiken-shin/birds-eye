@@ -17,11 +17,11 @@ interface LandingPageProps {
 
 const mono = "font-mono text-[11px] uppercase";
 const primaryButton =
-  "inline-flex min-h-[54px] items-center justify-center gap-2 bg-[#f4f1ea] px-6 text-sm font-black uppercase text-[#050607]";
+  "inline-flex min-h-[54px] items-center justify-center gap-2 bg-primary px-6 text-sm font-black uppercase text-base";
 const outlineButton =
-  "inline-flex min-h-[54px] items-center justify-center gap-2 border border-[#f4f1ea]/50 px-5 text-sm font-black uppercase text-[#f4f1ea] no-underline";
+  "inline-flex min-h-[54px] items-center justify-center gap-2 border border-primary/50 px-5 text-sm font-black uppercase text-primary no-underline";
 const iconButton =
-  "grid h-[54px] w-[54px] place-items-center border border-white/15 bg-black/25 text-[#f4f1ea] hover:bg-white/10";
+  "grid h-[54px] w-[54px] place-items-center border border-white/15 bg-black/25 text-primary hover:bg-white/10";
 
 export function LandingPage({
   scan,
@@ -61,16 +61,16 @@ export function LandingPage({
         <div className="flex items-center gap-[13px]">
           <img className="h-[42px] w-[42px]" src={logoUrl} alt="" />
           <div className="grid gap-[3px]">
-            <strong className="text-xl font-black uppercase text-[#f4f1ea] max-sm:text-[19px]">Birds Eye</strong>
-            <span className={`${mono} text-[#9a9a94] max-sm:max-w-[190px]`}>Storage observatory / local-first</span>
+            <strong className="text-xl font-black uppercase text-primary max-sm:text-[19px]">Birds Eye</strong>
+            <span className={`${mono} text-muted max-sm:max-w-[190px]`}>Storage observatory / local-first</span>
           </div>
         </div>
-        <div className={`${mono} flex items-center gap-[18px] text-[#9a9a94] max-sm:grid max-sm:w-full max-sm:grid-cols-2 max-sm:gap-2`}>
+        <div className={`${mono} flex items-center gap-[18px] text-muted max-sm:grid max-sm:w-full max-sm:grid-cols-2 max-sm:gap-2`}>
           <span>
-            Native index <b className="font-extrabold text-[#b7ff5c]">{nativeRuntime ? "online" : "browser"}</b>
+            Native index <b className="font-extrabold text-success">{nativeRuntime ? "online" : "browser"}</b>
           </span>
           <span>
-            Engine <b className="font-extrabold text-[#b7ff5c]">{scan.status === "idle" ? "ready" : scan.status}</b>
+            Engine <b className="font-extrabold text-success">{scan.status === "idle" ? "ready" : scan.status}</b>
           </span>
         </div>
       </header>
@@ -80,8 +80,8 @@ export function LandingPage({
       </div>
 
       <div className="relative z-[1]">
-        <p className="mb-0 text-[13px] font-bold uppercase text-[#00d0c4]">Launch interface / scan control</p>
-        <h1 className="mt-2.5 max-w-[900px] text-[clamp(58px,7vw,96px)] font-black uppercase leading-[0.86] text-[#f4f1ea] max-sm:text-[52px]">
+        <p className="mb-0 text-[13px] font-bold uppercase text-accent">Launch interface / scan control</p>
+        <h1 className="mt-2.5 max-w-[900px] text-[clamp(58px,7vw,96px)] font-black uppercase leading-[0.86] text-primary max-sm:text-[52px]">
           Scan The <span className="block text-transparent [-webkit-text-stroke:1px_#f4f1ea]">Great Expanse</span>
         </h1>
         <p className="mt-[22px] max-w-[650px] text-base font-bold leading-[1.62] text-[#cacac5] max-sm:text-[15px]">
@@ -112,3 +112,4 @@ export function LandingPage({
     </section>
   );
 }
+

@@ -45,7 +45,7 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
       {open && (
         <div
           ref={panelRef}
-          className="absolute bottom-[calc(100%+10px)] right-0 w-[340px] border border-white/12 bg-[#0d0f11] shadow-[0_-8px_32px_rgba(0,0,0,0.6)]"
+          className="absolute bottom-[calc(100%+10px)] right-0 w-[340px] border border-white/12 bg-surface shadow-[0_-8px_32px_rgba(0,0,0,0.6)]"
           role="dialog"
           aria-label="Scan queue"
         >
@@ -56,7 +56,7 @@ export function QueuePopover({ children }: { children: React.ReactNode }) {
               <Link
                 to="/scan"
                 onClick={() => setOpen(false)}
-                className={`mono text-[#00d0c4]/60 hover:text-[#00d0c4] no-underline`}
+                className={`mono text-accent/60 hover:text-accent no-underline`}
               >
                 View All →
               </Link>
@@ -102,9 +102,9 @@ function QueueItemRow({
 
   const dotColor =
     item.status === "scanning"
-      ? "bg-[#00d0c4] animate-pulse shadow-[0_0_6px_#00d0c4]"
+      ? "bg-accent animate-pulse shadow-[0_0_6px_#00d0c4]"
       : item.status === "done"
-      ? "bg-[#b7ff5c]"
+      ? "bg-success"
       : "bg-white/20";
 
   const iconBtn =
@@ -123,7 +123,7 @@ function QueueItemRow({
         <div className="flex min-w-0 items-center gap-2">
           <div className={`h-[6px] w-[6px] shrink-0 rounded-full ${dotColor}`} />
           <span
-            className={`truncate text-[10px] font-black text-[#f4f1ea] ${
+            className={`truncate text-[10px] font-black text-primary ${
               item.status === "loaded" ? "line-through" : ""
             }`}
           >
@@ -142,15 +142,15 @@ function QueueItemRow({
             </button>
           )}
           {(isScanning || isPaused) && (
-            <button className={`${iconBtn} hover:text-[#ff6b6b]`} type="button" onClick={cancelScan} title="Stop">
+            <button className={`${iconBtn} hover:text-danger`} type="button" onClick={cancelScan} title="Stop">
               <Square size={10} />
             </button>
           )}
           {item.status === "scanning" && (
-            <span className={`mono text-[#00d0c4]`}>{scan.status === "paused" ? "paused" : "scanning"}</span>
+            <span className={`mono text-accent`}>{scan.status === "paused" ? "paused" : "scanning"}</span>
           )}
           {item.status === "done" && (
-            <span className={`mono text-[#b7ff5c]`}>done</span>
+            <span className={`mono text-success`}>done</span>
           )}
           {item.status === "loaded" && (
             <span className={`mono text-white/30`}>loaded ✓</span>
@@ -161,7 +161,7 @@ function QueueItemRow({
       {item.status === "scanning" && (
         <>
           <div className="mb-1 h-[2px] bg-white/6">
-            <div className="h-full bg-[#00d0c4]" style={{ width: `${item.progress}%` }} />
+            <div className="h-full bg-accent" style={{ width: `${item.progress}%` }} />
           </div>
           <span className={`mono text-white/30`}>{item.progress}%</span>
         </>
@@ -174,7 +174,7 @@ function QueueItemRow({
             {item.totalBytes ? ` · ${formatBytes(item.totalBytes)}` : ""}
           </span>
           <button
-            className="border border-[#b7ff5c]/30 bg-[#b7ff5c]/10 px-[10px] py-[3px] font-mono text-[9px] font-black uppercase tracking-[1px] text-[#b7ff5c]"
+            className="border border-success/30 bg-success/10 px-[10px] py-[3px] font-mono text-[9px] font-black uppercase tracking-[1px] text-success"
             type="button"
             onClick={() => onLoad(item.id)}
           >
@@ -189,3 +189,4 @@ function QueueItemRow({
     </div>
   );
 }
+

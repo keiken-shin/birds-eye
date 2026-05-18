@@ -23,3 +23,4 @@ describe("ScanLog", () => {
     expect(screen.getByText(/no log entries/i)).toBeInTheDocument();
   });
 });
+

@@ -8,7 +8,7 @@ interface FilterBarProps {
 
 export function FilterBar({ filter, setFilter }: FilterBarProps) {
   return (
-    <section className="mb-[18px] flex flex-wrap gap-2 border-y border-[#f4f1ea]/10 py-3" aria-label="Category filters">
+    <section className="mb-[18px] flex flex-wrap gap-2 border-y border-primary/10 py-3" aria-label="Category filters">
       <button className={filterButtonClass(filter === "all")} type="button" onClick={() => setFilter("all")}>
         All
       </button>
@@ -30,6 +30,7 @@ export function FilterBar({ filter, setFilter }: FilterBarProps) {
 function filterButtonClass(active: boolean) {
   return [
     "inline-flex min-h-[42px] cursor-pointer items-center gap-2 border px-3 font-mono text-[11px] font-extrabold uppercase",
-    active ? "border-[#f4f1ea] bg-[#f4f1ea] text-[#050607]" : "border-white/15 bg-black/20 text-[#9a9a94] hover:bg-white/10 hover:text-[#f4f1ea]",
+    active ? "border-primary bg-primary text-base" : "border-white/15 bg-black/20 text-muted hover:bg-white/10 hover:text-primary",
   ].join(" ");
 }
+

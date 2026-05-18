@@ -21,7 +21,7 @@ export function ScanMetrics({ processedFiles, totalFiles, processedBytes, folder
       </div>
       <div className="border border-white/8 px-[12px] py-[10px]">
         <span className="font-mono text-[10px] uppercase tracking-[1.5px] text-white/25 block mb-[4px]">Throughput</span>
-        <span className="font-mono text-[12px] text-[#f4f1ea]/70">{throughput}</span>
+        <span className="font-mono text-[12px] text-primary/70">{throughput}</span>
       </div>
     </div>
   );
@@ -31,7 +31,8 @@ function MetricCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="border border-white/8 px-[10px] py-[8px]">
       <span className="font-mono text-[9px] uppercase tracking-[1.5px] text-white/25 block mb-[4px]">{label}</span>
-      <span className="font-mono text-[12px] font-black text-[#f4f1ea]">{value}</span>
+      <span className="font-mono text-[12px] font-black text-primary">{value}</span>
     </div>
   );
 }
+

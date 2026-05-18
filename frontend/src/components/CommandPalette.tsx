@@ -148,20 +148,20 @@ export function CommandPalette({
       role="dialog"
       aria-label="File search"
     >
-      <div className="w-full max-w-[600px] border border-white/15 bg-[#07090d] shadow-[0_24px_80px_rgba(0,0,0,0.7)]">
+      <div className="w-full max-w-[600px] border border-white/15 bg-overlay shadow-[0_24px_80px_rgba(0,0,0,0.7)]">
         {/* Search input row */}
         <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
           <Search size={14} className="shrink-0 text-white/30" />
           <input
             ref={inputRef}
-            className="flex-1 bg-transparent font-mono text-[13px] text-[#f4f1ea] placeholder-white/20 outline-none"
+            className="flex-1 bg-transparent font-mono text-[13px] text-primary placeholder-white/20 outline-none"
             placeholder="Search files..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
           <button
             className={`grid h-7 w-7 place-items-center border ${
-              filtersOpen ? "border-[#00d0c4]/40 text-[#00d0c4]" : "border-white/10 text-white/30 hover:text-white/60"
+              filtersOpen ? "border-accent/40 text-accent" : "border-white/10 text-white/30 hover:text-white/60"
             }`}
             type="button"
             title="Toggle filters"
@@ -188,7 +188,7 @@ export function CommandPalette({
                   key={kind}
                   className={`${mono} border px-2 py-0.5 ${
                     selectedKinds.includes(kind)
-                      ? "border-[#00d0c4]/50 bg-[#00d0c4]/10 text-[#00d0c4]"
+                      ? "border-accent/50 bg-accent/10 text-accent"
                       : "border-white/10 text-white/30 hover:border-white/25"
                   }`}
                   type="button"
@@ -201,14 +201,14 @@ export function CommandPalette({
             {/* Extension + size range — uniform height */}
             <div className="flex flex-wrap items-center gap-2">
               <input
-                className="h-7 w-36 border border-white/10 bg-transparent px-2 font-mono text-[10px] text-[#f4f1ea] placeholder-white/20 outline-none"
+                className="h-7 w-36 border border-white/10 bg-transparent px-2 font-mono text-[10px] text-primary placeholder-white/20 outline-none"
                 placeholder=".tsx .rs .pdf"
                 value={extInput}
                 onChange={(e) => setExtInput(e.target.value)}
               />
               <div className="flex items-center gap-1">
                 <input
-                  className="h-7 w-14 border border-white/10 bg-transparent px-2 font-mono text-[10px] text-[#f4f1ea] placeholder-white/20 outline-none"
+                  className="h-7 w-14 border border-white/10 bg-transparent px-2 font-mono text-[10px] text-primary placeholder-white/20 outline-none"
                   placeholder="min"
                   value={minSizeVal}
                   onChange={(e) => setMinSizeVal(e.target.value)}
@@ -216,7 +216,7 @@ export function CommandPalette({
                 <SizeUnitSelect value={minSizeUnit} onChange={setMinSizeUnit} />
                 <span className="px-1 font-mono text-[10px] text-white/20">→</span>
                 <input
-                  className="h-7 w-14 border border-white/10 bg-transparent px-2 font-mono text-[10px] text-[#f4f1ea] placeholder-white/20 outline-none"
+                  className="h-7 w-14 border border-white/10 bg-transparent px-2 font-mono text-[10px] text-primary placeholder-white/20 outline-none"
                   placeholder="max"
                   value={maxSizeVal}
                   onChange={(e) => setMaxSizeVal(e.target.value)}
@@ -226,7 +226,7 @@ export function CommandPalette({
               <button
                 className={`h-7 border px-2 font-mono text-[10px] ${
                   useRegex
-                    ? "border-[#b7ff5c]/40 bg-[#b7ff5c]/10 text-[#b7ff5c]"
+                    ? "border-success/40 bg-success/10 text-success"
                     : "border-white/10 text-white/30"
                 }`}
                 type="button"
@@ -236,7 +236,7 @@ export function CommandPalette({
               </button>
             </div>
             {regexError && (
-              <p className={`${mono} text-[#ff6b6b]`}>{regexError}</p>
+              <p className={`${mono} text-danger`}>{regexError}</p>
             )}
           </div>
         )}
@@ -256,8 +256,8 @@ export function CommandPalette({
               }`}
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[12px] font-bold text-[#f4f1ea]">{result.path}</p>
-                <p className={`${mono} text-[#9a9a94]`}>{formatBytes(result.size)}</p>
+                <p className="truncate text-[12px] font-bold text-primary">{result.path}</p>
+                <p className={`${mono} text-muted`}>{formatBytes(result.size)}</p>
               </div>
               <div className="flex shrink-0 gap-1.5 ml-3">
                 <button
@@ -300,7 +300,7 @@ function SizeUnitSelect({
 }) {
   return (
     <select
-      className="h-7 border border-white/10 bg-[#07090d] px-1 font-mono text-[10px] text-[#9a9a94] outline-none"
+      className="h-7 border border-white/10 bg-overlay px-1 font-mono text-[10px] text-muted outline-none"
       value={value}
       onChange={(e) => onChange(e.target.value as SizeUnit)}
     >
@@ -310,3 +310,4 @@ function SizeUnitSelect({
     </select>
   );
 }
+

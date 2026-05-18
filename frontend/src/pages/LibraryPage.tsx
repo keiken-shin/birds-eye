@@ -51,15 +51,15 @@ export function LibraryPage() {
     <section className="relative z-[1] mx-auto max-w-[1440px] min-w-0 px-[42px] pb-[118px] pt-10 max-sm:px-4 max-sm:pb-28">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className={`${mono} mb-1 text-[#00d0c4]`}>Saved indexes</p>
-          <h1 className="text-[clamp(28px,3vw,46px)] font-black uppercase leading-[0.95] text-[#f4f1ea]">
+          <p className={`${mono} mb-1 text-accent`}>Saved indexes</p>
+          <h1 className="text-[clamp(28px,3vw,46px)] font-black uppercase leading-[0.95] text-primary">
             Library
           </h1>
         </div>
         <div className="flex items-center gap-2 border border-white/15 bg-white/[0.025] px-3 py-2">
           <Search size={13} className="shrink-0 text-white/30" />
           <input
-            className="bg-transparent font-mono text-[11px] uppercase tracking-[1px] text-[#f4f1ea] placeholder-white/20 outline-none"
+            className="bg-transparent font-mono text-[11px] uppercase tracking-[1px] text-primary placeholder-white/20 outline-none"
             placeholder="Filter indexes..."
             value={filterQuery}
             onChange={(e) => setFilterQuery(e.target.value)}
@@ -113,29 +113,29 @@ function LibraryRow({
     ? new Date(entry.last_scanned_at * 1000).toLocaleDateString()
     : "—";
 
-  const iconBtn = "cursor-pointer grid h-8 w-8 place-items-center border border-white/15 text-[#9a9a94] transition-colors";
+  const iconBtn = "cursor-pointer grid h-8 w-8 place-items-center border border-white/15 text-muted transition-colors";
 
   return (
     <div className="flex items-center justify-between gap-4 border-b border-white/7 bg-white/[0.02] px-4 py-3 last:border-b-0">
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-black text-[#f4f1ea]">{label}</p>
-        <p className={`${mono} mt-0.5 text-[#9a9a94]`}>
+        <p className="truncate text-[13px] font-black text-primary">{label}</p>
+        <p className={`${mono} mt-0.5 text-muted`}>
           {formatBytes(entry.bytes_scanned)} · {formatCount(entry.files_scanned)} files · {scannedAt}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         {isConfirmingDelete ? (
           <>
-            <span className={`${mono} text-[#ff6b6b]`}>Delete?</span>
+            <span className={`${mono} text-danger`}>Delete?</span>
             <button
-              className="cursor-pointer !text-xs border border-[#ff6b6b]/40 bg-[#ff6b6b]/10 px-3 py-1 font-mono text-[9px] font-black uppercase text-[#ff6b6b]"
+              className="cursor-pointer !text-xs border border-danger/40 bg-danger/10 px-3 py-1 font-mono text-[9px] font-black uppercase text-danger"
               type="button"
               onClick={onDeleteConfirm}
             >
               Yes
             </button>
             <button
-              className="cursor-pointer grid h-7 w-7 place-items-center border border-white/15 text-[#9a9a94] hover:text-white/60"
+              className="cursor-pointer grid h-7 w-7 place-items-center border border-white/15 text-muted hover:text-white/60"
               type="button"
               onClick={onDeleteCancel}
               title="Cancel"
@@ -146,7 +146,7 @@ function LibraryRow({
         ) : (
           <>
             <button
-              className={`${iconBtn} hover:border-[#00d0c4]/40 hover:text-[#00d0c4]`}
+              className={`${iconBtn} hover:border-accent/40 hover:text-accent`}
               type="button"
               onClick={onLoad}
               title="Load into workspace"
@@ -155,7 +155,7 @@ function LibraryRow({
             </button>
             {entry.root_path && (
               <button
-                className={`${iconBtn} hover:border-white/30 hover:text-[#f4f1ea]`}
+                className={`${iconBtn} hover:border-white/30 hover:text-primary`}
                 type="button"
                 onClick={onRescan}
                 title="Rescan"
@@ -164,7 +164,7 @@ function LibraryRow({
               </button>
             )}
             <button
-              className={`${iconBtn} hover:border-[#ff6b6b]/40 hover:text-[#ff6b6b]`}
+              className={`${iconBtn} hover:border-danger/40 hover:text-danger`}
               type="button"
               onClick={onDeleteRequest}
               title="Delete index"
@@ -177,3 +177,4 @@ function LibraryRow({
     </div>
   );
 }
+
