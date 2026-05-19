@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -140,7 +140,43 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (3, strftime('%s', 'now'));
 "#;
 
-pub const ALL_MIGRATIONS: &[(u32, &str)] = &[(1, MIGRATION_001), (2, MIGRATION_002), (3, MIGRATION_003)];
+pub const MIGRATION_004: &str = r#"
+CREATE TABLE IF NOT EXISTS duplicate_candidates (
+  scan_id INTEGER NOT NULL REFERENCES scan_sessions(id) ON DELETE CASCADE,
+  size INTEGER NOT NULL,
+  file_count INTEGER NOT NULL,
+  total_bytes INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (scan_id, size)
+);
+
+CREATE TABLE IF NOT EXISTS hash_jobs (
+  id INTEGER PRIMARY KEY,
+  scan_id INTEGER NOT NULL REFERENCES scan_sessions(id) ON DELETE CASCADE,
+  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  job_type TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  started_at INTEGER,
+  completed_at INTEGER,
+  UNIQUE (scan_id, file_id, job_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_duplicate_candidates_status ON duplicate_candidates(scan_id, status);
+CREATE INDEX IF NOT EXISTS idx_hash_jobs_status ON hash_jobs(scan_id, status, priority DESC);
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (4, strftime('%s', 'now'));
+"#;
+
+pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
+    (1, MIGRATION_001),
+    (2, MIGRATION_002),
+    (3, MIGRATION_003),
+    (4, MIGRATION_004),
+];
 
 #[cfg(test)]
 mod tests {
@@ -148,8 +184,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 3);
-        assert_eq!(ALL_MIGRATIONS.len(), 3);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 4);
+        assert_eq!(ALL_MIGRATIONS.len(), 4);
     }
 
     #[test]
@@ -183,6 +219,7 @@ mod tests {
         assert!(MIGRATION_002.contains("duplicate_groups ADD COLUMN sample_hash"));
         assert!(MIGRATION_002.contains("idx_files_sample_hash"));
         assert!(MIGRATION_003.contains("ADD COLUMN scan_strategy"));
+        assert!(MIGRATION_004.contains("duplicate_candidates"));
+        assert!(MIGRATION_004.contains("hash_jobs"));
     }
 }
-
