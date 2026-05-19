@@ -52,6 +52,9 @@ export type ScanStatus = "idle" | "scanning" | "paused" | "complete" | "cancelle
 export type ScanState = {
   status: ScanStatus;
   finalizing: boolean;
+  progressCurrent: number;
+  progressTotal: number;
+  progressLabel: string;
   rootName: string;
   totalFiles: number;
   processedFiles: number;
@@ -145,6 +148,9 @@ export const emptyFolderCategories = (): Record<CategoryKey, number> =>
 export const initialScanState: ScanState = {
   status: "idle",
   finalizing: false,
+  progressCurrent: 0,
+  progressTotal: 0,
+  progressLabel: "",
   rootName: "No folder selected",
   totalFiles: 0,
   processedFiles: 0,
@@ -205,6 +211,14 @@ export type SearchFilters = {
 
 export type QueueItemStatus = "scanning" | "finalizing" | "done" | "loaded";
 
+export type ScanStrategy = "xxh3-progressive" | "fnv1a-legacy";
+
+export const defaultScanStrategy: ScanStrategy = "xxh3-progressive";
+
+export function parseScanStrategy(value: string | null | undefined): ScanStrategy {
+  return value === "fnv1a-legacy" || value === "xxh3-progressive" ? value : defaultScanStrategy;
+}
+
 export type ScanLogEntry = {
   ts: number;
   level: "info" | "warn" | "error";
@@ -216,6 +230,9 @@ export type QueueItem = {
   rootName: string;
   status: QueueItemStatus;
   progress: number;
+  progressCurrent?: number;
+  progressTotal?: number;
+  progressLabel?: string;
   indexPath: string;
   totalFiles?: number;
   totalBytes?: number;
