@@ -155,14 +155,9 @@ impl IndexWriter {
                 progress_stage(&mut progress, "Building extension statistics", 0, 1);
                 self.rebuild_extension_stats()?;
                 progress_stage(&mut progress, "Building extension statistics", 1, 1);
-                crate::index::algorithms::update_hashes_for_duplicate_candidates(
-                    &mut self.connection,
-                    self.active_scan_strategy,
-                    &mut progress,
-                )?;
-                progress_stage(&mut progress, "Building duplicate groups", 0, 1);
-                self.rebuild_duplicate_size_groups()?;
-                progress_stage(&mut progress, "Building duplicate groups", 1, 1);
+                progress_stage(&mut progress, "Preparing duplicate analysis", 0, 1);
+                self.prepare_duplicate_refinement_jobs()?;
+                progress_stage(&mut progress, "Preparing duplicate analysis", 1, 1);
                 progress_stage(&mut progress, "Capturing timeline", 0, 1);
                 self.capture_timeline(&report.root, &report.stats)?;
                 progress_stage(&mut progress, "Capturing timeline", 1, 1);
@@ -198,6 +193,41 @@ impl IndexWriter {
             .as_deref()
             .map(DedupStrategy::from_id)
             .unwrap_or_default())
+    }
+
+    pub fn refine_duplicates_with_progress<F>(&mut self, mut progress: F) -> Result<(), IndexError>
+    where
+        F: FnMut(FinalizationProgress),
+    {
+        let scan_id = self.current_scan_session_id()?;
+        let strategy = self.latest_scan_strategy()?;
+
+        progress_stage(&mut progress, "Preparing duplicate analysis", 0, 1);
+        self.prepare_duplicate_refinement_jobs()?;
+        progress_stage(&mut progress, "Preparing duplicate analysis", 1, 1);
+
+        progress_stage(&mut progress, "Sampling duplicate candidates", 0, 1);
+        self.mark_hash_jobs_running(scan_id, "sample")?;
+        self.mark_duplicate_candidates_status(scan_id, "sampling")?;
+        crate::index::algorithms::update_hashes_for_duplicate_candidates(
+            &mut self.connection,
+            strategy,
+            &mut progress,
+        )?;
+        self.mark_hash_jobs_completed(scan_id, "sample")?;
+
+        self.record_completed_full_hash_jobs(scan_id)?;
+
+        progress_stage(&mut progress, "Building duplicate groups", 0, 1);
+        self.rebuild_duplicate_size_groups()?;
+        self.mark_duplicate_candidates_status(scan_id, "completed")?;
+        progress_stage(&mut progress, "Building duplicate groups", 1, 1);
+
+        Ok(())
+    }
+
+    pub fn refine_duplicates(&mut self) -> Result<(), IndexError> {
+        self.refine_duplicates_with_progress(|_| {})
     }
 
     pub fn largest_folders(&self, limit: usize) -> Result<Vec<FolderSummary>, IndexError> {
@@ -237,7 +267,11 @@ impl IndexWriter {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    pub fn search_files(&self, query: &str, limit: usize) -> Result<Vec<FileSearchResult>, IndexError> {
+    pub fn search_files(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<FileSearchResult>, IndexError> {
         let trimmed_query = query.trim();
         if trimmed_query.is_empty() {
             return Ok(Vec::new());
@@ -424,7 +458,11 @@ impl IndexWriter {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    pub fn duplicate_group_files(&self, group_id: i64, limit: usize) -> Result<Vec<DuplicateFileSummary>, IndexError> {
+    pub fn duplicate_group_files(
+        &self,
+        group_id: i64,
+        limit: usize,
+    ) -> Result<Vec<DuplicateFileSummary>, IndexError> {
         let mut statement = self.connection.prepare(
             "SELECT files.path, files.size, files.modified_at
              FROM duplicate_group_files dgf
@@ -461,7 +499,10 @@ impl IndexWriter {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    pub fn folder_media_summaries(&self, limit: usize) -> Result<Vec<FolderMediaSummary>, IndexError> {
+    pub fn folder_media_summaries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<FolderMediaSummary>, IndexError> {
         let mut statement = self.connection.prepare(
             "SELECT f.path, files.media_kind, COALESCE(SUM(files.size), 0) AS total_bytes
              FROM files
@@ -524,7 +565,8 @@ impl IndexWriter {
 
     fn begin_scan_transaction(&mut self) -> Result<(), IndexError> {
         if !self.scan_transaction_open {
-            self.connection.execute_batch("BEGIN IMMEDIATE TRANSACTION")?;
+            self.connection
+                .execute_batch("BEGIN IMMEDIATE TRANSACTION")?;
             self.scan_transaction_open = true;
         }
         Ok(())
@@ -562,6 +604,101 @@ impl IndexWriter {
         Ok(())
     }
 
+    fn current_scan_session_id(&self) -> Result<i64, IndexError> {
+        if let Some(session_id) = self.session_id {
+            return Ok(session_id);
+        }
+
+        self.connection
+            .query_row(
+                "SELECT id FROM scan_sessions ORDER BY started_at DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(IndexError::MissingSession)
+    }
+
+    fn prepare_duplicate_refinement_jobs(&mut self) -> Result<(), IndexError> {
+        let scan_id = self.current_scan_session_id()?;
+        let now = now_millis();
+        let tx = self.connection.transaction()?;
+
+        tx.execute("DELETE FROM duplicate_group_files", [])?;
+        tx.execute("DELETE FROM duplicate_groups", [])?;
+        tx.execute("DELETE FROM hash_jobs WHERE scan_id = ?1", params![scan_id])?;
+        tx.execute(
+            "DELETE FROM duplicate_candidates WHERE scan_id = ?1",
+            params![scan_id],
+        )?;
+        tx.execute(
+            "INSERT INTO duplicate_candidates (scan_id, size, file_count, total_bytes, status, updated_at)
+             SELECT ?1, size, COUNT(*), COALESCE(SUM(size), 0), 'pending', ?2
+             FROM files
+             WHERE deleted_at IS NULL AND size > 0
+             GROUP BY size
+             HAVING COUNT(*) > 1",
+            params![scan_id, now],
+        )?;
+        tx.execute(
+            "INSERT OR IGNORE INTO hash_jobs (scan_id, file_id, job_type, priority, status, created_at)
+             SELECT ?1, files.id, 'sample', files.size, 'pending', ?2
+             FROM files
+             JOIN duplicate_candidates dc ON dc.scan_id = ?1 AND dc.size = files.size
+             WHERE files.deleted_at IS NULL",
+            params![scan_id, now],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn mark_duplicate_candidates_status(
+        &mut self,
+        scan_id: i64,
+        status: &str,
+    ) -> Result<(), IndexError> {
+        self.connection.execute(
+            "UPDATE duplicate_candidates SET status = ?1, updated_at = ?2 WHERE scan_id = ?3",
+            params![status, now_millis(), scan_id],
+        )?;
+        Ok(())
+    }
+
+    fn mark_hash_jobs_running(&mut self, scan_id: i64, job_type: &str) -> Result<(), IndexError> {
+        self.connection.execute(
+            "UPDATE hash_jobs
+             SET status = 'running', started_at = ?1
+             WHERE scan_id = ?2 AND job_type = ?3 AND status = 'pending'",
+            params![now_millis(), scan_id, job_type],
+        )?;
+        Ok(())
+    }
+
+    fn mark_hash_jobs_completed(&mut self, scan_id: i64, job_type: &str) -> Result<(), IndexError> {
+        self.connection.execute(
+            "UPDATE hash_jobs
+             SET status = 'completed', completed_at = ?1
+             WHERE scan_id = ?2 AND job_type = ?3 AND status IN ('pending', 'running')",
+            params![now_millis(), scan_id, job_type],
+        )?;
+        Ok(())
+    }
+
+    fn record_completed_full_hash_jobs(&mut self, scan_id: i64) -> Result<(), IndexError> {
+        let now = now_millis();
+        self.connection.execute(
+            "INSERT OR IGNORE INTO hash_jobs (
+                 scan_id, file_id, job_type, priority, status, created_at, started_at, completed_at
+             )
+             SELECT ?1, id, 'full', size, 'completed', ?2, ?2, ?2
+             FROM files
+             WHERE deleted_at IS NULL AND full_hash IS NOT NULL",
+            params![scan_id, now],
+        )?;
+        Ok(())
+    }
+
     fn mark_missing_files_deleted(&self) -> Result<(), IndexError> {
         let Some(root) = &self.active_root else {
             return Ok(());
@@ -578,7 +715,12 @@ impl IndexWriter {
              WHERE deleted_at IS NULL
                AND indexed_at < ?2
                AND (path = ?3 OR path LIKE ?4)",
-            params![now_millis(), started_at, root_text, format!("{root_prefix}%")],
+            params![
+                now_millis(),
+                started_at,
+                root_text,
+                format!("{root_prefix}%")
+            ],
         )?;
         Ok(())
     }
@@ -653,7 +795,16 @@ impl IndexWriter {
             rows.collect::<Result<Vec<_>, _>>()?
         };
 
-        for (size, partial_hash, sample_hash, full_hash, confidence, _file_count, reclaimable_bytes) in groups {
+        for (
+            size,
+            partial_hash,
+            sample_hash,
+            full_hash,
+            confidence,
+            _file_count,
+            reclaimable_bytes,
+        ) in groups
+        {
             tx.execute(
                 "INSERT INTO duplicate_groups (size, partial_hash, sample_hash, full_hash, confidence, reclaimable_bytes, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -951,8 +1102,12 @@ fn escape_like_pattern(query: &str) -> String {
     escaped
 }
 
-pub(crate) fn progress_stage<F>(progress: &mut F, message: &str, progress_current: u64, progress_total: u64)
-where
+pub(crate) fn progress_stage<F>(
+    progress: &mut F,
+    message: &str,
+    progress_current: u64,
+    progress_total: u64,
+) where
     F: FnMut(FinalizationProgress),
 {
     progress(FinalizationProgress {
@@ -967,8 +1122,7 @@ pub(crate) fn emit_counted_progress<F>(
     message: &str,
     progress_current: u64,
     progress_total: u64,
-)
-where
+) where
     F: FnMut(FinalizationProgress),
 {
     if progress_total <= 1
@@ -1014,15 +1168,21 @@ mod tests {
             .expect("failed to count files");
         let session_status: String = writer
             .connection()
-            .query_row("SELECT status FROM scan_sessions LIMIT 1", [], |row| row.get(0))
+            .query_row("SELECT status FROM scan_sessions LIMIT 1", [], |row| {
+                row.get(0)
+            })
             .expect("failed to read session");
         let timeline_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM timeline_history", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM timeline_history", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count timeline rows");
         let duplicate_group_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate groups");
         let root_total_bytes: i64 = writer
             .connection()
@@ -1062,10 +1222,15 @@ mod tests {
                 break;
             }
         }
+        writer
+            .refine_duplicates()
+            .expect("failed to refine duplicates");
 
         let duplicate_group_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate groups");
         let duplicate_group_id: i64 = writer
             .connection()
@@ -1073,19 +1238,31 @@ mod tests {
             .expect("failed to read duplicate group id");
         let duplicate_file_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_group_files", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_group_files", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate files");
         let reclaimable_bytes: i64 = writer
             .connection()
-            .query_row("SELECT reclaimable_bytes FROM duplicate_groups", [], |row| row.get(0))
+            .query_row(
+                "SELECT reclaimable_bytes FROM duplicate_groups",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to read reclaimable bytes");
         let confidence: f64 = writer
             .connection()
-            .query_row("SELECT confidence FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT confidence FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to read confidence");
         let full_hashes: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM files WHERE full_hash IS NOT NULL", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE full_hash IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to count full hashes");
 
         assert_eq!(duplicate_group_count, 1);
@@ -1115,7 +1292,11 @@ mod tests {
 
         let strategy: String = writer
             .connection()
-            .query_row("SELECT scan_strategy FROM scan_sessions LIMIT 1", [], |row| row.get(0))
+            .query_row(
+                "SELECT scan_strategy FROM scan_sessions LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to read scan strategy");
 
         assert_eq!(strategy, "fnv1a-legacy");
@@ -1131,6 +1312,9 @@ mod tests {
 
         let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
         scan_into_index(&root, &mut writer);
+        writer
+            .refine_duplicates()
+            .expect("failed to refine duplicates");
 
         let initial_algorithm: String = writer
             .connection()
@@ -1144,6 +1328,9 @@ mod tests {
 
         writer.set_dedup_strategy(crate::index::algorithms::DedupStrategy::Fnv1aLegacy);
         scan_into_index(&root, &mut writer);
+        writer
+            .refine_duplicates()
+            .expect("failed to refine duplicates");
 
         let (algorithm, full_hash_len, sample_hashes): (String, i64, i64) = writer
             .connection()
@@ -1183,18 +1370,31 @@ mod tests {
 
         let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
         scan_into_index(&root, &mut writer);
+        writer
+            .refine_duplicates()
+            .expect("failed to refine duplicates");
 
         let duplicate_group_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate groups");
         let full_hashes: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM files WHERE full_hash IS NOT NULL", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE full_hash IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to count full hashes");
         let sample_hashes: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM files WHERE sample_hash IS NOT NULL", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE sample_hash IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to count sample hashes");
 
         assert_eq!(duplicate_group_count, 0);
@@ -1221,14 +1421,23 @@ mod tests {
 
         let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
         scan_into_index(&root, &mut writer);
+        writer
+            .refine_duplicates()
+            .expect("failed to refine duplicates");
 
         let duplicate_group_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate groups");
         let full_hashes: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM files WHERE full_hash IS NOT NULL", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE full_hash IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to count full hashes");
 
         assert_eq!(duplicate_group_count, 0);
@@ -1256,20 +1465,30 @@ mod tests {
 
         let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
         scan_into_index(&root, &mut writer);
+        writer
+            .refine_duplicates()
+            .expect("failed to refine duplicates");
 
         let initial_groups: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count initial duplicate groups");
         assert_eq!(initial_groups, 1);
 
         std::thread::sleep(std::time::Duration::from_millis(1100));
         write_file(&second_path, &changed);
         scan_into_index(&root, &mut writer);
+        writer
+            .refine_duplicates()
+            .expect("failed to refine duplicates");
 
         let duplicate_group_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate groups after rescan");
 
         assert_eq!(duplicate_group_count, 0);
@@ -1286,14 +1505,23 @@ mod tests {
 
         let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
         scan_into_index(&root, &mut writer);
+        writer
+            .refine_duplicates()
+            .expect("failed to refine duplicates");
 
         let duplicate_group_count: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate groups");
         let hashed_files: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM files WHERE partial_hash IS NOT NULL", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE partial_hash IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to count hashed files");
 
         assert_eq!(duplicate_group_count, 0);
@@ -1318,19 +1546,33 @@ mod tests {
 
         let active_files: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM files WHERE deleted_at IS NULL", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to count active files");
         let deleted_files: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM files WHERE deleted_at IS NOT NULL", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE deleted_at IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to count deleted files");
         let duplicate_groups: i64 = writer
             .connection()
-            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
             .expect("failed to count duplicate groups");
         let extension_file_count: i64 = writer
             .connection()
-            .query_row("SELECT file_count FROM extension_stats WHERE extension = 'bin'", [], |row| row.get(0))
+            .query_row(
+                "SELECT file_count FROM extension_stats WHERE extension = 'bin'",
+                [],
+                |row| row.get(0),
+            )
             .expect("failed to read extension stats");
         let root_total_bytes: i64 = writer
             .connection()
@@ -1360,6 +1602,121 @@ mod tests {
     }
 
     #[test]
+    fn finished_scan_prepares_duplicate_refinement_without_hashing() {
+        let root = test_root("progressive-refinement");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("one.bin"), &[1; 32]);
+        write_file(&root.join("two.bin"), &[1; 32]);
+        write_file(&root.join("unique.bin"), &[3; 64]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut writer);
+
+        let session_status: String = writer
+            .connection()
+            .query_row("SELECT status FROM scan_sessions LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .expect("failed to read session status");
+        let duplicate_candidates: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_candidates", [], |row| {
+                row.get(0)
+            })
+            .expect("failed to count duplicate candidates");
+        let pending_hash_jobs: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM hash_jobs WHERE status = 'pending'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("failed to count pending hash jobs");
+        let duplicate_groups: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
+            .expect("failed to count duplicate groups");
+        let hashed_files: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE partial_hash IS NOT NULL OR sample_hash IS NOT NULL OR full_hash IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("failed to count hashed files");
+        let root_total_bytes: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT total_bytes FROM folders WHERE path = ?1",
+                params![path_to_string(&root)],
+                |row| row.get(0),
+            )
+            .expect("failed to read root rollup");
+
+        assert_eq!(session_status, "complete");
+        assert_eq!(duplicate_candidates, 1);
+        assert_eq!(pending_hash_jobs, 2);
+        assert_eq!(duplicate_groups, 0);
+        assert_eq!(hashed_files, 0);
+        assert_eq!(root_total_bytes, 128);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn duplicate_refinement_builds_groups_after_scan_completion() {
+        let root = test_root("refinement-groups");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("one.bin"), &[1; 32]);
+        write_file(&root.join("two.bin"), &[1; 32]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut writer);
+
+        writer
+            .refine_duplicates_with_progress(|_| {})
+            .expect("failed to refine duplicates");
+
+        let duplicate_groups: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
+            .expect("failed to count duplicate groups");
+        let completed_sample_jobs: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM hash_jobs WHERE job_type = 'sample' AND status = 'completed'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("failed to count completed sample jobs");
+        let completed_full_jobs: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM hash_jobs WHERE job_type = 'full' AND status = 'completed'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("failed to count completed full jobs");
+        let completed_candidates: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM duplicate_candidates WHERE status = 'completed'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("failed to count completed candidates");
+
+        assert_eq!(duplicate_groups, 1);
+        assert_eq!(completed_sample_jobs, 2);
+        assert_eq!(completed_full_jobs, 2);
+        assert_eq!(completed_candidates, 1);
+        cleanup(&root);
+    }
+
+    #[test]
     fn exposes_index_query_summaries() {
         let root = test_root("queries");
         fs::create_dir_all(root.join("nested")).expect("failed to create folder");
@@ -1379,10 +1736,20 @@ mod tests {
 
         assert_eq!(folders.first().map(|folder| folder.total_bytes), Some(160));
         assert_eq!(files.first().map(|file| file.size), Some(128));
-        assert_eq!(extensions.first().map(|extension| extension.extension.as_str()), Some("mp4"));
+        assert_eq!(
+            extensions
+                .first()
+                .map(|extension| extension.extension.as_str()),
+            Some("mp4")
+        );
         assert!(duplicates.is_empty());
-        assert_eq!(media.first().map(|summary| summary.media_kind.as_str()), Some("video"));
-        assert!(folder_media.iter().any(|summary| summary.media_kind == "video"));
+        assert_eq!(
+            media.first().map(|summary| summary.media_kind.as_str()),
+            Some("video")
+        );
+        assert!(folder_media
+            .iter()
+            .any(|summary| summary.media_kind == "video"));
         cleanup(&root);
     }
 
@@ -1401,8 +1768,14 @@ mod tests {
         let by_path = writer.search_files("photos", 10).expect("search by path");
         let empty = writer.search_files("   ", 10).expect("empty search");
 
-        assert_eq!(by_name.first().map(|file| file.name.as_str()), Some("vacation.raw"));
-        assert_eq!(by_name.first().map(|file| file.media_kind.as_str()), Some("photo"));
+        assert_eq!(
+            by_name.first().map(|file| file.name.as_str()),
+            Some("vacation.raw")
+        );
+        assert_eq!(
+            by_name.first().map(|file| file.media_kind.as_str()),
+            Some("photo")
+        );
         assert_eq!(by_path.len(), 1);
         assert!(empty.is_empty());
         cleanup(&root);
