@@ -1,4 +1,5 @@
 use crate::index::IndexWriter;
+use crate::index::algorithms::DedupStrategy;
 use crate::scanner::{ScanEvent, ScanOptions, Scanner};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -8,6 +9,8 @@ use std::path::PathBuf;
 pub struct ScanToIndexRequest {
     pub root: PathBuf,
     pub index_path: PathBuf,
+    #[serde(default)]
+    pub scan_strategy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -128,12 +131,16 @@ pub struct IndexMetadataDto {
     pub files_scanned: i64,
     pub folders_scanned: i64,
     pub bytes_scanned: i64,
+    pub scan_strategy: String,
 }
 
 pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse, String> {
     let scanner = Scanner::new(ScanOptions::new(request.root));
     let events = scanner.scan();
     let mut writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    writer.set_dedup_strategy(DedupStrategy::from_id(
+        request.scan_strategy.as_deref().unwrap_or(DedupStrategy::default().as_id()),
+    ));
 
     for event in events {
         writer
@@ -280,7 +287,7 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
     let metadata = writer
         .connection()
         .query_row(
-            "SELECT root_path, status, COALESCE(finished_at, started_at), files_scanned, folders_scanned, bytes_scanned
+            "SELECT root_path, status, COALESCE(finished_at, started_at), files_scanned, folders_scanned, bytes_scanned, scan_strategy
              FROM scan_sessions
              ORDER BY started_at DESC
              LIMIT 1",
@@ -294,6 +301,7 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
                     files_scanned: row.get(3)?,
                     folders_scanned: row.get(4)?,
                     bytes_scanned: row.get(5)?,
+                    scan_strategy: row.get(6)?,
                 })
             },
         )
@@ -308,6 +316,7 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
         files_scanned: 0,
         folders_scanned: 0,
         bytes_scanned: 0,
+        scan_strategy: DedupStrategy::default().as_id().to_owned(),
     }))
 }
 
@@ -329,6 +338,7 @@ mod tests {
         let response = scan_to_index(ScanToIndexRequest {
             root: root.join("data"),
             index_path: index_path.clone(),
+            scan_strategy: Some("fnv1a-legacy".to_owned()),
         })
         .expect("scan command failed");
         let overview = query_index_overview(IndexQueryRequest {
@@ -361,6 +371,7 @@ mod tests {
         scan_to_index(ScanToIndexRequest {
             root: root.join("data"),
             index_path: index_path.clone(),
+            scan_strategy: None,
         })
         .expect("scan command failed");
 
@@ -398,6 +409,7 @@ mod tests {
         scan_to_index(ScanToIndexRequest {
             root: root.join("data"),
             index_path: index_path.clone(),
+            scan_strategy: None,
         })
         .expect("scan command failed");
         let overview = query_index_overview(IndexQueryRequest {
@@ -433,6 +445,7 @@ mod tests {
         scan_to_index(ScanToIndexRequest {
             root: root.join("data"),
             index_path: index_path.clone(),
+            scan_strategy: None,
         }).expect("scan failed");
 
         let results = search_files(SearchFilesRequest {
@@ -462,6 +475,7 @@ mod tests {
         scan_to_index(ScanToIndexRequest {
             root: root.join("data"),
             index_path: index_path.clone(),
+            scan_strategy: None,
         }).expect("scan failed");
 
         let results = search_files(SearchFilesRequest {
@@ -491,6 +505,7 @@ mod tests {
         scan_to_index(ScanToIndexRequest {
             root: root.join("data"),
             index_path: index_path.clone(),
+            scan_strategy: None,
         }).expect("scan failed");
 
         let results = search_files(SearchFilesRequest {
@@ -510,6 +525,25 @@ mod tests {
     }
 
     #[test]
+    fn index_metadata_returns_latest_scan_strategy() {
+        let root = test_root("metadata-strategy");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("failed to create folders");
+        write_file(&root.join("data").join("one.bin"), &[1; 48]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+            scan_strategy: Some("fnv1a-legacy".to_owned()),
+        })
+        .expect("scan command failed");
+
+        let metadata = index_metadata(index_path).expect("metadata");
+        assert_eq!(metadata.scan_strategy, "fnv1a-legacy");
+        cleanup(&root);
+    }
+
+    #[test]
     fn search_files_with_regex_checks_beyond_limit_window() {
         let root = test_root("search-regex-limit");
         let index_path = root.join("index.sqlite");
@@ -521,6 +555,7 @@ mod tests {
         scan_to_index(ScanToIndexRequest {
             root: root.join("data"),
             index_path: index_path.clone(),
+            scan_strategy: None,
         }).expect("scan failed");
 
         let results = search_files(SearchFilesRequest {
@@ -549,6 +584,7 @@ mod tests {
         scan_to_index(ScanToIndexRequest {
             root: root.join("data"),
             index_path: index_path.clone(),
+            scan_strategy: None,
         }).expect("scan failed");
 
         let results = search_files(SearchFilesRequest {

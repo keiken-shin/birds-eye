@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS scan_sessions (
   started_at INTEGER NOT NULL,
   finished_at INTEGER,
   status TEXT NOT NULL,
+  scan_strategy TEXT NOT NULL DEFAULT 'xxh3-progressive',
   files_scanned INTEGER NOT NULL DEFAULT 0,
   folders_scanned INTEGER NOT NULL DEFAULT 0,
   bytes_scanned INTEGER NOT NULL DEFAULT 0,
@@ -44,8 +45,10 @@ CREATE TABLE IF NOT EXISTS files (
   accessed_at INTEGER,
   created_at INTEGER,
   partial_hash TEXT,
+  sample_hash TEXT,
   full_hash TEXT,
   hash_algorithm TEXT,
+  hash_state INTEGER NOT NULL DEFAULT 0,
   media_kind TEXT,
   indexed_at INTEGER NOT NULL,
   deleted_at INTEGER
@@ -55,6 +58,7 @@ CREATE TABLE IF NOT EXISTS duplicate_groups (
   id INTEGER PRIMARY KEY,
   size INTEGER NOT NULL,
   partial_hash TEXT,
+  sample_hash TEXT,
   full_hash TEXT,
   confidence REAL NOT NULL,
   reclaimable_bytes INTEGER NOT NULL,
@@ -102,9 +106,9 @@ CREATE INDEX IF NOT EXISTS idx_files_folder ON files(folder_id);
 CREATE INDEX IF NOT EXISTS idx_files_extension_size ON files(extension, size DESC);
 CREATE INDEX IF NOT EXISTS idx_files_modified ON files(modified_at);
 CREATE INDEX IF NOT EXISTS idx_files_hash ON files(size, partial_hash, full_hash);
+CREATE INDEX IF NOT EXISTS idx_files_sample_hash ON files(size, sample_hash, full_hash);
 CREATE INDEX IF NOT EXISTS idx_files_deleted ON files(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_folders_total_bytes ON folders(total_bytes DESC);
 CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_id);
 CREATE INDEX IF NOT EXISTS idx_scan_sessions_root ON scan_sessions(root_path, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_timeline_root ON timeline_history(root_path, captured_at DESC);
-
