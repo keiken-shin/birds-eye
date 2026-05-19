@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import type { ScanStrategy } from "./domain";
 
 export type NativeJobStatus = "Running" | "Completed" | "Cancelled" | "Failed";
 
@@ -14,6 +15,8 @@ export type NativeJobEvent = {
   queue_depth: number;
   active_workers: number;
   current_path: string | null;
+  progress_current: number;
+  progress_total: number;
 };
 
 export type NativeIndexOverview = {
@@ -48,6 +51,7 @@ export type NativeIndexEntry = {
   files_scanned: number;
   folders_scanned: number;
   bytes_scanned: number;
+  scan_strategy: ScanStrategy;
 };
 
 export type NativeDuplicateFile = {
@@ -70,9 +74,10 @@ export async function chooseNativeFolder() {
   return typeof selected === "string" ? selected : null;
 }
 
-export async function startNativeScan(root: string) {
+export async function startNativeScan(root: string, scanStrategy: ScanStrategy) {
   const response = await invoke<{ job_id: number; index_path: string }>("start_scan_job_for_root", {
     root,
+    scanStrategy,
   });
 
   return { jobId: response.job_id, indexPath: response.index_path };

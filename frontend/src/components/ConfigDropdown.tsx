@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type React from "react";
+import type { ScanStrategy } from "../domain";
 
 const mono = "font-mono text-11 uppercase";
 const panelClass = "border border-white/12 bg-surface shadow-inner";
 
-export function ConfigDropdown({ children }: { children: React.ReactNode }) {
+export function ConfigDropdown({
+  children,
+  scanStrategy,
+  onScanStrategyChange,
+}: {
+  children: React.ReactNode;
+  scanStrategy: ScanStrategy;
+  onScanStrategyChange: (strategy: ScanStrategy) => void;
+}) {
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -48,8 +57,19 @@ export function ConfigDropdown({ children }: { children: React.ReactNode }) {
             </ConfigSection>
 
             <ConfigSection label="Scan Strategy">
-              <ConfigOption label="Default (Partial FNV-1a)" active />
-              <ConfigOption label="Full Hash" disabled hint="coming soon" />
+              <ConfigOption
+                label="XXH3 Progressive"
+                description="Fast default with stronger sampling for modern scans."
+                active={scanStrategy === "xxh3-progressive"}
+                hint="recommended"
+                onClick={() => onScanStrategyChange("xxh3-progressive")}
+              />
+              <ConfigOption
+                label="Legacy FNV-1a"
+                description="Compatibility mode for repeatable legacy index comparisons."
+                active={scanStrategy === "fnv1a-legacy"}
+                onClick={() => onScanStrategyChange("fnv1a-legacy")}
+              />
             </ConfigSection>
           </div>
 
@@ -73,29 +93,39 @@ function ConfigSection({ label, children }: { children: React.ReactNode; label: 
 
 function ConfigOption({
   label,
+  description,
   active = false,
   disabled = false,
   hint,
+  onClick,
 }: {
   label: string;
+  description?: string;
   active?: boolean;
   disabled?: boolean;
   hint?: string;
+  onClick?: () => void;
 }) {
   return (
-    <div
-      className={`flex items-center justify-between px-2.5 py-[7px] border ${
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex justify-between px-2.5 py-[7px] border ${
         active
           ? "border-accent/30 bg-accent/8 text-accent"
           : "border-white/8 text-white/30"
-      } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
+      } ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
     >
-      <span className="font-mono text-11 uppercase">{label}</span>
+      <span className="grid gap-1 pr-3">
+        <span className="font-mono text-11 uppercase">{label}</span>
+        {description && <span className="font-mono text-10 uppercase leading-snug text-white/30">{description}</span>}
+      </span>
       <div className="flex items-center gap-2">
         {active && <span className="h-[5px] w-[5px] rounded-full bg-accent" />}
         {hint && <span className="font-mono text-9 uppercase text-white/20">{hint}</span>}
       </div>
-    </div>
+    </button>
   );
 }
 

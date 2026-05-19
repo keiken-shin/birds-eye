@@ -3,7 +3,14 @@ import type React from "react";
 import { useNativeRuntime } from "../hooks/useNativeRuntime";
 import { useSavedIndexes } from "../hooks/useSavedIndexes";
 import { useScan } from "../hooks/useScan";
-import type { CategoryKey, FolderStats, QueueItem, ScanState } from "../domain";
+import {
+  parseScanStrategy,
+  type CategoryKey,
+  type FolderStats,
+  type QueueItem,
+  type ScanState,
+  type ScanStrategy,
+} from "../domain";
 import type { NativeIndexEntry } from "../nativeClient";
 
 type ScanContextValue = {
@@ -32,11 +39,14 @@ type ScanContextValue = {
   openSavedIndex: (entry: NativeIndexEntry) => Promise<void>;
   rescanSavedIndex: (entry: NativeIndexEntry) => Promise<void>;
   queueItems: QueueItem[];
+  scanHistoryItems: QueueItem[];
   activeQueueId: string | null;
   loadQueueItem: (id: string) => Promise<void>;
   deleteQueueItem: (id: string) => void;
   theme: "dark" | "light" | "system";
   setTheme: React.Dispatch<React.SetStateAction<"dark" | "light" | "system">>;
+  scanStrategy: ScanStrategy;
+  setScanStrategy: (strategy: ScanStrategy) => void;
 };
 
 const ScanContext = createContext<ScanContextValue | null>(null);
@@ -50,10 +60,18 @@ export function useScanContext(): ScanContextValue {
 export function ScanProvider({ children }: { children: React.ReactNode }) {
   const { nativeRuntime, runtimeMessage, setRuntimeMessage } = useNativeRuntime();
   const { savedIndexes, refreshSavedIndexes } = useSavedIndexes({ nativeRuntime, setRuntimeMessage });
-  const scanApi = useScan({ nativeRuntime, setRuntimeMessage, refreshSavedIndexes });
 
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
+  const [scanHistoryItems, setScanHistoryItems] = useState<QueueItem[]>([]);
   const [theme, setTheme] = useState<"dark" | "light" | "system">("dark");
+  const [scanStrategy, setScanStrategyState] = useState<ScanStrategy>(() =>
+    parseScanStrategy(window.localStorage.getItem("birds-eye.scanStrategy"))
+  );
+  const setScanStrategy = useCallback((strategy: ScanStrategy) => {
+    setScanStrategyState(strategy);
+    window.localStorage.setItem("birds-eye.scanStrategy", strategy);
+  }, []);
+  const scanApi = useScan({ nativeRuntime, setRuntimeMessage, refreshSavedIndexes, scanStrategy });
   const activeQueueIdRef = useRef<string | null>(null);
   const prevStatusRef = useRef(scanApi.scan.status);
   const prevFolderRef = useRef<string>("");
@@ -75,6 +93,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
           rootName: scanApi.scan.rootName,
           status: "scanning",
           progress: 0,
+          progressLabel: "Scanning files",
           indexPath: "",
           logs: [{ ts: Date.now(), level: "info" as const, message: `scan started: ${scanApi.scan.rootName}` }],
         },
@@ -85,23 +104,27 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
       const id = activeQueueIdRef.current;
       activeQueueIdRef.current = null;
       const summary = `scan complete — ${scanApi.scan.totalFiles.toLocaleString()} files, ${scanApi.scan.totalBytes > 0 ? `${(scanApi.scan.totalBytes / 1073741824).toFixed(2)} GB` : "0 B"}`;
-      setQueueItems((items) =>
-        items.map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                status: "done",
-                progress: 100,
-                indexPath: scanApi.currentIndexPath ?? "",
-                totalFiles: scanApi.scan.totalFiles,
-                totalBytes: scanApi.scan.totalBytes,
-                foldersScanned: scanApi.scan.folders.length,
-                elapsedMs: scanApi.scan.elapsedMs,
-                logs: [...item.logs, { ts: Date.now(), level: "info" as const, message: summary }].slice(-2000),
-              }
-            : item
-        )
-      );
+      setQueueItems((items) => {
+        const completed = items.find((item) => item.id === id);
+        if (completed) {
+          const historyItem: QueueItem = {
+            ...completed,
+            status: "done",
+            progress: 100,
+            progressCurrent: scanApi.scan.totalFiles,
+            progressTotal: scanApi.scan.totalFiles,
+            progressLabel: "Complete",
+            indexPath: scanApi.currentIndexPath ?? "",
+            totalFiles: scanApi.scan.totalFiles,
+            totalBytes: scanApi.scan.totalBytes,
+            foldersScanned: scanApi.scan.folders.length,
+            elapsedMs: scanApi.scan.elapsedMs,
+            logs: [...completed.logs, { ts: Date.now(), level: "info" as const, message: summary }].slice(-2000),
+          };
+          setScanHistoryItems((history) => [historyItem, ...history.filter((item) => item.id !== id)]);
+        }
+        return items.filter((item) => item.id !== id);
+      });
     }
 
     if (current === "cancelled" && activeQueueIdRef.current) {
@@ -119,7 +142,21 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
       );
       // Brief delay so the cancelled log entry is visible before item is removed
       setTimeout(() => {
-        setQueueItems((items) => items.filter((item) => item.id !== id));
+        setQueueItems((items) => {
+          const cancelled = items.find((item) => item.id === id);
+          if (cancelled) {
+            setScanHistoryItems((history) => [
+              {
+                ...cancelled,
+                status: "done",
+                progressLabel: "Cancelled",
+                elapsedMs: scanApi.scan.elapsedMs,
+              },
+              ...history.filter((item) => item.id !== id),
+            ]);
+          }
+          return items.filter((item) => item.id !== id);
+        });
       }, 1500);
     }
   }, [nativeRuntime, scanApi.currentIndexPath, scanApi.scan.elapsedMs, scanApi.scan.folders.length, scanApi.scan.rootName, scanApi.scan.status, scanApi.scan.totalBytes, scanApi.scan.totalFiles]);
@@ -129,15 +166,30 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     const id = activeQueueIdRef.current;
     if (!id || (scanApi.scan.status !== "scanning" && scanApi.scan.status !== "paused")) return;
     const status: import("../domain").QueueItemStatus = scanApi.scan.finalizing ? "finalizing" : "scanning";
-    const progress = scanApi.scan.totalFiles > 0
+    const progress = scanApi.scan.progressTotal > 0
+      ? Math.min(99, Math.round((scanApi.scan.progressCurrent / scanApi.scan.progressTotal) * 100))
+      : scanApi.scan.totalFiles > 0
       ? Math.min(99, Math.round((scanApi.scan.processedFiles / scanApi.scan.totalFiles) * 100))
       : 0;
     setQueueItems((items) =>
       items.map((item) =>
-        item.id === id ? { ...item, status, progress, rootName: scanApi.scan.rootName } : item
+        item.id === id
+          ? {
+              ...item,
+              status,
+              progress,
+              progressCurrent: scanApi.scan.progressCurrent,
+              progressTotal: scanApi.scan.progressTotal,
+              progressLabel: scanApi.scan.progressLabel,
+              rootName: scanApi.scan.rootName,
+              elapsedMs: scanApi.scan.elapsedMs,
+              totalFiles: Math.max(scanApi.scan.totalFiles, scanApi.scan.processedFiles),
+              totalBytes: Math.max(scanApi.scan.totalBytes, scanApi.scan.processedBytes),
+            }
+          : item
       )
     );
-  }, [scanApi.scan.processedFiles, scanApi.scan.totalFiles, scanApi.scan.finalizing, scanApi.scan.status]);
+  }, [scanApi.scan.processedFiles, scanApi.scan.totalFiles, scanApi.scan.finalizing, scanApi.scan.status, scanApi.scan.progressCurrent, scanApi.scan.progressTotal, scanApi.scan.progressLabel, scanApi.scan.rootName, scanApi.scan.elapsedMs, scanApi.scan.processedBytes, scanApi.scan.totalBytes]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -178,7 +230,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
   const loadQueueItem = useCallback(
     async (id: string) => {
-      const item = queueItems.find((q) => q.id === id);
+      const item = [...queueItems, ...scanHistoryItems].find((q) => q.id === id);
       if (!item || !item.indexPath) return;
 
       await scanApi.openSavedIndex({
@@ -189,21 +241,22 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         files_scanned: item.totalFiles ?? 0,
         folders_scanned: item.foldersScanned ?? 0,
         bytes_scanned: item.totalBytes ?? 0,
+        scan_strategy: scanStrategy,
       });
 
       setQueueItems((items) =>
         items.map((q) => (q.id === id ? { ...q, status: "loaded", loadedAt: Date.now() } : q))
       );
-
-      setTimeout(() => {
-        setQueueItems((items) => items.filter((q) => q.id !== id));
-      }, 5000);
+      setScanHistoryItems((items) =>
+        items.map((q) => (q.id === id ? { ...q, status: "loaded", loadedAt: Date.now() } : q))
+      );
     },
-    [queueItems, scanApi]
+    [queueItems, scanHistoryItems, scanApi, scanStrategy]
   );
 
   const deleteQueueItem = useCallback((id: string) => {
     setQueueItems((items) => items.filter((item) => item.id !== id));
+    setScanHistoryItems((items) => items.filter((item) => item.id !== id));
   }, []);
 
   return (
@@ -216,11 +269,14 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         refreshSavedIndexes,
         ...scanApi,
         queueItems,
+        scanHistoryItems,
         activeQueueId: activeQueueIdRef.current,
         loadQueueItem,
         deleteQueueItem,
         theme,
         setTheme,
+        scanStrategy,
+        setScanStrategy,
       }}
     >
       {children}
