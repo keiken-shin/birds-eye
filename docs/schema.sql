@@ -71,6 +71,29 @@ CREATE TABLE IF NOT EXISTS duplicate_group_files (
   PRIMARY KEY (group_id, file_id)
 );
 
+CREATE TABLE IF NOT EXISTS duplicate_candidates (
+  scan_id INTEGER NOT NULL REFERENCES scan_sessions(id) ON DELETE CASCADE,
+  size INTEGER NOT NULL,
+  file_count INTEGER NOT NULL,
+  total_bytes INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (scan_id, size)
+);
+
+CREATE TABLE IF NOT EXISTS hash_jobs (
+  id INTEGER PRIMARY KEY,
+  scan_id INTEGER NOT NULL REFERENCES scan_sessions(id) ON DELETE CASCADE,
+  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  job_type TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  started_at INTEGER,
+  completed_at INTEGER,
+  UNIQUE (scan_id, file_id, job_type)
+);
+
 CREATE TABLE IF NOT EXISTS media_metadata (
   file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
   width INTEGER,
@@ -108,6 +131,8 @@ CREATE INDEX IF NOT EXISTS idx_files_modified ON files(modified_at);
 CREATE INDEX IF NOT EXISTS idx_files_hash ON files(size, partial_hash, full_hash);
 CREATE INDEX IF NOT EXISTS idx_files_sample_hash ON files(size, sample_hash, full_hash);
 CREATE INDEX IF NOT EXISTS idx_files_deleted ON files(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_duplicate_candidates_status ON duplicate_candidates(scan_id, status);
+CREATE INDEX IF NOT EXISTS idx_hash_jobs_status ON hash_jobs(scan_id, status, priority DESC);
 CREATE INDEX IF NOT EXISTS idx_folders_total_bytes ON folders(total_bytes DESC);
 CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_id);
 CREATE INDEX IF NOT EXISTS idx_scan_sessions_root ON scan_sessions(root_path, started_at DESC);
