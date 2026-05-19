@@ -14,7 +14,7 @@ I have a scattered external storage drive, can't find what I need, and what I ha
 - Rust parallel filesystem scanner with cancellation and symlink-safe traversal.
 - SQLite index with files, folders, scan sessions, extension stats, media rollups, duplicate groups, and scan history.
 - Incremental rescan behavior that marks missing files deleted and rebuilds projections.
-- Multi-stage duplicate detection by size, partial hash, and full hash.
+- Selectable duplicate detection with XXH3 progressive filtering by default and a legacy FNV-1a compatibility strategy.
 - React dashboard with native background scan progress, canvas treemap, drilldown navigation, file search, duplicate detail preview, and browser preview fallback.
 - Offline-first behavior: files stay local and indexes are stored under the app data directory.
 

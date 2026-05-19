@@ -21,13 +21,16 @@ Current flow:
 3. `Started` creates a `scan_sessions` row.
 4. `FileIndexed` upserts the file, ensures its folder exists, and classifies a coarse `media_kind`.
 5. `FolderIndexed` updates direct folder totals.
-6. `Finished` marks files under the scan root as deleted when they were not seen in the current run, recomputes folder rollups, rebuilds extension statistics, refines duplicate candidates through partial and full hashes, and writes a `timeline_history` snapshot.
+6. `Finished` marks files under the scan root as deleted when they were not seen in the current run, recomputes folder rollups, rebuilds extension statistics, refines duplicate candidates with the scan session's selected dedup strategy, rebuilds duplicate groups, and writes a `timeline_history` snapshot.
 
 Duplicate confidence is currently:
 
 - `0.35` for size-only matches when partial hashing could not be computed.
-- `0.65` for same-size files with matching partial hashes.
+- `0.60` for same-size files with matching partial hashes.
+- `0.80` for same-size files with matching XXH3 sample hashes.
 - `1.0` for same-size files with matching full hashes.
+
+Saved-index rescans reuse the latest `scan_strategy` recorded in that index. Brand-new scans use the frontend's remembered preference, defaulting to `xxh3-progressive`.
 
 The same indexing APIs are exposed through the native boundary and Tauri commands for the desktop app.
 
