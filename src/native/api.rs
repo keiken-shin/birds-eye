@@ -1,5 +1,5 @@
-use crate::index::IndexWriter;
 use crate::index::algorithms::DedupStrategy;
+use crate::index::IndexWriter;
 use crate::scanner::{ScanEvent, ScanOptions, Scanner};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -139,7 +139,10 @@ pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse,
     let events = scanner.scan();
     let mut writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
     writer.set_dedup_strategy(DedupStrategy::from_id(
-        request.scan_strategy.as_deref().unwrap_or(DedupStrategy::default().as_id()),
+        request
+            .scan_strategy
+            .as_deref()
+            .unwrap_or(DedupStrategy::default().as_id()),
     ));
 
     for event in events {
@@ -341,6 +344,10 @@ mod tests {
             scan_strategy: Some("fnv1a-legacy".to_owned()),
         })
         .expect("scan command failed");
+        IndexWriter::open(index_path.clone())
+            .expect("failed to open index")
+            .refine_duplicates()
+            .expect("failed to refine duplicates");
         let overview = query_index_overview(IndexQueryRequest {
             index_path,
             limit: 5,
@@ -412,6 +419,10 @@ mod tests {
             scan_strategy: None,
         })
         .expect("scan command failed");
+        IndexWriter::open(index_path.clone())
+            .expect("failed to open index")
+            .refine_duplicates()
+            .expect("failed to refine duplicates");
         let overview = query_index_overview(IndexQueryRequest {
             index_path: index_path.clone(),
             limit: 5,
@@ -446,7 +457,8 @@ mod tests {
             root: root.join("data"),
             index_path: index_path.clone(),
             scan_strategy: None,
-        }).expect("scan failed");
+        })
+        .expect("scan failed");
 
         let results = search_files(SearchFilesRequest {
             index_path: index_path.clone(),
@@ -457,7 +469,8 @@ mod tests {
             min_bytes: None,
             max_bytes: None,
             use_regex: None,
-        }).expect("search failed");
+        })
+        .expect("search failed");
 
         assert_eq!(results.len(), 1);
         assert!(results[0].name.ends_with(".pdf"));
@@ -476,7 +489,8 @@ mod tests {
             root: root.join("data"),
             index_path: index_path.clone(),
             scan_strategy: None,
-        }).expect("scan failed");
+        })
+        .expect("scan failed");
 
         let results = search_files(SearchFilesRequest {
             index_path,
@@ -487,7 +501,8 @@ mod tests {
             min_bytes: Some(100),
             max_bytes: None,
             use_regex: None,
-        }).expect("search failed");
+        })
+        .expect("search failed");
 
         assert_eq!(results.len(), 1);
         assert!(results[0].name.contains("large"));
@@ -506,7 +521,8 @@ mod tests {
             root: root.join("data"),
             index_path: index_path.clone(),
             scan_strategy: None,
-        }).expect("scan failed");
+        })
+        .expect("scan failed");
 
         let results = search_files(SearchFilesRequest {
             index_path,
@@ -517,7 +533,8 @@ mod tests {
             min_bytes: None,
             max_bytes: None,
             use_regex: Some(true),
-        }).expect("search failed");
+        })
+        .expect("search failed");
 
         assert_eq!(results.len(), 1);
         assert!(results[0].name.starts_with("report_"));
@@ -556,7 +573,8 @@ mod tests {
             root: root.join("data"),
             index_path: index_path.clone(),
             scan_strategy: None,
-        }).expect("scan failed");
+        })
+        .expect("scan failed");
 
         let results = search_files(SearchFilesRequest {
             index_path,
@@ -567,7 +585,8 @@ mod tests {
             min_bytes: None,
             max_bytes: None,
             use_regex: Some(true),
-        }).expect("search failed");
+        })
+        .expect("search failed");
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "target_2026.txt");
@@ -585,7 +604,8 @@ mod tests {
             root: root.join("data"),
             index_path: index_path.clone(),
             scan_strategy: None,
-        }).expect("scan failed");
+        })
+        .expect("scan failed");
 
         let results = search_files(SearchFilesRequest {
             index_path,
@@ -596,7 +616,8 @@ mod tests {
             min_bytes: None,
             max_bytes: None,
             use_regex: Some(true),
-        }).expect("search failed");
+        })
+        .expect("search failed");
 
         assert!(results.is_empty());
         cleanup(&root);

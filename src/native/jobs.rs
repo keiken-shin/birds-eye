@@ -67,7 +67,10 @@ impl ScanJobManager {
         }
     }
 
-    pub fn start_scan_job(&self, request: StartScanJobRequest) -> Result<StartScanJobResponse, String> {
+    pub fn start_scan_job(
+        &self,
+        request: StartScanJobRequest,
+    ) -> Result<StartScanJobResponse, String> {
         self.start_scan_job_with_listener(request, None)
     }
 
@@ -83,7 +86,10 @@ impl ScanJobManager {
         let jobs = Arc::clone(&self.jobs);
 
         {
-            let mut jobs = self.jobs.lock().map_err(|_| "job lock poisoned".to_owned())?;
+            let mut jobs = self
+                .jobs
+                .lock()
+                .map_err(|_| "job lock poisoned".to_owned())?;
             jobs.insert(
                 job_id,
                 JobState {
@@ -108,10 +114,14 @@ impl ScanJobManager {
                 }
             };
             writer.set_dedup_strategy(DedupStrategy::from_id(
-                request.scan_strategy.as_deref().unwrap_or(DedupStrategy::default().as_id()),
+                request
+                    .scan_strategy
+                    .as_deref()
+                    .unwrap_or(DedupStrategy::default().as_id()),
             ));
 
             let mut terminal_event = None;
+            let mut completed_stats = None;
 
             for event in events {
                 let final_stats = match &event {
@@ -128,24 +138,27 @@ impl ScanJobManager {
                     );
                 }
 
-                let mut progress_listener = |progress: crate::index::writer::FinalizationProgress| {
-                    if let Some(stats) = &final_stats {
-                        push_event(
-                            &jobs,
-                            job_id,
-                            JobEventDto::running_with_progress(
+                let mut progress_listener =
+                    |progress: crate::index::writer::FinalizationProgress| {
+                        if let Some(stats) = &final_stats {
+                            push_event(
+                                &jobs,
                                 job_id,
-                                progress.message,
-                                stats,
-                                progress.progress_current,
-                                progress.progress_total,
-                            ),
-                            listener.as_ref(),
-                        );
-                    }
-                };
+                                JobEventDto::running_with_progress(
+                                    job_id,
+                                    progress.message,
+                                    stats,
+                                    progress.progress_current,
+                                    progress.progress_total,
+                                ),
+                                listener.as_ref(),
+                            );
+                        }
+                    };
 
-                if let Err(error) = writer.handle_event_with_progress(&event, &mut progress_listener) {
+                if let Err(error) =
+                    writer.handle_event_with_progress(&event, &mut progress_listener)
+                {
                     push_event(
                         &jobs,
                         job_id,
@@ -165,13 +178,64 @@ impl ScanJobManager {
                 }
 
                 if terminal {
+                    if matches!(event, ScanEvent::Finished(_)) {
+                        completed_stats = final_stats;
+                    }
                     break;
                 }
             }
 
-            drop(writer);
             if let Some(event) = terminal_event {
+                let was_completed = event.status == JobStatusDto::Completed;
                 push_event(&jobs, job_id, event, listener.as_ref());
+
+                if was_completed {
+                    if let Some(stats) = completed_stats {
+                        let mut progress_listener =
+                            |progress: crate::index::writer::FinalizationProgress| {
+                                push_event(
+                                    &jobs,
+                                    job_id,
+                                    JobEventDto::completed_with_progress(
+                                        job_id,
+                                        progress.message,
+                                        &stats,
+                                        progress.progress_current,
+                                        progress.progress_total,
+                                    ),
+                                    listener.as_ref(),
+                                );
+                            };
+
+                        match writer.refine_duplicates_with_progress(&mut progress_listener) {
+                            Ok(()) => {
+                                push_event(
+                                    &jobs,
+                                    job_id,
+                                    JobEventDto::completed_with_progress(
+                                        job_id,
+                                        "Duplicate analysis complete".to_owned(),
+                                        &stats,
+                                        stats.files_scanned,
+                                        stats.files_scanned,
+                                    ),
+                                    listener.as_ref(),
+                                );
+                            }
+                            Err(error) => {
+                                push_event(
+                                    &jobs,
+                                    job_id,
+                                    JobEventDto::failed(
+                                        job_id,
+                                        format!("failed to refine duplicates: {error:?}"),
+                                    ),
+                                    listener.as_ref(),
+                                );
+                            }
+                        }
+                    }
+                }
             }
         });
 
@@ -179,7 +243,10 @@ impl ScanJobManager {
     }
 
     pub fn cancel_job(&self, job_id: u64) -> Result<(), String> {
-        let jobs = self.jobs.lock().map_err(|_| "job lock poisoned".to_owned())?;
+        let jobs = self
+            .jobs
+            .lock()
+            .map_err(|_| "job lock poisoned".to_owned())?;
         let job = jobs
             .get(&job_id)
             .ok_or_else(|| format!("unknown scan job {job_id}"))?;
@@ -188,7 +255,10 @@ impl ScanJobManager {
     }
 
     pub fn job_events_since(&self, job_id: u64, offset: usize) -> Result<Vec<JobEventDto>, String> {
-        let jobs = self.jobs.lock().map_err(|_| "job lock poisoned".to_owned())?;
+        let jobs = self
+            .jobs
+            .lock()
+            .map_err(|_| "job lock poisoned".to_owned())?;
         let job = jobs
             .get(&job_id)
             .ok_or_else(|| format!("unknown scan job {job_id}"))?;
@@ -196,7 +266,10 @@ impl ScanJobManager {
     }
 
     pub fn job_status(&self, job_id: u64) -> Result<JobStatusDto, String> {
-        let jobs = self.jobs.lock().map_err(|_| "job lock poisoned".to_owned())?;
+        let jobs = self
+            .jobs
+            .lock()
+            .map_err(|_| "job lock poisoned".to_owned())?;
         let job = jobs
             .get(&job_id)
             .ok_or_else(|| format!("unknown scan job {job_id}"))?;
@@ -234,6 +307,31 @@ impl JobEventDto {
         Self {
             job_id,
             status: JobStatusDto::Running,
+            message,
+            files_scanned: stats.files_scanned,
+            folders_scanned: stats.folders_scanned,
+            bytes_scanned: stats.bytes_scanned,
+            queue_depth: 0,
+            active_workers: 0,
+            current_path: stats
+                .current_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+            progress_current,
+            progress_total,
+        }
+    }
+
+    fn completed_with_progress(
+        job_id: u64,
+        message: String,
+        stats: &crate::scanner::ScanStats,
+        progress_current: u64,
+        progress_total: u64,
+    ) -> Self {
+        Self {
+            job_id,
+            status: JobStatusDto::Completed,
             message,
             files_scanned: stats.files_scanned,
             folders_scanned: stats.folders_scanned,
@@ -312,7 +410,11 @@ impl JobEventDto {
             ScanEvent::Error(error) => Some(Self {
                 job_id,
                 status: JobStatusDto::Running,
-                message: format!("error path={} message={}", error.path.display(), error.message),
+                message: format!(
+                    "error path={} message={}",
+                    error.path.display(),
+                    error.message
+                ),
                 files_scanned: 0,
                 folders_scanned: 0,
                 bytes_scanned: 0,
@@ -398,8 +500,12 @@ mod tests {
         })
         .expect("failed to query index");
 
-        assert!(events.iter().any(|event| event.status == JobStatusDto::Completed));
-        assert!(events.iter().any(|event| event.message == "Finalizing index"));
+        assert!(events
+            .iter()
+            .any(|event| event.status == JobStatusDto::Completed));
+        assert!(events
+            .iter()
+            .any(|event| event.message == "Finalizing index"));
         assert_eq!(overview.files.len(), 2);
         assert_eq!(overview.duplicate_groups.len(), 1);
         cleanup(&root);
@@ -447,11 +553,16 @@ mod tests {
                 scan_strategy: None,
             })
             .expect("failed to start job");
-        manager.cancel_job(response.job_id).expect("failed to cancel job");
+        manager
+            .cancel_job(response.job_id)
+            .expect("failed to cancel job");
         wait_for_terminal(&manager, response.job_id);
 
         let status = manager.job_status(response.job_id).expect("missing status");
-        assert!(matches!(status, JobStatusDto::Cancelled | JobStatusDto::Completed));
+        assert!(matches!(
+            status,
+            JobStatusDto::Cancelled | JobStatusDto::Completed
+        ));
         cleanup(&root);
     }
 
@@ -490,9 +601,9 @@ mod tests {
             matches!(e.status, JobStatusDto::Running) && e.message.contains("progress")
         }));
 
-        assert!(
-            events.iter().any(|e| matches!(e.status, JobStatusDto::Completed))
-        );
+        assert!(events
+            .iter()
+            .any(|e| matches!(e.status, JobStatusDto::Completed)));
 
         let buffered = manager.job_events_since(response.job_id, 0).unwrap();
         assert!(!buffered.is_empty());
@@ -544,11 +655,30 @@ mod tests {
         for _ in 0..80 {
             let status = manager.job_status(job_id).expect("missing status");
             if !matches!(status, JobStatusDto::Running) {
+                if matches!(status, JobStatusDto::Completed) {
+                    wait_for_duplicate_analysis_complete(manager, job_id);
+                }
                 return;
             }
             thread::sleep(Duration::from_millis(50));
         }
         panic!("job did not finish");
+    }
+
+    fn wait_for_duplicate_analysis_complete(manager: &ScanJobManager, job_id: u64) {
+        for _ in 0..80 {
+            let events = manager
+                .job_events_since(job_id, 0)
+                .expect("failed to fetch job events");
+            if events
+                .iter()
+                .any(|event| event.message == "Duplicate analysis complete")
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        panic!("duplicate analysis did not finish");
     }
 
     fn test_root(name: &str) -> PathBuf {
