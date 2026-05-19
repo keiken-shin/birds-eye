@@ -1,10 +1,9 @@
+use crate::index::algorithms::DedupStrategy;
 use crate::index::schema::ALL_MIGRATIONS;
 use crate::scanner::{FileRecord, FolderRecord, ScanEvent, ScanStats};
 use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -25,6 +24,8 @@ pub struct IndexWriter {
     session_id: Option<i64>,
     active_root: Option<PathBuf>,
     active_scan_started_at: Option<i64>,
+    active_scan_strategy: DedupStrategy,
+    scan_transaction_open: bool,
     folder_ids: HashMap<PathBuf, i64>,
 }
 
@@ -90,6 +91,13 @@ pub struct FolderMediaSummary {
     pub total_bytes: i64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct FinalizationProgress {
+    pub message: String,
+    pub progress_current: u64,
+    pub progress_total: u64,
+}
+
 impl IndexWriter {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, IndexError> {
         let connection = Connection::open(path)?;
@@ -98,6 +106,8 @@ impl IndexWriter {
             session_id: None,
             active_root: None,
             active_scan_started_at: None,
+            active_scan_strategy: DedupStrategy::default(),
+            scan_transaction_open: false,
             folder_ids: HashMap::new(),
         };
         writer.migrate()?;
@@ -111,6 +121,8 @@ impl IndexWriter {
             session_id: None,
             active_root: None,
             active_scan_started_at: None,
+            active_scan_strategy: DedupStrategy::default(),
+            scan_transaction_open: false,
             folder_ids: HashMap::new(),
         };
         writer.migrate()?;
@@ -118,27 +130,74 @@ impl IndexWriter {
     }
 
     pub fn handle_event(&mut self, event: &ScanEvent) -> Result<(), IndexError> {
+        self.handle_event_with_progress(event, |_| {})
+    }
+
+    pub fn handle_event_with_progress<F>(
+        &mut self,
+        event: &ScanEvent,
+        mut progress: F,
+    ) -> Result<(), IndexError>
+    where
+        F: FnMut(FinalizationProgress),
+    {
         match event {
             ScanEvent::Started { root, .. } => self.start_session(root),
             ScanEvent::FolderIndexed(folder) => self.index_folder(folder),
             ScanEvent::FileIndexed(file) => self.index_file(file),
             ScanEvent::Finished(report) => {
                 self.finish_session("complete", &report.stats)?;
+                progress_stage(&mut progress, "Marking missing files", 0, 1);
                 self.mark_missing_files_deleted()?;
-                self.recompute_folder_rollups()?;
+                progress_stage(&mut progress, "Marking missing files", 1, 1);
+                self.commit_scan_transaction()?;
+                self.recompute_folder_rollups(&mut progress)?;
+                progress_stage(&mut progress, "Building extension statistics", 0, 1);
                 self.rebuild_extension_stats()?;
-                self.update_partial_hashes_for_duplicate_candidates()?;
-                self.update_full_hashes_for_partial_matches()?;
+                progress_stage(&mut progress, "Building extension statistics", 1, 1);
+                crate::index::algorithms::update_hashes_for_duplicate_candidates(
+                    &mut self.connection,
+                    self.active_scan_strategy,
+                    &mut progress,
+                )?;
+                progress_stage(&mut progress, "Building duplicate groups", 0, 1);
                 self.rebuild_duplicate_size_groups()?;
-                self.capture_timeline(&report.root, &report.stats)
+                progress_stage(&mut progress, "Building duplicate groups", 1, 1);
+                progress_stage(&mut progress, "Capturing timeline", 0, 1);
+                self.capture_timeline(&report.root, &report.stats)?;
+                progress_stage(&mut progress, "Capturing timeline", 1, 1);
+                Ok(())
             }
-            ScanEvent::Cancelled(stats) => self.finish_session("cancelled", stats),
+            ScanEvent::Cancelled(stats) => {
+                self.finish_session("cancelled", stats)?;
+                self.commit_scan_transaction()
+            }
             ScanEvent::Error(_) | ScanEvent::Progress(_) => Ok(()),
         }
     }
 
     pub fn connection(&self) -> &Connection {
         &self.connection
+    }
+
+    pub fn set_dedup_strategy(&mut self, strategy: DedupStrategy) {
+        self.active_scan_strategy = strategy;
+    }
+
+    pub fn latest_scan_strategy(&self) -> Result<DedupStrategy, IndexError> {
+        let strategy = self
+            .connection
+            .query_row(
+                "SELECT scan_strategy FROM scan_sessions ORDER BY started_at DESC LIMIT 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+
+        Ok(strategy
+            .as_deref()
+            .map(DedupStrategy::from_id)
+            .unwrap_or_default())
     }
 
     pub fn largest_folders(&self, limit: usize) -> Result<Vec<FolderSummary>, IndexError> {
@@ -423,8 +482,27 @@ impl IndexWriter {
     }
 
     fn migrate(&self) -> Result<(), IndexError> {
-        for (_, migration) in ALL_MIGRATIONS {
-            self.connection.execute_batch(migration)?;
+        self.connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+              version INTEGER PRIMARY KEY,
+              applied_at INTEGER NOT NULL
+            );",
+        )?;
+
+        for (version, migration) in ALL_MIGRATIONS {
+            let already_applied = self
+                .connection
+                .query_row(
+                    "SELECT 1 FROM schema_migrations WHERE version = ?1",
+                    params![*version as i64],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+
+            if !already_applied {
+                self.connection.execute_batch(migration)?;
+            }
         }
         Ok(())
     }
@@ -432,14 +510,31 @@ impl IndexWriter {
     fn start_session(&mut self, root: &Path) -> Result<(), IndexError> {
         let started_at = now_millis();
         self.folder_ids.clear();
+        self.begin_scan_transaction()?;
         self.connection.execute(
-            "INSERT INTO scan_sessions (root_path, started_at, status) VALUES (?1, ?2, 'running')",
-            params![path_to_string(root), started_at],
+            "INSERT INTO scan_sessions (root_path, started_at, status, scan_strategy) VALUES (?1, ?2, 'running', ?3)",
+            params![path_to_string(root), started_at, self.active_scan_strategy.as_id()],
         )?;
         self.session_id = Some(self.connection.last_insert_rowid());
         self.active_root = Some(root.to_path_buf());
         self.active_scan_started_at = Some(started_at);
         self.ensure_folder(root)?;
+        Ok(())
+    }
+
+    fn begin_scan_transaction(&mut self) -> Result<(), IndexError> {
+        if !self.scan_transaction_open {
+            self.connection.execute_batch("BEGIN IMMEDIATE TRANSACTION")?;
+            self.scan_transaction_open = true;
+        }
+        Ok(())
+    }
+
+    fn commit_scan_transaction(&mut self) -> Result<(), IndexError> {
+        if self.scan_transaction_open {
+            self.connection.execute_batch("COMMIT")?;
+            self.scan_transaction_open = false;
+        }
         Ok(())
     }
 
@@ -527,17 +622,19 @@ impl IndexWriter {
             let mut statement = tx.prepare(
                 "SELECT size,
                         partial_hash,
+                        sample_hash,
                         full_hash,
                         CASE
                           WHEN full_hash IS NOT NULL THEN 1.0
-                          WHEN partial_hash IS NOT NULL THEN 0.65
+                          WHEN sample_hash IS NOT NULL THEN 0.80
+                          WHEN partial_hash IS NOT NULL THEN 0.60
                           ELSE 0.35
                         END AS confidence,
                         COUNT(*) AS file_count,
                         size * (COUNT(*) - 1) AS reclaimable_bytes
                  FROM files
                  WHERE deleted_at IS NULL AND size > 0
-                 GROUP BY size, partial_hash, full_hash
+                 GROUP BY size, partial_hash, sample_hash, full_hash
                  HAVING COUNT(*) > 1
                  ORDER BY reclaimable_bytes DESC",
             )?;
@@ -546,20 +643,21 @@ impl IndexWriter {
                     row.get::<_, i64>(0)?,
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, Option<String>>(2)?,
-                    row.get::<_, f64>(3)?,
-                    row.get::<_, i64>(4)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, f64>(4)?,
                     row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
                 ))
             })?;
 
             rows.collect::<Result<Vec<_>, _>>()?
         };
 
-        for (size, partial_hash, full_hash, confidence, _file_count, reclaimable_bytes) in groups {
+        for (size, partial_hash, sample_hash, full_hash, confidence, _file_count, reclaimable_bytes) in groups {
             tx.execute(
-                "INSERT INTO duplicate_groups (size, partial_hash, full_hash, confidence, reclaimable_bytes, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![size, partial_hash, full_hash, confidence, reclaimable_bytes, now_millis()],
+                "INSERT INTO duplicate_groups (size, partial_hash, sample_hash, full_hash, confidence, reclaimable_bytes, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![size, partial_hash, sample_hash, full_hash, confidence, reclaimable_bytes, now_millis()],
             )?;
             let group_id = tx.last_insert_rowid();
             if let Some(full_hash) = full_hash {
@@ -568,6 +666,12 @@ impl IndexWriter {
                      SELECT ?1, id FROM files
                      WHERE deleted_at IS NULL AND size = ?2 AND full_hash = ?3",
                     params![group_id, size, full_hash],
+                )?;
+            } else if let Some(sample_hash) = sample_hash {
+                tx.execute(
+                    "INSERT INTO duplicate_group_files (group_id, file_id)
+                     SELECT ?1, id FROM files WHERE deleted_at IS NULL AND size = ?2 AND sample_hash = ?3",
+                    params![group_id, size, sample_hash],
                 )?;
             } else if let Some(partial_hash) = partial_hash {
                 tx.execute(
@@ -588,79 +692,10 @@ impl IndexWriter {
         Ok(())
     }
 
-    fn update_full_hashes_for_partial_matches(&mut self) -> Result<(), IndexError> {
-        let candidates = {
-            let mut statement = self.connection.prepare(
-                "SELECT id, path
-                 FROM files
-                 WHERE deleted_at IS NULL
-                   AND partial_hash IS NOT NULL
-                   AND full_hash IS NULL
-                   AND (size, partial_hash) IN (
-                     SELECT size, partial_hash FROM files
-                     WHERE deleted_at IS NULL AND partial_hash IS NOT NULL
-                     GROUP BY size, partial_hash
-                     HAVING COUNT(*) > 1
-                   )",
-            )?;
-            let rows = statement.query_map([], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-            })?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
-
-        let tx = self.connection.transaction()?;
-        for (id, path) in candidates {
-            let full_hash = full_file_hash(Path::new(&path));
-            if let Some(full_hash) = full_hash {
-                tx.execute(
-                    "UPDATE files SET full_hash = ?1, hash_algorithm = ?2 WHERE id = ?3",
-                    params![full_hash, "fnv1a-full-v1", id],
-                )?;
-            }
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
-    fn update_partial_hashes_for_duplicate_candidates(&mut self) -> Result<(), IndexError> {
-        let candidates = {
-            let mut statement = self.connection.prepare(
-                "SELECT id, path, size
-                 FROM files
-                 WHERE deleted_at IS NULL
-                   AND size IN (
-                     SELECT size FROM files
-                     WHERE deleted_at IS NULL AND size > 0
-                     GROUP BY size
-                     HAVING COUNT(*) > 1
-                   )",
-            )?;
-            let rows = statement.query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            })?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
-
-        let tx = self.connection.transaction()?;
-        for (id, path, size) in candidates {
-            let partial_hash = partial_file_hash(Path::new(&path), size as u64);
-            if let Some(partial_hash) = partial_hash {
-                tx.execute(
-                    "UPDATE files SET partial_hash = ?1, hash_algorithm = ?2 WHERE id = ?3",
-                    params![partial_hash, "fnv1a-partial-v1", id],
-                )?;
-            }
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
-    fn recompute_folder_rollups(&mut self) -> Result<(), IndexError> {
+    fn recompute_folder_rollups<F>(&mut self, progress: &mut F) -> Result<(), IndexError>
+    where
+        F: FnMut(FinalizationProgress),
+    {
         #[derive(Clone, Debug)]
         struct FolderNode {
             id: i64,
@@ -720,12 +755,15 @@ impl IndexWriter {
             }
         }
 
+        progress_stage(progress, "Computing folder totals", 0, folders.len() as u64);
         let tx = self.connection.transaction()?;
-        for folder in folders {
+        let total = folders.len() as u64;
+        for (index, folder) in folders.into_iter().enumerate() {
             tx.execute(
                 "UPDATE folders SET total_files = ?1, total_bytes = ?2 WHERE id = ?3",
                 params![folder.total_files, folder.total_bytes, folder.id],
             )?;
+            emit_counted_progress(progress, "Computing folder totals", index as u64 + 1, total);
         }
         tx.commit()?;
         Ok(())
@@ -759,6 +797,31 @@ impl IndexWriter {
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL)
              ON CONFLICT(path) DO UPDATE SET
+                partial_hash = CASE
+                    WHEN files.size IS NOT excluded.size
+                      OR files.modified_at IS NOT excluded.modified_at
+                      OR files.created_at IS NOT excluded.created_at
+                    THEN NULL ELSE files.partial_hash END,
+                sample_hash = CASE
+                    WHEN files.size IS NOT excluded.size
+                      OR files.modified_at IS NOT excluded.modified_at
+                      OR files.created_at IS NOT excluded.created_at
+                    THEN NULL ELSE files.sample_hash END,
+                full_hash = CASE
+                    WHEN files.size IS NOT excluded.size
+                      OR files.modified_at IS NOT excluded.modified_at
+                      OR files.created_at IS NOT excluded.created_at
+                    THEN NULL ELSE files.full_hash END,
+                hash_algorithm = CASE
+                    WHEN files.size IS NOT excluded.size
+                      OR files.modified_at IS NOT excluded.modified_at
+                      OR files.created_at IS NOT excluded.created_at
+                    THEN NULL ELSE files.hash_algorithm END,
+                hash_state = CASE
+                    WHEN files.size IS NOT excluded.size
+                      OR files.modified_at IS NOT excluded.modified_at
+                      OR files.created_at IS NOT excluded.created_at
+                    THEN 0 ELSE files.hash_state END,
                 folder_id = excluded.folder_id,
                 name = excluded.name,
                 extension = excluded.extension,
@@ -888,55 +951,33 @@ fn escape_like_pattern(query: &str) -> String {
     escaped
 }
 
-fn partial_file_hash(path: &Path, size: u64) -> Option<String> {
-    const BLOCK_SIZE: usize = 64 * 1024;
-    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut file = File::open(path).ok()?;
-    let mut hash = FNV_OFFSET;
-    let mut buffer = vec![0_u8; BLOCK_SIZE.min(size as usize)];
-
-    let first_read = file.read(&mut buffer).ok()?;
-    for byte in &buffer[..first_read] {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    if size > BLOCK_SIZE as u64 {
-        file.seek(SeekFrom::End(-(BLOCK_SIZE as i64))).ok()?;
-        let last_read = file.read(&mut buffer).ok()?;
-        for byte in &buffer[..last_read] {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
-    }
-
-    Some(format!("{hash:016x}"))
+pub(crate) fn progress_stage<F>(progress: &mut F, message: &str, progress_current: u64, progress_total: u64)
+where
+    F: FnMut(FinalizationProgress),
+{
+    progress(FinalizationProgress {
+        message: message.to_owned(),
+        progress_current,
+        progress_total,
+    });
 }
 
-fn full_file_hash(path: &Path) -> Option<String> {
-    const BLOCK_SIZE: usize = 128 * 1024;
-    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut file = File::open(path).ok()?;
-    let mut hash = FNV_OFFSET;
-    let mut buffer = vec![0_u8; BLOCK_SIZE];
-
-    loop {
-        let read = file.read(&mut buffer).ok()?;
-        if read == 0 {
-            break;
-        }
-
-        for byte in &buffer[..read] {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
+pub(crate) fn emit_counted_progress<F>(
+    progress: &mut F,
+    message: &str,
+    progress_current: u64,
+    progress_total: u64,
+)
+where
+    F: FnMut(FinalizationProgress),
+{
+    if progress_total <= 1
+        || progress_current == progress_total
+        || progress_current == 1
+        || progress_current % 128 == 0
+    {
+        progress_stage(progress, message, progress_current, progress_total);
     }
-
-    Some(format!("{hash:016x}"))
 }
 
 #[cfg(test)]
@@ -1063,7 +1104,69 @@ mod tests {
     }
 
     #[test]
-    fn full_hashing_filters_partial_hash_collisions() {
+    fn records_selected_scan_strategy() {
+        let root = test_root("scan-strategy");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("one.bin"), &[1; 32]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        writer.set_dedup_strategy(crate::index::algorithms::DedupStrategy::Fnv1aLegacy);
+        scan_into_index(&root, &mut writer);
+
+        let strategy: String = writer
+            .connection()
+            .query_row("SELECT scan_strategy FROM scan_sessions LIMIT 1", [], |row| row.get(0))
+            .expect("failed to read scan strategy");
+
+        assert_eq!(strategy, "fnv1a-legacy");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn changing_strategy_rehashes_existing_candidates() {
+        let root = test_root("strategy-rehash");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("one.bin"), &[1; 32]);
+        write_file(&root.join("two.bin"), &[1; 32]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut writer);
+
+        let initial_algorithm: String = writer
+            .connection()
+            .query_row(
+                "SELECT hash_algorithm FROM files WHERE full_hash IS NOT NULL LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("failed to read initial hash algorithm");
+        assert_eq!(initial_algorithm, "xxh3-full-v1");
+
+        writer.set_dedup_strategy(crate::index::algorithms::DedupStrategy::Fnv1aLegacy);
+        scan_into_index(&root, &mut writer);
+
+        let (algorithm, full_hash_len, sample_hashes): (String, i64, i64) = writer
+            .connection()
+            .query_row(
+                "SELECT
+                   hash_algorithm,
+                   LENGTH(full_hash),
+                   SUM(CASE WHEN sample_hash IS NOT NULL THEN 1 ELSE 0 END)
+                 FROM files
+                 WHERE deleted_at IS NULL",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("failed to read rehashed evidence");
+
+        assert_eq!(algorithm, "fnv1a-full-v1");
+        assert_eq!(full_hash_len, 16);
+        assert_eq!(sample_hashes, 0);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn sample_hashing_filters_partial_hash_collisions_before_full_hashing() {
         let root = test_root("full-hash");
         fs::create_dir_all(&root).expect("failed to create folder");
 
@@ -1089,9 +1192,88 @@ mod tests {
             .connection()
             .query_row("SELECT COUNT(*) FROM files WHERE full_hash IS NOT NULL", [], |row| row.get(0))
             .expect("failed to count full hashes");
+        let sample_hashes: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM files WHERE sample_hash IS NOT NULL", [], |row| row.get(0))
+            .expect("failed to count sample hashes");
 
         assert_eq!(duplicate_group_count, 0);
-        assert_eq!(full_hashes, 2);
+        assert_eq!(full_hashes, 0);
+        assert_eq!(sample_hashes, 2);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn three_point_sampling_filters_same_edges_different_middle() {
+        let root = test_root("three-point-sample");
+        fs::create_dir_all(&root).expect("failed to create folder");
+
+        let mut first = vec![1_u8; 64 * 1024];
+        first.extend(vec![9_u8; 16]);
+        first.extend(vec![2_u8; 64 * 1024]);
+
+        let mut second = vec![1_u8; 64 * 1024];
+        second.extend(vec![8_u8; 16]);
+        second.extend(vec![2_u8; 64 * 1024]);
+
+        write_file(&root.join("one.bin"), &first);
+        write_file(&root.join("two.bin"), &second);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut writer);
+
+        let duplicate_group_count: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .expect("failed to count duplicate groups");
+        let full_hashes: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM files WHERE full_hash IS NOT NULL", [], |row| row.get(0))
+            .expect("failed to count full hashes");
+
+        assert_eq!(duplicate_group_count, 0);
+        assert_eq!(full_hashes, 0);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn rescan_clears_stale_hashes_when_file_changes() {
+        let root = test_root("stale-hash");
+        fs::create_dir_all(&root).expect("failed to create folder");
+
+        let mut original = vec![1_u8; 64 * 1024];
+        original.extend(vec![7_u8; 16]);
+        original.extend(vec![2_u8; 64 * 1024]);
+
+        let mut changed = vec![1_u8; 64 * 1024];
+        changed.extend(vec![8_u8; 16]);
+        changed.extend(vec![2_u8; 64 * 1024]);
+
+        let first_path = root.join("one.bin");
+        let second_path = root.join("two.bin");
+        write_file(&first_path, &original);
+        write_file(&second_path, &original);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut writer);
+
+        let initial_groups: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .expect("failed to count initial duplicate groups");
+        assert_eq!(initial_groups, 1);
+
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        write_file(&second_path, &changed);
+        scan_into_index(&root, &mut writer);
+
+        let duplicate_group_count: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .expect("failed to count duplicate groups after rescan");
+
+        assert_eq!(duplicate_group_count, 0);
+        assert!(first_path.exists());
         cleanup(&root);
     }
 

@@ -1,3 +1,4 @@
+use crate::index::algorithms::DedupStrategy;
 use crate::index::IndexWriter;
 use crate::scanner::{ScanController, ScanEvent, ScanOptions, Scanner};
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,8 @@ pub type JobEventListener = Arc<dyn Fn(JobEventDto) + Send + Sync + 'static>;
 pub struct StartScanJobRequest {
     pub root: PathBuf,
     pub index_path: PathBuf,
+    #[serde(default)]
+    pub scan_strategy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -39,6 +42,8 @@ pub struct JobEventDto {
     pub queue_depth: usize,
     pub active_workers: usize,
     pub current_path: Option<String>,
+    pub progress_current: u64,
+    pub progress_total: u64,
 }
 
 #[derive(Clone, Default)]
@@ -102,18 +107,45 @@ impl ScanJobManager {
                     return;
                 }
             };
+            writer.set_dedup_strategy(DedupStrategy::from_id(
+                request.scan_strategy.as_deref().unwrap_or(DedupStrategy::default().as_id()),
+            ));
+
+            let mut terminal_event = None;
 
             for event in events {
-                if let ScanEvent::Finished(report) = &event {
+                let final_stats = match &event {
+                    ScanEvent::Finished(report) => Some(report.stats.clone()),
+                    _ => None,
+                };
+
+                if let Some(stats) = &final_stats {
                     push_event(
                         &jobs,
                         job_id,
-                        JobEventDto::running_from_stats(job_id, "finalizing index", &report.stats),
+                        JobEventDto::running_from_stats(job_id, "Finalizing index", stats),
                         listener.as_ref(),
                     );
                 }
 
-                if let Err(error) = writer.handle_event(&event) {
+                let mut progress_listener = |progress: crate::index::writer::FinalizationProgress| {
+                    if let Some(stats) = &final_stats {
+                        push_event(
+                            &jobs,
+                            job_id,
+                            JobEventDto::running_with_progress(
+                                job_id,
+                                progress.message,
+                                stats,
+                                progress.progress_current,
+                                progress.progress_total,
+                            ),
+                            listener.as_ref(),
+                        );
+                    }
+                };
+
+                if let Err(error) = writer.handle_event_with_progress(&event, &mut progress_listener) {
                     push_event(
                         &jobs,
                         job_id,
@@ -125,12 +157,21 @@ impl ScanJobManager {
 
                 let terminal = matches!(event, ScanEvent::Finished(_) | ScanEvent::Cancelled(_));
                 if let Some(event) = JobEventDto::from_scan_event(job_id, &event) {
-                    push_event(&jobs, job_id, event, listener.as_ref());
+                    if terminal {
+                        terminal_event = Some(event);
+                    } else {
+                        push_event(&jobs, job_id, event, listener.as_ref());
+                    }
                 }
 
                 if terminal {
                     break;
                 }
+            }
+
+            drop(writer);
+            if let Some(event) = terminal_event {
+                push_event(&jobs, job_id, event, listener.as_ref());
             }
         });
 
@@ -178,6 +219,33 @@ impl JobEventDto {
                 .current_path
                 .as_ref()
                 .map(|path| path.to_string_lossy().into_owned()),
+            progress_current: stats.files_scanned,
+            progress_total: 0,
+        }
+    }
+
+    fn running_with_progress(
+        job_id: u64,
+        message: String,
+        stats: &crate::scanner::ScanStats,
+        progress_current: u64,
+        progress_total: u64,
+    ) -> Self {
+        Self {
+            job_id,
+            status: JobStatusDto::Running,
+            message,
+            files_scanned: stats.files_scanned,
+            folders_scanned: stats.folders_scanned,
+            bytes_scanned: stats.bytes_scanned,
+            queue_depth: 0,
+            active_workers: 0,
+            current_path: stats
+                .current_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+            progress_current,
+            progress_total,
         }
     }
 
@@ -193,6 +261,8 @@ impl JobEventDto {
                 queue_depth: 0,
                 active_workers: 0,
                 current_path: Some(root.to_string_lossy().into_owned()),
+                progress_current: 0,
+                progress_total: 0,
             }),
             ScanEvent::Progress(stats) => Some(Self {
                 job_id,
@@ -207,6 +277,8 @@ impl JobEventDto {
                     .current_path
                     .as_ref()
                     .map(|path| path.to_string_lossy().into_owned()),
+                progress_current: stats.files_scanned,
+                progress_total: 0,
             }),
             ScanEvent::Finished(report) => Some(Self {
                 job_id,
@@ -218,6 +290,8 @@ impl JobEventDto {
                 queue_depth: 0,
                 active_workers: 0,
                 current_path: Some(report.root.to_string_lossy().into_owned()),
+                progress_current: report.stats.files_scanned,
+                progress_total: report.stats.files_scanned,
             }),
             ScanEvent::Cancelled(stats) => Some(Self {
                 job_id,
@@ -232,6 +306,8 @@ impl JobEventDto {
                     .current_path
                     .as_ref()
                     .map(|path| path.to_string_lossy().into_owned()),
+                progress_current: stats.files_scanned,
+                progress_total: stats.files_scanned,
             }),
             ScanEvent::Error(error) => Some(Self {
                 job_id,
@@ -243,6 +319,8 @@ impl JobEventDto {
                 queue_depth: 0,
                 active_workers: 0,
                 current_path: Some(error.path.to_string_lossy().into_owned()),
+                progress_current: 0,
+                progress_total: 0,
             }),
             ScanEvent::FileIndexed(_) | ScanEvent::FolderIndexed(_) => None,
         }
@@ -259,6 +337,8 @@ impl JobEventDto {
             queue_depth: 0,
             active_workers: 0,
             current_path: None,
+            progress_current: 0,
+            progress_total: 0,
         }
     }
 }
@@ -284,7 +364,7 @@ fn push_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::native::api::{query_index_overview, IndexQueryRequest};
+    use crate::native::api::{index_metadata, query_index_overview, IndexQueryRequest};
     use std::fs::{self, File};
     use std::io::Write;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -303,6 +383,7 @@ mod tests {
             .start_scan_job(StartScanJobRequest {
                 root: data_root,
                 index_path: index_path.clone(),
+                scan_strategy: None,
             })
             .expect("failed to start job");
 
@@ -318,9 +399,33 @@ mod tests {
         .expect("failed to query index");
 
         assert!(events.iter().any(|event| event.status == JobStatusDto::Completed));
-        assert!(events.iter().any(|event| event.message == "finalizing index"));
+        assert!(events.iter().any(|event| event.message == "Finalizing index"));
         assert_eq!(overview.files.len(), 2);
         assert_eq!(overview.duplicate_groups.len(), 1);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn background_job_records_scan_strategy() {
+        let root = test_root("job-strategy");
+        let data_root = root.join("data");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(&data_root).expect("failed to create folder");
+        write_file(&data_root.join("one.bin"), &[1; 32]);
+
+        let manager = ScanJobManager::new();
+        let response = manager
+            .start_scan_job(StartScanJobRequest {
+                root: data_root,
+                index_path: index_path.clone(),
+                scan_strategy: Some("fnv1a-legacy".to_owned()),
+            })
+            .expect("failed to start job");
+
+        wait_for_terminal(&manager, response.job_id);
+
+        let metadata = index_metadata(index_path).expect("metadata");
+        assert_eq!(metadata.scan_strategy, "fnv1a-legacy");
         cleanup(&root);
     }
 
@@ -339,6 +444,7 @@ mod tests {
             .start_scan_job(StartScanJobRequest {
                 root: data_root,
                 index_path,
+                scan_strategy: None,
             })
             .expect("failed to start job");
         manager.cancel_job(response.job_id).expect("failed to cancel job");
@@ -368,6 +474,7 @@ mod tests {
                 StartScanJobRequest {
                     root: data_root,
                     index_path,
+                    scan_strategy: None,
                 },
                 Some(Arc::new(move |event| {
                     captured.lock().unwrap().push(event);
@@ -389,6 +496,46 @@ mod tests {
 
         let buffered = manager.job_events_since(response.job_id, 0).unwrap();
         assert!(!buffered.is_empty());
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn listener_receives_finalization_progress_totals() {
+        let root = test_root("finalization-progress");
+        let data_root = root.join("data");
+        let index_path = root.join("index.sqlite");
+
+        fs::create_dir_all(&data_root).unwrap();
+        write_file(&data_root.join("one.bin"), &[1; 64]);
+        write_file(&data_root.join("two.bin"), &[1; 64]);
+
+        let manager = ScanJobManager::new();
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+
+        let response = manager
+            .start_scan_job_with_listener(
+                StartScanJobRequest {
+                    root: data_root,
+                    index_path,
+                    scan_strategy: None,
+                },
+                Some(Arc::new(move |event| {
+                    captured.lock().unwrap().push(event);
+                })),
+            )
+            .unwrap();
+
+        wait_for_terminal(&manager, response.job_id);
+
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|event| {
+            event.message.contains("Sampling duplicate candidates")
+                && event.progress_total > 0
+                && event.progress_current <= event.progress_total
+        }));
 
         cleanup(&root);
     }
