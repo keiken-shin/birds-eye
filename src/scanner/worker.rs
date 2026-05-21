@@ -475,9 +475,6 @@ mod tests {
             if let ScanEvent::Verbose { .. } = event {
                 saw_verbose = true;
             }
-            if matches!(event, ScanEvent::Finished(_)) {
-                break;
-            }
         }
 
         assert!(saw_verbose, "expected at least one Verbose event");
