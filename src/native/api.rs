@@ -555,8 +555,20 @@ mod tests {
         })
         .expect("scan command failed");
 
-        let metadata = index_metadata(index_path).expect("metadata");
+        let metadata = index_metadata(index_path.clone()).expect("metadata");
         assert_eq!(metadata.scan_strategy, "metadata");
+
+        {
+            let writer = IndexWriter::open(&index_path).expect("open writer for verification");
+            let job_count: i64 = writer
+                .connection()
+                .query_row("SELECT COUNT(*) FROM hash_jobs", [], |r| r.get(0))
+                .expect("count hash_jobs");
+            assert_eq!(
+                job_count, 0,
+                "MetadataOnly scan must not seed hash_jobs"
+            );
+        }
         cleanup(&root);
     }
 
