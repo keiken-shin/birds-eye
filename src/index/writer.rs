@@ -897,6 +897,9 @@ impl IndexWriter {
         progress_stage(progress, "Computing folder totals", 0, 1);
         let tx = self.connection.transaction()?;
 
+        // Clean up any leftover temp table from a previous interrupted run.
+        tx.execute("DROP TABLE IF EXISTS _folder_direct", [])?;
+
         // Per-folder direct file counts/bytes.
         tx.execute(
             "CREATE TEMP TABLE _folder_direct AS
@@ -1855,6 +1858,18 @@ mod tests {
 
         assert_eq!(root_files, 3, "root should roll up all 3 files");
         assert_eq!(root_bytes, 600, "root should roll up 100+200+300 bytes");
+
+        let (child_files, child_bytes): (i64, i64) = writer
+            .connection()
+            .query_row(
+                "SELECT total_files, total_bytes FROM folders WHERE path = ?1",
+                params![path_to_string(&child)],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("query child folder");
+
+        assert_eq!(child_files, 2, "child should roll up 2 files (its own + grandchild)");
+        assert_eq!(child_bytes, 500, "child should roll up 200+300 bytes");
         cleanup(&root);
     }
 }
