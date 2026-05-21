@@ -62,7 +62,7 @@ fn main() {
             ScanEvent::Error(error) => {
                 eprintln!("error path={} message={}", error.path.display(), error.message);
             }
-            ScanEvent::FileIndexed(_) | ScanEvent::FolderIndexed(_) => {}
+            ScanEvent::FileIndexed(_) | ScanEvent::FolderIndexed(_) | ScanEvent::Verbose { .. } => {}
         }
     }
 }

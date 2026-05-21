@@ -187,54 +187,60 @@ impl ScanJobManager {
 
             if let Some(event) = terminal_event {
                 let was_completed = event.status == JobStatusDto::Completed;
-                push_event(&jobs, job_id, event, listener.as_ref());
 
-                if was_completed {
-                    if let Some(stats) = completed_stats {
-                        let mut progress_listener =
-                            |progress: crate::index::writer::FinalizationProgress| {
-                                push_event(
-                                    &jobs,
+                if !was_completed {
+                    // Cancelled or Failed: emit immediately, no refinement.
+                    push_event(&jobs, job_id, event, listener.as_ref());
+                } else if let Some(stats) = completed_stats {
+                    // Run refinement first with Running-status progress events, then emit
+                    // a single Completed event so the frontend only queries the index once
+                    // refinement is done.
+                    let mut progress_listener =
+                        |progress: crate::index::writer::FinalizationProgress| {
+                            push_event(
+                                &jobs,
+                                job_id,
+                                JobEventDto::running_with_progress(
                                     job_id,
-                                    JobEventDto::completed_with_progress(
-                                        job_id,
-                                        progress.message,
-                                        &stats,
-                                        progress.progress_current,
-                                        progress.progress_total,
-                                    ),
-                                    listener.as_ref(),
-                                );
-                            };
+                                    progress.message,
+                                    &stats,
+                                    progress.progress_current,
+                                    progress.progress_total,
+                                ),
+                                listener.as_ref(),
+                            );
+                        };
 
-                        match writer.refine_duplicates_with_progress(&mut progress_listener) {
-                            Ok(()) => {
-                                push_event(
-                                    &jobs,
+                    match writer.refine_duplicates_with_progress(&mut progress_listener) {
+                        Ok(()) => {
+                            push_event(
+                                &jobs,
+                                job_id,
+                                JobEventDto::completed_with_progress(
                                     job_id,
-                                    JobEventDto::completed_with_progress(
-                                        job_id,
-                                        "Duplicate analysis complete".to_owned(),
-                                        &stats,
-                                        stats.files_scanned,
-                                        stats.files_scanned,
-                                    ),
-                                    listener.as_ref(),
-                                );
-                            }
-                            Err(error) => {
-                                push_event(
-                                    &jobs,
+                                    "Duplicate analysis complete".to_owned(),
+                                    &stats,
+                                    stats.files_scanned,
+                                    stats.files_scanned,
+                                ),
+                                listener.as_ref(),
+                            );
+                        }
+                        Err(error) => {
+                            push_event(
+                                &jobs,
+                                job_id,
+                                JobEventDto::failed(
                                     job_id,
-                                    JobEventDto::failed(
-                                        job_id,
-                                        format!("failed to refine duplicates: {error:?}"),
-                                    ),
-                                    listener.as_ref(),
-                                );
-                            }
+                                    format!("failed to refine duplicates: {error:?}"),
+                                ),
+                                listener.as_ref(),
+                            );
                         }
                     }
+                } else {
+                    // Completed but no stats (unexpected) — emit as-is.
+                    push_event(&jobs, job_id, event, listener.as_ref());
                 }
             }
         });
@@ -424,7 +430,7 @@ impl JobEventDto {
                 progress_current: 0,
                 progress_total: 0,
             }),
-            ScanEvent::FileIndexed(_) | ScanEvent::FolderIndexed(_) => None,
+            ScanEvent::FileIndexed(_) | ScanEvent::FolderIndexed(_) | ScanEvent::Verbose { .. } => None,
         }
     }
 

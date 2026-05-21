@@ -215,7 +215,7 @@ impl IndexWriter {
                 self.finish_session("cancelled", stats)?;
                 self.commit_scan_transaction()
             }
-            ScanEvent::Error(_) | ScanEvent::Progress(_) => Ok(()),
+            ScanEvent::Error(_) | ScanEvent::Progress(_) | ScanEvent::Verbose { .. } => Ok(()),
         }
     }
 
