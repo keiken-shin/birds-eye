@@ -1,4 +1,4 @@
-use crate::index::algorithms::DedupStrategy;
+use crate::index::writer::ScanMode;
 use crate::index::IndexWriter;
 use crate::scanner::{ScanEvent, ScanOptions, Scanner};
 use rusqlite::OptionalExtension;
@@ -138,11 +138,11 @@ pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse,
     let scanner = Scanner::new(ScanOptions::new(request.root));
     let events = scanner.scan();
     let mut writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
-    writer.set_dedup_strategy(DedupStrategy::from_id(
+    writer.set_scan_mode(ScanMode::from_id(
         request
             .scan_strategy
             .as_deref()
-            .unwrap_or(DedupStrategy::default().as_id()),
+            .unwrap_or(ScanMode::default().as_id()),
     ));
 
     for event in events {
@@ -319,7 +319,7 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
         files_scanned: 0,
         folders_scanned: 0,
         bytes_scanned: 0,
-        scan_strategy: DedupStrategy::default().as_id().to_owned(),
+        scan_strategy: ScanMode::default().as_id().to_owned(),
     }))
 }
 
@@ -341,7 +341,7 @@ mod tests {
         let response = scan_to_index(ScanToIndexRequest {
             root: root.join("data"),
             index_path: index_path.clone(),
-            scan_strategy: Some("fnv1a-legacy".to_owned()),
+            scan_strategy: Some("smart".to_owned()),
         })
         .expect("scan command failed");
         IndexWriter::open(index_path.clone())
@@ -551,12 +551,12 @@ mod tests {
         scan_to_index(ScanToIndexRequest {
             root: root.join("data"),
             index_path: index_path.clone(),
-            scan_strategy: Some("fnv1a-legacy".to_owned()),
+            scan_strategy: Some("metadata".to_owned()),
         })
         .expect("scan command failed");
 
         let metadata = index_metadata(index_path).expect("metadata");
-        assert_eq!(metadata.scan_strategy, "fnv1a-legacy");
+        assert_eq!(metadata.scan_strategy, "metadata");
         cleanup(&root);
     }
 
