@@ -95,5 +95,6 @@ pub enum ScanEvent {
     Progress(ScanStats),
     Finished(ScanReport),
     Cancelled(ScanStats),
+    Verbose { phase: &'static str, message: String },
 }
 

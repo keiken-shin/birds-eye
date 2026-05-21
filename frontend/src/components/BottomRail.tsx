@@ -1,0 +1,66 @@
+import { NavLink } from "react-router-dom";
+import {
+  House,
+  LibraryBig,
+  ListOrdered,
+  Settings,
+  Blocks,
+} from "lucide-react";
+import { QueuePopover } from "./QueuePopover";
+import { SettingsPopover } from "./SettingsPopover";
+import { useScanContext } from "../context/ScanContext";
+
+const itemBase =
+  "inline-flex min-h-[52px] min-w-[106px] items-center justify-center gap-1.5 border-r border-white/15 px-3 font-mono text-11 font-black uppercase text-muted no-underline last:border-r";
+const activeClass = "!text-accent border-b border-b-accent";
+
+export function BottomRail() {
+  const { queueItems } = useScanContext();
+  const hasActiveScans = queueItems.some((item) => item.status === "scanning");
+
+  return (
+    <nav
+      className="fixed bottom-7 left-1/2 z-20 flex max-w-[calc(100vw-28px)] -translate-x-1/2 border border-primary/30 bg-overlay shadow-[0_18px_70px_rgba(0,0,0,0.58)] before:pointer-events-none before:absolute before:-left-[7px] before:-top-[7px] before:h-4 before:w-4 before:border-l-2 before:border-t-2 before:border-primary after:pointer-events-none after:absolute after:-bottom-[7px] after:-right-[7px] after:h-4 after:w-4 after:border-b-2 after:border-r-2 after:border-primary max-sm:sticky max-sm:bottom-3 max-sm:left-2 max-sm:right-2 max-sm:mx-2 max-sm:mb-3 max-sm:overflow-x-auto max-sm:translate-x-0"
+      aria-label="Primary navigation"
+    >
+      <NavLink
+        to="/"
+        end
+        className={({ isActive }) => `${itemBase}${isActive ? ` ${activeClass}` : ""}`}
+        title="Home"
+      >
+        <House size={20} />
+      </NavLink>
+      <NavLink
+        to="/workspace"
+        className={({ isActive }) => `${itemBase}${isActive ? ` ${activeClass}` : ""}`}
+        title="Workspace"
+      >
+        <Blocks size={20} />
+      </NavLink>
+      <NavLink
+        to="/library"
+        className={({ isActive }) => `${itemBase}${isActive ? ` ${activeClass}` : ""}`}
+        title="Library"
+      >
+        <LibraryBig size={20} />
+      </NavLink>
+      <QueuePopover>
+        <button className={`${itemBase} cursor-pointer relative`} type="button" title="Queue">
+          <ListOrdered size={20} />
+          {hasActiveScans && (
+            <span className="absolute right-2 top-2 h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+          )}
+        </button>
+      </QueuePopover>
+      <SettingsPopover>
+        <button className={`${itemBase} cursor-pointer`} type="button" title="Settings">
+          <Settings size={20} />
+        </button>
+      </SettingsPopover>
+    </nav>
+  );
+}
+
+
+

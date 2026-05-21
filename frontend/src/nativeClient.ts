@@ -1,8 +1,20 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import type { ScanStrategy } from "./domain";
 
 export type NativeJobStatus = "Running" | "Completed" | "Cancelled" | "Failed";
+
+export type NativeLogLine = {
+  phase: string;
+  message: string;
+  elapsed_ms: number;
+};
+
+export type NativePhaseTimingEntry = {
+  phase: string;
+  duration_ms: number;
+};
 
 export type NativeJobEvent = {
   job_id: number;
@@ -14,6 +26,10 @@ export type NativeJobEvent = {
   queue_depth: number;
   active_workers: number;
   current_path: string | null;
+  progress_current: number;
+  progress_total: number;
+  log_line?: NativeLogLine;
+  phase_timings?: NativePhaseTimingEntry[];
 };
 
 export type NativeIndexOverview = {
@@ -48,6 +64,7 @@ export type NativeIndexEntry = {
   files_scanned: number;
   folders_scanned: number;
   bytes_scanned: number;
+  scan_strategy: ScanStrategy;
 };
 
 export type NativeDuplicateFile = {
@@ -70,9 +87,10 @@ export async function chooseNativeFolder() {
   return typeof selected === "string" ? selected : null;
 }
 
-export async function startNativeScan(root: string) {
+export async function startNativeScan(root: string, scanStrategy: ScanStrategy) {
   const response = await invoke<{ job_id: number; index_path: string }>("start_scan_job_for_root", {
     root,
+    scanStrategy,
   });
 
   return { jobId: response.job_id, indexPath: response.index_path };
@@ -103,12 +121,28 @@ export async function queryNativeIndex(indexPath: string, limit: number) {
   });
 }
 
-export async function searchNativeIndex(indexPath: string, query: string, limit: number) {
+export async function searchNativeIndex(
+  indexPath: string,
+  query: string,
+  limit: number,
+  filters?: {
+    kinds?: string[];
+    extensions?: string[];
+    minBytes?: number;
+    maxBytes?: number;
+    useRegex?: boolean;
+  }
+) {
   return invoke<NativeSearchResult[]>("search_files", {
     request: {
       index_path: indexPath,
       query,
       limit,
+      kinds: filters?.kinds ?? null,
+      extensions: filters?.extensions ?? null,
+      min_bytes: filters?.minBytes ?? null,
+      max_bytes: filters?.maxBytes ?? null,
+      use_regex: filters?.useRegex ?? null,
     },
   });
 }
