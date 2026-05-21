@@ -62,14 +62,14 @@ describe("ScanContext scan strategy", () => {
     window.localStorage.clear();
     const { result } = renderHook(() => useScanContext(), { wrapper });
 
-    expect(result.current.scanStrategy).toBe("xxh3-progressive");
+    expect(result.current.scanStrategy).toBe("smart");
 
     act(() => {
-      result.current.setScanStrategy("fnv1a-legacy");
+      result.current.setScanStrategy("metadata");
     });
 
-    expect(result.current.scanStrategy).toBe("fnv1a-legacy");
-    expect(window.localStorage.getItem("birds-eye.scanStrategy")).toBe("fnv1a-legacy");
+    expect(result.current.scanStrategy).toBe("metadata");
+    expect(window.localStorage.getItem("birds-eye.scanStrategy")).toBe("metadata");
   });
 });
 

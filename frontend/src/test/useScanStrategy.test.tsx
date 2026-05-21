@@ -27,7 +27,7 @@ vi.mock("../nativeClient", async () => {
   };
 });
 
-function renderUseScan(scanStrategy: "xxh3-progressive" | "fnv1a-legacy" = "xxh3-progressive") {
+function renderUseScan(scanStrategy: "smart" | "metadata" = "smart") {
   return renderHook(() =>
     useScan({
       nativeRuntime: true,
@@ -47,17 +47,17 @@ describe("useScan strategy routing", () => {
 
   it("uses the current preference for new native scans", async () => {
     chooseNativeFolder.mockResolvedValue("D:\\Data");
-    const { result } = renderUseScan("fnv1a-legacy");
+    const { result } = renderUseScan("metadata");
 
     await act(async () => {
       result.current.openFolderPicker();
     });
 
-    expect(startNativeScan).toHaveBeenCalledWith("D:\\Data", "fnv1a-legacy");
+    expect(startNativeScan).toHaveBeenCalledWith("D:\\Data", "metadata");
   });
 
   it("uses the saved index strategy for rescans", async () => {
-    const { result } = renderUseScan("xxh3-progressive");
+    const { result } = renderUseScan("smart");
     const entry: NativeIndexEntry = {
       index_path: "index.sqlite",
       root_path: "D:\\Data",
@@ -66,13 +66,13 @@ describe("useScan strategy routing", () => {
       files_scanned: 1,
       folders_scanned: 1,
       bytes_scanned: 10,
-      scan_strategy: "fnv1a-legacy",
+      scan_strategy: "metadata",
     };
 
     await act(async () => {
       await result.current.rescanSavedIndex(entry);
     });
 
-    expect(startNativeScan).toHaveBeenCalledWith("D:\\Data", "fnv1a-legacy");
+    expect(startNativeScan).toHaveBeenCalledWith("D:\\Data", "metadata");
   });
 });
