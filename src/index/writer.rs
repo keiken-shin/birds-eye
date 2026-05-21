@@ -56,6 +56,7 @@ pub struct IndexWriter {
     active_scan_mode: ScanMode,
     scan_transaction_open: bool,
     folder_ids: HashMap<PathBuf, i64>,
+    files_since_commit: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -128,6 +129,20 @@ pub struct FinalizationProgress {
 }
 
 impl IndexWriter {
+    /// Commit the crawl transaction every this many indexed files so the index
+    /// is queryable progressively and the final commit is not a single cliff.
+    const CRAWL_COMMIT_BATCH: u64 = 10_000;
+
+    fn maybe_commit_crawl_batch(&mut self) -> Result<(), IndexError> {
+        self.files_since_commit += 1;
+        if self.files_since_commit >= Self::CRAWL_COMMIT_BATCH {
+            self.commit_scan_transaction()?;
+            self.begin_scan_transaction()?;
+            self.files_since_commit = 0;
+        }
+        Ok(())
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self, IndexError> {
         let connection = Connection::open(path)?;
         let writer = Self {
@@ -138,6 +153,7 @@ impl IndexWriter {
             active_scan_mode: ScanMode::default(),
             scan_transaction_open: false,
             folder_ids: HashMap::new(),
+            files_since_commit: 0,
         };
         writer.migrate()?;
         Ok(writer)
@@ -153,6 +169,7 @@ impl IndexWriter {
             active_scan_mode: ScanMode::default(),
             scan_transaction_open: false,
             folder_ids: HashMap::new(),
+            files_since_commit: 0,
         };
         writer.migrate()?;
         Ok(writer)
@@ -580,6 +597,7 @@ impl IndexWriter {
     fn start_session(&mut self, root: &Path) -> Result<(), IndexError> {
         let started_at = now_millis();
         self.folder_ids.clear();
+        self.files_since_commit = 0;
         self.begin_scan_transaction()?;
         self.connection.execute(
             "INSERT INTO scan_sessions (root_path, started_at, status, scan_strategy) VALUES (?1, ?2, 'running', ?3)",
@@ -1026,6 +1044,7 @@ impl IndexWriter {
             ],
         )?;
 
+        self.maybe_commit_crawl_batch()?;
         Ok(())
     }
 
@@ -1779,6 +1798,43 @@ mod tests {
         if root.exists() {
             fs::remove_dir_all(root).expect("failed to remove test folder");
         }
+    }
+
+    #[test]
+    fn crawl_commits_in_batches_before_finish() {
+        let root = test_root("batched-commits");
+        std::fs::create_dir_all(&root).expect("create root");
+        for i in 0..25_000 {
+            std::fs::write(root.join(format!("f{i}.bin")), b"x").expect("write file");
+        }
+
+        let mut writer = IndexWriter::open_in_memory().expect("open writer");
+        let scanner = crate::scanner::Scanner::new(crate::scanner::ScanOptions {
+            root: root.clone(),
+            workers: 2,
+        });
+        let events = scanner.scan();
+
+        let mut committed_mid_crawl = 0_i64;
+        for event in events {
+            let is_finished = matches!(event, ScanEvent::Finished(_));
+            writer.handle_event(&event).expect("handle event");
+            if !is_finished {
+                committed_mid_crawl = writer
+                    .connection()
+                    .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+                    .unwrap_or(0);
+            }
+            if is_finished {
+                break;
+            }
+        }
+
+        assert!(
+            committed_mid_crawl > 0,
+            "expected files to be visible before Finished, saw {committed_mid_crawl}"
+        );
+        cleanup(&root);
     }
 
     #[test]
