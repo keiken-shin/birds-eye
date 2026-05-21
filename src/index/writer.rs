@@ -1,4 +1,3 @@
-use crate::index::algorithms::DedupStrategy;
 use crate::index::schema::ALL_MIGRATIONS;
 use crate::scanner::{FileRecord, FolderRecord, ScanEvent, ScanStats};
 use regex::Regex;
@@ -54,7 +53,7 @@ pub struct IndexWriter {
     session_id: Option<i64>,
     active_root: Option<PathBuf>,
     active_scan_started_at: Option<i64>,
-    active_scan_strategy: DedupStrategy,
+    active_scan_mode: ScanMode,
     scan_transaction_open: bool,
     folder_ids: HashMap<PathBuf, i64>,
 }
@@ -136,7 +135,7 @@ impl IndexWriter {
             session_id: None,
             active_root: None,
             active_scan_started_at: None,
-            active_scan_strategy: DedupStrategy::default(),
+            active_scan_mode: ScanMode::default(),
             scan_transaction_open: false,
             folder_ids: HashMap::new(),
         };
@@ -151,7 +150,7 @@ impl IndexWriter {
             session_id: None,
             active_root: None,
             active_scan_started_at: None,
-            active_scan_strategy: DedupStrategy::default(),
+            active_scan_mode: ScanMode::default(),
             scan_transaction_open: false,
             folder_ids: HashMap::new(),
         };
@@ -186,7 +185,9 @@ impl IndexWriter {
                 self.rebuild_extension_stats()?;
                 progress_stage(&mut progress, "Building extension statistics", 1, 1);
                 progress_stage(&mut progress, "Preparing duplicate analysis", 0, 1);
-                self.prepare_duplicate_refinement_jobs()?;
+                if self.active_scan_mode == ScanMode::Smart {
+                    self.prepare_duplicate_refinement_jobs()?;
+                }
                 progress_stage(&mut progress, "Preparing duplicate analysis", 1, 1);
                 progress_stage(&mut progress, "Capturing timeline", 0, 1);
                 self.capture_timeline(&report.root, &report.stats)?;
@@ -205,12 +206,12 @@ impl IndexWriter {
         &self.connection
     }
 
-    pub fn set_dedup_strategy(&mut self, strategy: DedupStrategy) {
-        self.active_scan_strategy = strategy;
+    pub fn set_scan_mode(&mut self, mode: ScanMode) {
+        self.active_scan_mode = mode;
     }
 
-    pub fn latest_scan_strategy(&self) -> Result<DedupStrategy, IndexError> {
-        let strategy = self
+    pub fn latest_scan_mode(&self) -> Result<ScanMode, IndexError> {
+        let mode = self
             .connection
             .query_row(
                 "SELECT scan_strategy FROM scan_sessions ORDER BY started_at DESC LIMIT 1",
@@ -218,11 +219,7 @@ impl IndexWriter {
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
-
-        Ok(strategy
-            .as_deref()
-            .map(DedupStrategy::from_id)
-            .unwrap_or_default())
+        Ok(mode.as_deref().map(ScanMode::from_id).unwrap_or_default())
     }
 
     pub fn refine_duplicates_with_progress<F>(&mut self, mut progress: F) -> Result<(), IndexError>
@@ -230,7 +227,6 @@ impl IndexWriter {
         F: FnMut(FinalizationProgress),
     {
         let scan_id = self.current_scan_session_id()?;
-        let strategy = self.latest_scan_strategy()?;
 
         progress_stage(&mut progress, "Preparing duplicate analysis", 0, 1);
         self.prepare_duplicate_refinement_jobs()?;
@@ -241,7 +237,6 @@ impl IndexWriter {
         self.mark_duplicate_candidates_status(scan_id, "sampling")?;
         crate::index::algorithms::update_hashes_for_duplicate_candidates(
             &mut self.connection,
-            strategy,
             &mut progress,
         )?;
         self.mark_hash_jobs_completed(scan_id, "sample")?;
@@ -584,7 +579,7 @@ impl IndexWriter {
         self.begin_scan_transaction()?;
         self.connection.execute(
             "INSERT INTO scan_sessions (root_path, started_at, status, scan_strategy) VALUES (?1, ?2, 'running', ?3)",
-            params![path_to_string(root), started_at, self.active_scan_strategy.as_id()],
+            params![path_to_string(root), started_at, self.active_scan_mode.as_id()],
         )?;
         self.session_id = Some(self.connection.last_insert_rowid());
         self.active_root = Some(root.to_path_buf());
@@ -1307,78 +1302,6 @@ mod tests {
                 .len(),
             2
         );
-        cleanup(&root);
-    }
-
-    #[test]
-    fn records_selected_scan_strategy() {
-        let root = test_root("scan-strategy");
-        fs::create_dir_all(&root).expect("failed to create folder");
-        write_file(&root.join("one.bin"), &[1; 32]);
-
-        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
-        writer.set_dedup_strategy(crate::index::algorithms::DedupStrategy::Fnv1aLegacy);
-        scan_into_index(&root, &mut writer);
-
-        let strategy: String = writer
-            .connection()
-            .query_row(
-                "SELECT scan_strategy FROM scan_sessions LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
-            .expect("failed to read scan strategy");
-
-        assert_eq!(strategy, "fnv1a-legacy");
-        cleanup(&root);
-    }
-
-    #[test]
-    fn changing_strategy_rehashes_existing_candidates() {
-        let root = test_root("strategy-rehash");
-        fs::create_dir_all(&root).expect("failed to create folder");
-        write_file(&root.join("one.bin"), &[1; 32]);
-        write_file(&root.join("two.bin"), &[1; 32]);
-
-        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
-        scan_into_index(&root, &mut writer);
-        writer
-            .refine_duplicates()
-            .expect("failed to refine duplicates");
-
-        let initial_algorithm: String = writer
-            .connection()
-            .query_row(
-                "SELECT hash_algorithm FROM files WHERE full_hash IS NOT NULL LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
-            .expect("failed to read initial hash algorithm");
-        assert_eq!(initial_algorithm, "xxh3-full-v1");
-
-        writer.set_dedup_strategy(crate::index::algorithms::DedupStrategy::Fnv1aLegacy);
-        scan_into_index(&root, &mut writer);
-        writer
-            .refine_duplicates()
-            .expect("failed to refine duplicates");
-
-        let (algorithm, full_hash_len, sample_hashes): (String, i64, i64) = writer
-            .connection()
-            .query_row(
-                "SELECT
-                   hash_algorithm,
-                   LENGTH(full_hash),
-                   SUM(CASE WHEN sample_hash IS NOT NULL THEN 1 ELSE 0 END)
-                 FROM files
-                 WHERE deleted_at IS NULL",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .expect("failed to read rehashed evidence");
-
-        assert_eq!(algorithm, "fnv1a-full-v1");
-        assert_eq!(full_hash_len, 16);
-        assert_eq!(sample_hashes, 0);
         cleanup(&root);
     }
 
