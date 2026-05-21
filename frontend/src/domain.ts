@@ -216,7 +216,8 @@ export type ScanStrategy = "smart" | "metadata";
 export const defaultScanStrategy: ScanStrategy = "smart";
 
 export function parseScanStrategy(value: unknown): ScanStrategy {
-  return value === "metadata" ? "metadata" : "smart";
+  if (value === "smart" || value === "metadata") return value;
+  return defaultScanStrategy;
 }
 
 export type ScanLogEntry = {

@@ -1,12 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { defaultScanStrategy, parseScanStrategy } from "../domain";
 
-describe("parseScanStrategy", () => {
-  it("returns smart for the default", () => {
+describe("ScanStrategy helpers", () => {
+  it("default is smart", () => {
     expect(defaultScanStrategy).toBe("smart");
   });
 
-  it("returns metadata for the metadata string", () => {
+  it("parses smart", () => {
+    expect(parseScanStrategy("smart")).toBe("smart");
+  });
+
+  it("parses metadata", () => {
     expect(parseScanStrategy("metadata")).toBe("metadata");
   });
 
