@@ -99,10 +99,10 @@ where
     let tx = connection.transaction()?;
     let total = candidates.len() as u64;
     for (index, (id, path, size)) in candidates.into_iter().enumerate() {
-        let partial_hash = partial_file_hash(Path::new(&path), size as u64);
         let sample_hash = sample_file_hash(Path::new(&path), size as u64);
         match sample_hash {
             Some(sample_hash) => {
+                let partial_hash = partial_file_hash(Path::new(&path), size as u64);
                 if let Some(partial_hash) = partial_hash {
                     tx.execute(
                         "UPDATE files
