@@ -1309,13 +1309,15 @@ mod tests {
         let root = test_root("full-hash");
         fs::create_dir_all(&root).expect("failed to create folder");
 
-        let mut first = vec![1_u8; 128 * 1024];
+        // Use >1 MiB files so sample_chunk_plan picks the 3-point (head+middle+tail) ladder;
+        // the difference sits in the middle chunk, which is caught by sampling → no full hash.
+        let mut first = vec![1_u8; 1024 * 1024];
         first.extend(vec![9_u8; 16]);
-        first.extend(vec![2_u8; 128 * 1024]);
+        first.extend(vec![2_u8; 1024 * 1024]);
 
-        let mut second = vec![1_u8; 128 * 1024];
+        let mut second = vec![1_u8; 1024 * 1024];
         second.extend(vec![8_u8; 16]);
-        second.extend(vec![2_u8; 128 * 1024]);
+        second.extend(vec![2_u8; 1024 * 1024]);
 
         write_file(&root.join("one.bin"), &first);
         write_file(&root.join("two.bin"), &second);
@@ -1360,13 +1362,15 @@ mod tests {
         let root = test_root("three-point-sample");
         fs::create_dir_all(&root).expect("failed to create folder");
 
-        let mut first = vec![1_u8; 64 * 1024];
+        // Use >1 MiB files so sample_chunk_plan picks the 3-point (head+middle+tail) ladder;
+        // the difference sits in the middle chunk so it is caught without a full hash.
+        let mut first = vec![1_u8; 1024 * 1024];
         first.extend(vec![9_u8; 16]);
-        first.extend(vec![2_u8; 64 * 1024]);
+        first.extend(vec![2_u8; 1024 * 1024]);
 
-        let mut second = vec![1_u8; 64 * 1024];
+        let mut second = vec![1_u8; 1024 * 1024];
         second.extend(vec![8_u8; 16]);
-        second.extend(vec![2_u8; 64 * 1024]);
+        second.extend(vec![2_u8; 1024 * 1024]);
 
         write_file(&root.join("one.bin"), &first);
         write_file(&root.join("two.bin"), &second);
