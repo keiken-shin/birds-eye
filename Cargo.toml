@@ -10,6 +10,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 regex = "1"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+rayon = "1"
 
 [lib]
 name = "birds_eye"
