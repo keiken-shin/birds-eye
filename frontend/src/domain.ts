@@ -211,12 +211,12 @@ export type SearchFilters = {
 
 export type QueueItemStatus = "scanning" | "finalizing" | "done" | "loaded";
 
-export type ScanStrategy = "xxh3-progressive" | "fnv1a-legacy";
+export type ScanStrategy = "smart" | "metadata";
 
-export const defaultScanStrategy: ScanStrategy = "xxh3-progressive";
+export const defaultScanStrategy: ScanStrategy = "smart";
 
-export function parseScanStrategy(value: string | null | undefined): ScanStrategy {
-  return value === "fnv1a-legacy" || value === "xxh3-progressive" ? value : defaultScanStrategy;
+export function parseScanStrategy(value: unknown): ScanStrategy {
+  return value === "metadata" ? "metadata" : "smart";
 }
 
 export type ScanLogEntry = {
