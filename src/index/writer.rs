@@ -894,76 +894,49 @@ impl IndexWriter {
     where
         F: FnMut(FinalizationProgress),
     {
-        #[derive(Clone, Debug)]
-        struct FolderNode {
-            id: i64,
-            parent_id: Option<i64>,
-            total_files: i64,
-            total_bytes: i64,
-        }
-
-        let mut folders = {
-            let mut statement = self
-                .connection
-                .prepare("SELECT id, parent_id FROM folders ORDER BY depth DESC")?;
-            let rows = statement.query_map([], |row| {
-                Ok(FolderNode {
-                    id: row.get(0)?,
-                    parent_id: row.get(1)?,
-                    total_files: 0,
-                    total_bytes: 0,
-                })
-            })?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
-
-        let positions = folders
-            .iter()
-            .enumerate()
-            .map(|(index, folder)| (folder.id, index))
-            .collect::<HashMap<_, _>>();
-
-        {
-            let mut statement = self
-                .connection
-                .prepare("SELECT folder_id, COUNT(*), COALESCE(SUM(size), 0) FROM files WHERE deleted_at IS NULL GROUP BY folder_id")?;
-            let rows = statement.query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            })?;
-
-            for row in rows {
-                let (folder_id, file_count, bytes) = row?;
-                if let Some(index) = positions.get(&folder_id) {
-                    folders[*index].total_files = file_count;
-                    folders[*index].total_bytes = bytes;
-                }
-            }
-        }
-
-        for index in 0..folders.len() {
-            if let Some(parent_id) = folders[index].parent_id {
-                if let Some(parent_index) = positions.get(&parent_id) {
-                    folders[*parent_index].total_files += folders[index].total_files;
-                    folders[*parent_index].total_bytes += folders[index].total_bytes;
-                }
-            }
-        }
-
-        progress_stage(progress, "Computing folder totals", 0, folders.len() as u64);
+        progress_stage(progress, "Computing folder totals", 0, 1);
         let tx = self.connection.transaction()?;
-        let total = folders.len() as u64;
-        for (index, folder) in folders.into_iter().enumerate() {
-            tx.execute(
-                "UPDATE folders SET total_files = ?1, total_bytes = ?2 WHERE id = ?3",
-                params![folder.total_files, folder.total_bytes, folder.id],
-            )?;
-            emit_counted_progress(progress, "Computing folder totals", index as u64 + 1, total);
-        }
+
+        // Per-folder direct file counts/bytes.
+        tx.execute(
+            "CREATE TEMP TABLE _folder_direct AS
+             SELECT folder_id AS id,
+                    COUNT(*)             AS direct_files,
+                    COALESCE(SUM(size),0) AS direct_bytes
+             FROM files
+             WHERE deleted_at IS NULL
+             GROUP BY folder_id",
+            [],
+        )?;
+
+        // Roll each folder's direct totals up to every ancestor via a recursive
+        // walk from each folder to the root.
+        tx.execute(
+            "WITH RECURSIVE ancestry(start_id, node_id) AS (
+                 SELECT id, id FROM folders
+                 UNION ALL
+                 SELECT a.start_id, f.parent_id
+                 FROM ancestry a
+                 JOIN folders f ON f.id = a.node_id
+                 WHERE f.parent_id IS NOT NULL
+             )
+             UPDATE folders SET
+                total_files = COALESCE((
+                    SELECT SUM(d.direct_files)
+                    FROM ancestry a
+                    JOIN _folder_direct d ON d.id = a.start_id
+                    WHERE a.node_id = folders.id), 0),
+                total_bytes = COALESCE((
+                    SELECT SUM(d.direct_bytes)
+                    FROM ancestry a
+                    JOIN _folder_direct d ON d.id = a.start_id
+                    WHERE a.node_id = folders.id), 0)",
+            [],
+        )?;
+
+        tx.execute("DROP TABLE _folder_direct", [])?;
         tx.commit()?;
+        progress_stage(progress, "Computing folder totals", 1, 1);
         Ok(())
     }
 
@@ -1846,5 +1819,42 @@ mod tests {
         assert_eq!(ScanMode::Smart.as_id(), "smart");
         assert_eq!(ScanMode::MetadataOnly.as_id(), "metadata");
         assert_eq!(ScanMode::default(), ScanMode::Smart);
+    }
+
+    #[test]
+    fn folder_rollups_match_nested_tree() {
+        let root = test_root("rollup-tree");
+        let child = root.join("child");
+        let grandchild = child.join("grandchild");
+        std::fs::create_dir_all(&grandchild).expect("create dirs");
+        std::fs::write(root.join("a.bin"), vec![0_u8; 100]).expect("write a");
+        std::fs::write(child.join("b.bin"), vec![0_u8; 200]).expect("write b");
+        std::fs::write(grandchild.join("c.bin"), vec![0_u8; 300]).expect("write c");
+
+        let mut writer = IndexWriter::open_in_memory().expect("open writer");
+        let scanner = crate::scanner::Scanner::new(crate::scanner::ScanOptions {
+            root: root.clone(),
+            workers: 1,
+        });
+        for event in scanner.scan() {
+            let finished = matches!(event, ScanEvent::Finished(_));
+            writer.handle_event(&event).expect("handle event");
+            if finished {
+                break;
+            }
+        }
+
+        let (root_files, root_bytes): (i64, i64) = writer
+            .connection()
+            .query_row(
+                "SELECT total_files, total_bytes FROM folders WHERE path = ?1",
+                params![path_to_string(&root)],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("query root folder");
+
+        assert_eq!(root_files, 3, "root should roll up all 3 files");
+        assert_eq!(root_bytes, 600, "root should roll up 100+200+300 bytes");
+        cleanup(&root);
     }
 }
