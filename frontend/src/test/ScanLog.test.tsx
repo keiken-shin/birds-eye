@@ -22,7 +22,26 @@ describe("ScanLog", () => {
     render(<ScanLog entries={[]} isActive={false} />);
     expect(screen.getByText(/no log entries/i)).toBeInTheDocument();
   });
+
+  it("renders phase label when entry has a phase", () => {
+    const withPhase: ScanLogEntry[] = [
+      { ts: Date.now(), level: "info", message: "dir scanned", phase: "scan" },
+    ];
+    render(<ScanLog entries={withPhase} isActive={false} />);
+    expect(screen.getByText("scan")).toBeInTheDocument();
+    expect(screen.getByText("dir scanned")).toBeInTheDocument();
+  });
+
+  it("renders timing matrix block for isTimingMatrix entries", () => {
+    const withMatrix: ScanLogEntry[] = [
+      {
+        ts: Date.now(),
+        level: "info",
+        message: "── Time Breakdown\n  scan    2.1s\n  total   2.1s",
+        isTimingMatrix: true,
+      },
+    ];
+    render(<ScanLog entries={withMatrix} isActive={false} />);
+    expect(screen.getByText(/Time Breakdown/)).toBeInTheDocument();
+  });
 });
-
-
-
