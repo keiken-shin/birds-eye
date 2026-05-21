@@ -224,7 +224,23 @@ export type ScanLogEntry = {
   ts: number;
   level: "info" | "warn" | "error";
   message: string;
+  phase?: string;
+  isTimingMatrix?: boolean;
 };
+
+type PhaseTimingEntry = { phase: string; duration_ms: number };
+
+export function formatTimingMatrix(timings: PhaseTimingEntry[]): string {
+  const total = timings.reduce((sum, t) => sum + t.duration_ms, 0);
+  const lines = timings.map((t) => {
+    const secs = (t.duration_ms / 1000).toFixed(1);
+    return `  ${t.phase.padEnd(22)}${secs}s`;
+  });
+  const totalSecs = (total / 1000).toFixed(1);
+  lines.push(`  ${"─".repeat(22)}─────`);
+  lines.push(`  ${"total".padEnd(22)}${totalSecs}s`);
+  return ["── Time Breakdown " + "─".repeat(22), ...lines].join("\n");
+}
 
 export type QueueItem = {
   id: string;

@@ -5,6 +5,17 @@ import type { ScanStrategy } from "./domain";
 
 export type NativeJobStatus = "Running" | "Completed" | "Cancelled" | "Failed";
 
+export type NativeLogLine = {
+  phase: string;
+  message: string;
+  elapsed_ms: number;
+};
+
+export type NativePhaseTimingEntry = {
+  phase: string;
+  duration_ms: number;
+};
+
 export type NativeJobEvent = {
   job_id: number;
   status: NativeJobStatus;
@@ -17,6 +28,8 @@ export type NativeJobEvent = {
   current_path: string | null;
   progress_current: number;
   progress_total: number;
+  log_line?: NativeLogLine;
+  phase_timings?: NativePhaseTimingEntry[];
 };
 
 export type NativeIndexOverview = {
