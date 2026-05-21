@@ -24,6 +24,19 @@ pub struct StartScanJobResponse {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct LogLineDto {
+    pub phase: String,
+    pub message: String,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct PhaseTimingDto {
+    pub phase: String,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub enum JobStatusDto {
     Running,
     Completed,
@@ -44,6 +57,10 @@ pub struct JobEventDto {
     pub current_path: Option<String>,
     pub progress_current: u64,
     pub progress_total: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_line: Option<LogLineDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase_timings: Option<Vec<PhaseTimingDto>>,
 }
 
 #[derive(Clone, Default)]
@@ -300,6 +317,8 @@ impl JobEventDto {
                 .map(|path| path.to_string_lossy().into_owned()),
             progress_current: stats.files_scanned,
             progress_total: 0,
+            log_line: None,
+            phase_timings: None,
         }
     }
 
@@ -325,6 +344,8 @@ impl JobEventDto {
                 .map(|path| path.to_string_lossy().into_owned()),
             progress_current,
             progress_total,
+            log_line: None,
+            phase_timings: None,
         }
     }
 
@@ -350,6 +371,8 @@ impl JobEventDto {
                 .map(|path| path.to_string_lossy().into_owned()),
             progress_current,
             progress_total,
+            log_line: None,
+            phase_timings: None,
         }
     }
 
@@ -367,6 +390,8 @@ impl JobEventDto {
                 current_path: Some(root.to_string_lossy().into_owned()),
                 progress_current: 0,
                 progress_total: 0,
+                log_line: None,
+                phase_timings: None,
             }),
             ScanEvent::Progress(stats) => Some(Self {
                 job_id,
@@ -383,6 +408,8 @@ impl JobEventDto {
                     .map(|path| path.to_string_lossy().into_owned()),
                 progress_current: stats.files_scanned,
                 progress_total: 0,
+                log_line: None,
+                phase_timings: None,
             }),
             ScanEvent::Finished(report) => Some(Self {
                 job_id,
@@ -396,6 +423,8 @@ impl JobEventDto {
                 current_path: Some(report.root.to_string_lossy().into_owned()),
                 progress_current: report.stats.files_scanned,
                 progress_total: report.stats.files_scanned,
+                log_line: None,
+                phase_timings: None,
             }),
             ScanEvent::Cancelled(stats) => Some(Self {
                 job_id,
@@ -412,6 +441,8 @@ impl JobEventDto {
                     .map(|path| path.to_string_lossy().into_owned()),
                 progress_current: stats.files_scanned,
                 progress_total: stats.files_scanned,
+                log_line: None,
+                phase_timings: None,
             }),
             ScanEvent::Error(error) => Some(Self {
                 job_id,
@@ -429,6 +460,8 @@ impl JobEventDto {
                 current_path: Some(error.path.to_string_lossy().into_owned()),
                 progress_current: 0,
                 progress_total: 0,
+                log_line: None,
+                phase_timings: None,
             }),
             ScanEvent::FileIndexed(_) | ScanEvent::FolderIndexed(_) | ScanEvent::Verbose { .. } => None,
         }
@@ -447,6 +480,30 @@ impl JobEventDto {
             current_path: None,
             progress_current: 0,
             progress_total: 0,
+            log_line: None,
+            phase_timings: None,
+        }
+    }
+
+    fn log_line_event(job_id: u64, phase: &'static str, message: String, elapsed_ms: u64) -> Self {
+        Self {
+            job_id,
+            status: JobStatusDto::Running,
+            message: message.clone(),
+            files_scanned: 0,
+            folders_scanned: 0,
+            bytes_scanned: 0,
+            queue_depth: 0,
+            active_workers: 0,
+            current_path: None,
+            progress_current: 0,
+            progress_total: 0,
+            log_line: Some(LogLineDto {
+                phase: phase.to_owned(),
+                message,
+                elapsed_ms,
+            }),
+            phase_timings: None,
         }
     }
 }
