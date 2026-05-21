@@ -226,6 +226,10 @@ impl IndexWriter {
     where
         F: FnMut(FinalizationProgress),
     {
+        if self.active_scan_mode == ScanMode::MetadataOnly {
+            return Ok(());
+        }
+
         let scan_id = self.current_scan_session_id()?;
 
         progress_stage(&mut progress, "Preparing duplicate analysis", 0, 1);

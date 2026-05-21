@@ -1,4 +1,4 @@
-use crate::index::algorithms::DedupStrategy;
+use crate::index::writer::ScanMode;
 use crate::index::IndexWriter;
 use crate::scanner::{ScanController, ScanEvent, ScanOptions, Scanner};
 use serde::{Deserialize, Serialize};
@@ -113,11 +113,11 @@ impl ScanJobManager {
                     return;
                 }
             };
-            writer.set_dedup_strategy(DedupStrategy::from_id(
+            writer.set_scan_mode(ScanMode::from_id(
                 request
                     .scan_strategy
                     .as_deref()
-                    .unwrap_or(DedupStrategy::default().as_id()),
+                    .unwrap_or(ScanMode::default().as_id()),
             ));
 
             let mut terminal_event = None;
@@ -524,14 +524,14 @@ mod tests {
             .start_scan_job(StartScanJobRequest {
                 root: data_root,
                 index_path: index_path.clone(),
-                scan_strategy: Some("fnv1a-legacy".to_owned()),
+                scan_strategy: Some("metadata".to_owned()),
             })
             .expect("failed to start job");
 
         wait_for_terminal(&manager, response.job_id);
 
         let metadata = index_metadata(index_path).expect("metadata");
-        assert_eq!(metadata.scan_strategy, "fnv1a-legacy");
+        assert_eq!(metadata.scan_strategy, "metadata");
         cleanup(&root);
     }
 
