@@ -1,8 +1,11 @@
 use crate::index::writer::ScanMode;
 use crate::index::IndexWriter;
+use crate::native::phase_timer::{PhaseTimer, PhaseTimingEntry};
 use crate::scanner::{ScanController, ScanEvent, ScanOptions, Scanner};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -97,6 +100,7 @@ impl ScanJobManager {
         listener: Option<JobEventListener>,
     ) -> Result<StartScanJobResponse, String> {
         let job_id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let root_display = request.root.display().to_string();
         let scanner = Scanner::new(ScanOptions::new(request.root));
         let controller = scanner.controller();
         let events = scanner.scan();
@@ -118,7 +122,27 @@ impl ScanJobManager {
         }
 
         thread::spawn(move || {
-            let mut writer = match IndexWriter::open(request.index_path) {
+            let job_start = std::time::Instant::now();
+            let log_stem = request
+                .index_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("index")
+                .to_owned();
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let log_path = request
+                .index_path
+                .with_file_name(format!("{log_stem}-{ts}.log"));
+            let log_file: RefCell<Option<BufWriter<std::fs::File>>> = RefCell::new(
+                std::fs::File::create(&log_path).ok().map(BufWriter::new),
+            );
+            let mut timer = PhaseTimer::new();
+            let mut phase_watcher = PhaseWatcher::new();
+
+            let mut writer = match IndexWriter::open(&request.index_path) {
                 Ok(writer) => writer,
                 Err(error) => {
                     push_event(
@@ -137,16 +161,84 @@ impl ScanJobManager {
                     .unwrap_or(ScanMode::default().as_id()),
             ));
 
+            emit_log(
+                &jobs,
+                listener.as_ref(),
+                &log_file,
+                job_id,
+                job_start,
+                "job",
+                format!(
+                    "job started id={job_id} root={} strategy={}",
+                    root_display,
+                    request.scan_strategy.as_deref().unwrap_or(ScanMode::default().as_id())
+                ),
+            );
+
             let mut terminal_event = None;
             let mut completed_stats = None;
+            let mut files_indexed: u64 = 0;
+            let mut last_log_milestone: u64 = 0;
+            timer.start("scan");
 
             for event in events {
+                // Route Verbose events from workers to the log only — skip all other processing.
+                if let ScanEvent::Verbose { phase, message } = &event {
+                    emit_log(&jobs, listener.as_ref(), &log_file, job_id, job_start, phase, message.clone());
+                    continue;
+                }
+
+                if matches!(&event, ScanEvent::FileIndexed(_)) {
+                    if files_indexed == 0 {
+                        timer.start("index_write");
+                    }
+                    files_indexed += 1;
+                    if files_indexed / 10_000 > last_log_milestone / 10_000 {
+                        last_log_milestone = files_indexed;
+                        emit_log(
+                            &jobs,
+                            listener.as_ref(),
+                            &log_file,
+                            job_id,
+                            job_start,
+                            "index_write",
+                            format!("batch committed files_so_far={files_indexed} elapsed_ms={}", job_start.elapsed().as_millis()),
+                        );
+                    }
+                }
+
                 let final_stats = match &event {
                     ScanEvent::Finished(report) => Some(report.stats.clone()),
                     _ => None,
                 };
 
                 if let Some(stats) = &final_stats {
+                    timer.finish("scan");
+                    timer.finish("index_write");
+                    emit_log(
+                        &jobs,
+                        listener.as_ref(),
+                        &log_file,
+                        job_id,
+                        job_start,
+                        "job",
+                        format!(
+                            "scan finished files={} folders={} bytes={} elapsed_ms={}",
+                            stats.files_scanned,
+                            stats.folders_scanned,
+                            stats.bytes_scanned,
+                            job_start.elapsed().as_millis()
+                        ),
+                    );
+                    emit_log(
+                        &jobs,
+                        listener.as_ref(),
+                        &log_file,
+                        job_id,
+                        job_start,
+                        "job",
+                        "finalization started".to_owned(),
+                    );
                     push_event(
                         &jobs,
                         job_id,
@@ -158,6 +250,19 @@ impl ScanJobManager {
                 let mut progress_listener =
                     |progress: crate::index::writer::FinalizationProgress| {
                         if let Some(stats) = &final_stats {
+                            phase_watcher.on_progress(&progress.message, progress.progress_current, progress.progress_total, &mut timer);
+                            emit_log(
+                                &jobs,
+                                listener.as_ref(),
+                                &log_file,
+                                job_id,
+                                job_start,
+                                "finalize",
+                                format!(
+                                    "{} ({}/{})",
+                                    progress.message, progress.progress_current, progress.progress_total
+                                ),
+                            );
                             push_event(
                                 &jobs,
                                 job_id,
@@ -214,6 +319,19 @@ impl ScanJobManager {
                     // refinement is done.
                     let mut progress_listener =
                         |progress: crate::index::writer::FinalizationProgress| {
+                            phase_watcher.on_progress(&progress.message, progress.progress_current, progress.progress_total, &mut timer);
+                            emit_log(
+                                &jobs,
+                                listener.as_ref(),
+                                &log_file,
+                                job_id,
+                                job_start,
+                                "finalize",
+                                format!(
+                                    "{} ({}/{})",
+                                    progress.message, progress.progress_current, progress.progress_total
+                                ),
+                            );
                             push_event(
                                 &jobs,
                                 job_id,
@@ -230,16 +348,42 @@ impl ScanJobManager {
 
                     match writer.refine_duplicates_with_progress(&mut progress_listener) {
                         Ok(()) => {
+                            timer.finish("scan"); // no-op if already finished
+                            let phase_timings: Vec<PhaseTimingDto> = timer
+                                .into_timings()
+                                .into_iter()
+                                .map(|e: PhaseTimingEntry| PhaseTimingDto {
+                                    phase: e.phase,
+                                    duration_ms: e.duration_ms,
+                                })
+                                .collect();
+
+                            emit_log(
+                                &jobs,
+                                listener.as_ref(),
+                                &log_file,
+                                job_id,
+                                job_start,
+                                "job",
+                                format!(
+                                    "job completed total_elapsed={}ms",
+                                    job_start.elapsed().as_millis()
+                                ),
+                            );
+                            write_timing_summary(&log_file, &phase_timings);
+
+                            let mut completed = JobEventDto::completed_with_progress(
+                                job_id,
+                                "Duplicate analysis complete".to_owned(),
+                                &stats,
+                                stats.files_scanned,
+                                stats.files_scanned,
+                            );
+                            completed.phase_timings = Some(phase_timings);
                             push_event(
                                 &jobs,
                                 job_id,
-                                JobEventDto::completed_with_progress(
-                                    job_id,
-                                    "Duplicate analysis complete".to_owned(),
-                                    &stats,
-                                    stats.files_scanned,
-                                    stats.files_scanned,
-                                ),
+                                completed,
                                 listener.as_ref(),
                             );
                         }
@@ -526,6 +670,87 @@ fn push_event(
     }
 }
 
+fn emit_log(
+    jobs: &Arc<Mutex<HashMap<u64, JobState>>>,
+    listener: Option<&JobEventListener>,
+    log_file: &RefCell<Option<BufWriter<std::fs::File>>>,
+    job_id: u64,
+    job_start: std::time::Instant,
+    phase: &'static str,
+    message: String,
+) {
+    let elapsed_ms = job_start.elapsed().as_millis() as u64;
+    if let Ok(mut borrow) = log_file.try_borrow_mut() {
+        if let Some(ref mut f) = *borrow {
+            let s = elapsed_ms / 1000;
+            let ms_part = elapsed_ms % 1000;
+            let _ = writeln!(
+                f,
+                "[{:02}:{:02}:{:02}.{:03}] [{}] {}",
+                s / 3600,
+                (s % 3600) / 60,
+                s % 60,
+                ms_part,
+                phase,
+                message
+            );
+        }
+    }
+    push_event(
+        jobs,
+        job_id,
+        JobEventDto::log_line_event(job_id, phase, message, elapsed_ms),
+        listener,
+    );
+}
+
+fn write_timing_summary(
+    log_file: &RefCell<Option<BufWriter<std::fs::File>>>,
+    timings: &[PhaseTimingDto],
+) {
+    if let Ok(mut borrow) = log_file.try_borrow_mut() {
+        if let Some(ref mut f) = *borrow {
+            let _ = writeln!(f, "\n── Time Breakdown ──────────────────────");
+            for t in timings {
+                let _ = writeln!(f, "  {:<22} {}ms", t.phase, t.duration_ms);
+            }
+            let total: u64 = timings.iter().map(|t| t.duration_ms).sum();
+            let _ = writeln!(f, "  {:<22} {}ms (total)", "─────────────────────", total);
+            let _ = f.flush();
+        }
+    }
+}
+
+struct PhaseWatcher;
+
+impl PhaseWatcher {
+    fn new() -> Self { Self }
+
+    fn on_progress(
+        &mut self,
+        message: &str,
+        current: u64,
+        total: u64,
+        timer: &mut PhaseTimer,
+    ) {
+        let phase: Option<&'static str> = match message {
+            "Marking missing files" => Some("mark_deleted"),
+            "Computing folder totals" => Some("folder_rollups"),
+            "Building extension statistics" => Some("ext_stats"),
+            "Preparing duplicate analysis" => Some("dedup_prep"),
+            "Sampling duplicate candidates" => Some("hashing"),
+            "Building duplicate groups" => Some("build_groups"),
+            _ => None,
+        };
+        let Some(phase) = phase else { return };
+        if current == 0 {
+            timer.start(phase);
+        } else if total > 0 && current >= total {
+            timer.finish(phase);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -790,5 +1015,57 @@ mod tests {
         if root.exists() {
             fs::remove_dir_all(root).expect("failed to remove test folder");
         }
+    }
+
+    #[test]
+    fn job_emits_log_line_events_and_phase_timings() {
+        let root = test_root("log-events");
+        let data_root = root.join("data");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(&data_root).expect("failed to create folder");
+        write_file(&data_root.join("a.bin"), &[1; 64]);
+        write_file(&data_root.join("b.bin"), &[2; 64]);
+
+        let manager = ScanJobManager::new();
+        let response = manager
+            .start_scan_job(StartScanJobRequest {
+                root: data_root,
+                index_path: index_path.clone(),
+                scan_strategy: None,
+            })
+            .expect("failed to start job");
+
+        wait_for_terminal(&manager, response.job_id);
+
+        let events = manager
+            .job_events_since(response.job_id, 0)
+            .expect("failed to fetch events");
+
+        // At least one log_line event must exist
+        assert!(
+            events.iter().any(|e| e.log_line.is_some()),
+            "no log_line events emitted"
+        );
+
+        // The terminal Completed event must carry phase_timings
+        let completed = events.iter().find(|e| e.status == JobStatusDto::Completed);
+        assert!(completed.is_some(), "no Completed event");
+        assert!(
+            completed.unwrap().phase_timings.as_ref().map(|v| !v.is_empty()).unwrap_or(false),
+            "Completed event missing phase_timings"
+        );
+
+        // Log file must exist alongside the index
+        let log_files: Vec<_> = index_path
+            .parent()
+            .unwrap()
+            .read_dir()
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map(|x| x == "log").unwrap_or(false))
+            .collect();
+        assert!(!log_files.is_empty(), "no .log file created");
+
+        cleanup(&root);
     }
 }
