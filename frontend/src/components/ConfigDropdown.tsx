@@ -58,17 +58,17 @@ export function ConfigDropdown({
 
             <ConfigSection label="Scan Strategy">
               <ConfigOption
-                label="XXH3 Progressive"
-                description="Fast default with stronger sampling for modern scans."
-                active={scanStrategy === "xxh3-progressive"}
-                hint="recommended"
-                onClick={() => onScanStrategyChange("xxh3-progressive")}
+                label="Smart Dedup"
+                description="Adaptive sampling with duplicate detection"
+                active={scanStrategy === "smart"}
+                hint="default"
+                onClick={() => onScanStrategyChange("smart")}
               />
               <ConfigOption
-                label="Legacy FNV-1a"
-                description="Compatibility mode for repeatable legacy index comparisons."
-                active={scanStrategy === "fnv1a-legacy"}
-                onClick={() => onScanStrategyChange("fnv1a-legacy")}
+                label="Metadata Only"
+                description="Fast scan, no duplicate detection"
+                active={scanStrategy === "metadata"}
+                onClick={() => onScanStrategyChange("metadata")}
               />
             </ConfigSection>
           </div>
