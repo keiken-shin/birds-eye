@@ -134,7 +134,7 @@ VALUES (2, strftime('%s', 'now'));
 "#;
 
 pub const MIGRATION_003: &str = r#"
-ALTER TABLE scan_sessions ADD COLUMN scan_strategy TEXT NOT NULL DEFAULT 'xxh3-progressive';
+ALTER TABLE scan_sessions ADD COLUMN scan_strategy TEXT NOT NULL DEFAULT 'smart';
 
 INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (3, strftime('%s', 'now'));

@@ -201,11 +201,6 @@ impl IndexWriter {
                 progress_stage(&mut progress, "Building extension statistics", 0, 1);
                 self.rebuild_extension_stats()?;
                 progress_stage(&mut progress, "Building extension statistics", 1, 1);
-                progress_stage(&mut progress, "Preparing duplicate analysis", 0, 1);
-                if self.active_scan_mode == ScanMode::Smart {
-                    self.prepare_duplicate_refinement_jobs()?;
-                }
-                progress_stage(&mut progress, "Preparing duplicate analysis", 1, 1);
                 progress_stage(&mut progress, "Capturing timeline", 0, 1);
                 self.capture_timeline(&report.root, &report.stats)?;
                 progress_stage(&mut progress, "Capturing timeline", 1, 1);

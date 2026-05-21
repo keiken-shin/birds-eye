@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS scan_sessions (
   started_at INTEGER NOT NULL,
   finished_at INTEGER,
   status TEXT NOT NULL,
-  scan_strategy TEXT NOT NULL DEFAULT 'xxh3-progressive',
+  scan_strategy TEXT NOT NULL DEFAULT 'smart',
   files_scanned INTEGER NOT NULL DEFAULT 0,
   folders_scanned INTEGER NOT NULL DEFAULT 0,
   bytes_scanned INTEGER NOT NULL DEFAULT 0,

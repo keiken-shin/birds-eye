@@ -30,7 +30,7 @@ Duplicate confidence is currently:
 - `0.80` for same-size files with matching XXH3 sample hashes.
 - `1.0` for same-size files with matching full hashes.
 
-Saved-index rescans reuse the latest `scan_strategy` recorded in that index. Brand-new scans use the frontend's remembered preference, defaulting to `xxh3-progressive`.
+Saved-index rescans reuse the latest `scan_strategy` recorded in that index. Brand-new scans use the frontend's remembered preference, defaulting to `smart`.
 
 The same indexing APIs are exposed through the native boundary and Tauri commands for the desktop app.
 

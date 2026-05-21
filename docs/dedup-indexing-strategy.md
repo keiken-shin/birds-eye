@@ -50,10 +50,10 @@ On rescan, Birds Eye clears hashes when a file's size, modified time, or created
 
 ## Selectable Strategies
 
-Birds Eye can run duplicate refinement with either `xxh3-progressive` or `fnv1a-legacy`.
-New scans default to `xxh3-progressive`. The frontend remembers the user's preferred strategy for new scans, while saved-index rescans reuse the strategy stored in the index's latest scan session.
+Birds Eye supports two scan modes: `smart` and `metadata`.
+New scans default to `smart`. The frontend remembers the user's preferred strategy for new scans, while saved-index rescans reuse the strategy stored in the index's latest scan session.
 
-`fnv1a-legacy` preserves the original `size -> partial FNV-1a -> full FNV-1a` pipeline for compatibility and repeatable legacy comparisons. It is not the recommended default.
+`metadata` skips all hashing and produces a fast index without duplicate candidate analysis. Use it when you only need storage usage data and want to avoid the I/O cost of dedup refinement.
 
 ## Why We Switched
 

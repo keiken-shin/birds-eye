@@ -131,11 +131,11 @@ impl ScanJobManager {
                 .to_owned();
             let ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
+                .map(|d| d.as_millis())
                 .unwrap_or(0);
             let log_path = request
                 .index_path
-                .with_file_name(format!("{log_stem}-{ts}.log"));
+                .with_file_name(format!("{log_stem}-{ts}-{job_id}.log"));
             let log_file: RefCell<Option<BufWriter<std::fs::File>>> = RefCell::new(
                 std::fs::File::create(&log_path).ok().map(BufWriter::new),
             );

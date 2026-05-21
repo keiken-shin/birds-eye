@@ -153,6 +153,8 @@ export function useScan({
   const handleNativeJobEventRef = useRef<(event: NativeJobEvent, options?: { replay?: boolean }) => Promise<void>>(async () => {});
 
   async function handleNativeJobEvent(event: NativeJobEvent, options: { replay?: boolean } = {}) {
+    if (nativeJobRef.current?.jobId !== event.job_id) return;
+
     if (event.log_line) {
       setLastLogEntry({
         ts: Date.now(),
@@ -163,7 +165,6 @@ export function useScan({
       return;
     }
 
-    if (nativeJobRef.current?.jobId !== event.job_id) return;
     if (isWaitingForJobId.current && !options.replay) return;
     if (shouldIgnoreNativeJobEvent(event)) return;
 
