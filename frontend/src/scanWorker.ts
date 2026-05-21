@@ -114,6 +114,9 @@ async function scanFiles(files: File[]) {
     return {
       status,
       finalizing: false,
+      progressCurrent: processedFiles,
+      progressTotal: files.length,
+      progressLabel: "",
       rootName,
       totalFiles: files.length,
       processedFiles,
