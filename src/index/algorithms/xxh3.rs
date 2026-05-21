@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use rusqlite::{params, Connection};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -48,11 +49,16 @@ where
         rows.collect::<Result<Vec<_>, _>>()?
     };
 
-    progress_stage(progress, "Full hashing strong matches", 0, candidates.len() as u64);
-    let tx = connection.transaction()?;
     let total = candidates.len() as u64;
-    for (index, (id, path)) in candidates.into_iter().enumerate() {
-        let full_hash = full_file_hash(Path::new(&path));
+    progress_stage(progress, "Full hashing strong matches", 0, total);
+
+    let results: Vec<(i64, Option<String>)> = candidates
+        .into_par_iter()
+        .map(|(id, path)| (id, full_file_hash(Path::new(&path))))
+        .collect();
+
+    let tx = connection.transaction()?;
+    for (index, (id, full_hash)) in results.into_iter().enumerate() {
         if let Some(full_hash) = full_hash {
             tx.execute(
                 "UPDATE files SET full_hash = ?1, hash_algorithm = ?2, hash_state = 4 WHERE id = ?3",
@@ -63,6 +69,12 @@ where
     }
     tx.commit()?;
     Ok(())
+}
+
+enum SampleResult {
+    Sampled { partial_hash: String, sample_hash: String },
+    Full { full_hash: String },
+    Skipped,
 }
 
 fn update_partial_hashes_for_duplicate_candidates<F>(
@@ -95,35 +107,48 @@ where
         rows.collect::<Result<Vec<_>, _>>()?
     };
 
-    progress_stage(progress, "Sampling duplicate candidates", 0, candidates.len() as u64);
-    let tx = connection.transaction()?;
     let total = candidates.len() as u64;
-    for (index, (id, path, size)) in candidates.into_iter().enumerate() {
-        let sample_hash = sample_file_hash(Path::new(&path), size as u64);
-        match sample_hash {
-            Some(sample_hash) => {
-                let partial_hash = partial_file_hash(Path::new(&path), size as u64);
-                if let Some(partial_hash) = partial_hash {
-                    tx.execute(
-                        "UPDATE files
-                         SET partial_hash = ?1, sample_hash = ?2, full_hash = NULL,
-                             hash_algorithm = ?3, hash_state = 2
-                         WHERE id = ?4",
-                        params![partial_hash, sample_hash, "xxh3-sample-v1", id],
-                    )?;
-                }
+    progress_stage(progress, "Sampling duplicate candidates", 0, total);
+
+    let results: Vec<(i64, SampleResult)> = candidates
+        .into_par_iter()
+        .map(|(id, path, size)| {
+            let result = match sample_file_hash(Path::new(&path), size as u64) {
+                Some(sample_hash) => match partial_file_hash(Path::new(&path), size as u64) {
+                    Some(partial_hash) => SampleResult::Sampled { partial_hash, sample_hash },
+                    None => SampleResult::Skipped,
+                },
+                None => match full_file_hash(Path::new(&path)) {
+                    Some(full_hash) => SampleResult::Full { full_hash },
+                    None => SampleResult::Skipped,
+                },
+            };
+            (id, result)
+        })
+        .collect();
+
+    let tx = connection.transaction()?;
+    for (index, (id, result)) in results.into_iter().enumerate() {
+        match result {
+            SampleResult::Sampled { partial_hash, sample_hash } => {
+                tx.execute(
+                    "UPDATE files
+                     SET partial_hash = ?1, sample_hash = ?2, full_hash = NULL,
+                         hash_algorithm = ?3, hash_state = 2
+                     WHERE id = ?4",
+                    params![partial_hash, sample_hash, "xxh3-sample-v1", id],
+                )?;
             }
-            None => {
-                if let Some(full_hash) = full_file_hash(Path::new(&path)) {
-                    tx.execute(
-                        "UPDATE files
-                         SET partial_hash = ?1, sample_hash = ?1, full_hash = ?1,
-                             hash_algorithm = ?2, hash_state = 4
-                         WHERE id = ?3",
-                        params![full_hash, "xxh3-full-v1", id],
-                    )?;
-                }
+            SampleResult::Full { full_hash } => {
+                tx.execute(
+                    "UPDATE files
+                     SET partial_hash = ?1, sample_hash = ?1, full_hash = ?1,
+                         hash_algorithm = ?2, hash_state = 4
+                     WHERE id = ?3",
+                    params![full_hash, "xxh3-full-v1", id],
+                )?;
             }
+            SampleResult::Skipped => {}
         }
         emit_counted_progress(progress, "Sampling duplicate candidates", index as u64 + 1, total);
     }
