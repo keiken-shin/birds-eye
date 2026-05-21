@@ -9,13 +9,16 @@ import {
   startNativeScan,
   type NativeIndexEntry,
   type NativeJobEvent,
+  type NativePhaseTimingEntry,
 } from "../nativeClient";
 import {
+  formatTimingMatrix,
   initialScanState,
   lastSegment,
   parseScanStrategy,
   type CategoryKey,
   type FolderStats,
+  type ScanLogEntry,
   type ScanState,
   type ScanStrategy,
   type ScanWorkerCommand,
@@ -64,6 +67,8 @@ export function useScan({
   clearScan: () => void;
   openSavedIndex: (entry: NativeIndexEntry) => Promise<void>;
   rescanSavedIndex: (entry: NativeIndexEntry) => Promise<void>;
+  lastLogEntry: ScanLogEntry | null;
+  phaseTimings: NativePhaseTimingEntry[] | null;
 } {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -78,6 +83,8 @@ export function useScan({
   const [filter, setFilter] = useState<CategoryKey | "all">("all");
   const [currentIndexPath, setCurrentIndexPath] = useState<string | null>(null);
   const [focusedFolder, setFocusedFolder] = useState<string | null>(null);
+  const [lastLogEntry, setLastLogEntry] = useState<ScanLogEntry | null>(null);
+  const [phaseTimings, setPhaseTimings] = useState<NativePhaseTimingEntry[] | null>(null);
 
   const sortedFolders = useMemo(() => {
     return [...scan.folders].sort((a, b) => b.bytes - a.bytes);
@@ -146,6 +153,16 @@ export function useScan({
   const handleNativeJobEventRef = useRef<(event: NativeJobEvent, options?: { replay?: boolean }) => Promise<void>>(async () => {});
 
   async function handleNativeJobEvent(event: NativeJobEvent, options: { replay?: boolean } = {}) {
+    if (event.log_line) {
+      setLastLogEntry({
+        ts: Date.now(),
+        level: "info",
+        message: event.log_line.message,
+        phase: event.log_line.phase,
+      });
+      return;
+    }
+
     if (nativeJobRef.current?.jobId !== event.job_id) return;
     if (isWaitingForJobId.current && !options.replay) return;
     if (shouldIgnoreNativeJobEvent(event)) return;
@@ -182,6 +199,9 @@ export function useScan({
     }));
 
     if (event.status === "Completed" && nativeJobRef.current) {
+      if (event.phase_timings && event.phase_timings.length > 0) {
+        setPhaseTimings(event.phase_timings);
+      }
       const indexPath = nativeJobRef.current.indexPath;
       const overview = await queryNativeIndex(indexPath, 1000);
       setScan((current) => mergeNativeOverview(current, overview));
@@ -447,5 +467,7 @@ export function useScan({
     clearScan,
     openSavedIndex,
     rescanSavedIndex,
+    lastLogEntry,
+    phaseTimings,
   };
 }

@@ -4,10 +4,12 @@ import { useNativeRuntime } from "../hooks/useNativeRuntime";
 import { useSavedIndexes } from "../hooks/useSavedIndexes";
 import { useScan } from "../hooks/useScan";
 import {
+  formatTimingMatrix,
   parseScanStrategy,
   type CategoryKey,
   type FolderStats,
   type QueueItem,
+  type ScanLogEntry,
   type ScanState,
   type ScanStrategy,
 } from "../domain";
@@ -73,6 +75,40 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const scanApi = useScan({ nativeRuntime, setRuntimeMessage, refreshSavedIndexes, scanStrategy });
   const activeQueueIdRef = useRef<string | null>(null);
+
+  // Route backend log lines into the active queue item's log
+  useEffect(() => {
+    if (!scanApi.lastLogEntry || !activeQueueIdRef.current) return;
+    const entry = scanApi.lastLogEntry;
+    const id = activeQueueIdRef.current;
+    setQueueItems((items) =>
+      items.map((item) =>
+        item.id === id
+          ? { ...item, logs: [...item.logs, entry].slice(-5000) }
+          : item
+      )
+    );
+  }, [scanApi.lastLogEntry]);
+
+  // Route phase timings into the active queue item's log as a timing matrix block
+  useEffect(() => {
+    if (!scanApi.phaseTimings || scanApi.phaseTimings.length === 0) return;
+    if (!activeQueueIdRef.current) return;
+    const matrixEntry: ScanLogEntry = {
+      ts: Date.now(),
+      level: "info",
+      message: formatTimingMatrix(scanApi.phaseTimings),
+      isTimingMatrix: true,
+    };
+    const id = activeQueueIdRef.current;
+    setQueueItems((items) =>
+      items.map((item) =>
+        item.id === id
+          ? { ...item, logs: [...item.logs, matrixEntry].slice(-5000) }
+          : item
+      )
+    );
+  }, [scanApi.phaseTimings]);
   const prevStatusRef = useRef(scanApi.scan.status);
   const prevFolderRef = useRef<string>("");
 
