@@ -61,9 +61,13 @@ export function ScanLog({ entries, isActive }: ScanLogProps) {
         {entries.length === 0 ? (
           <span className="text-white/15 uppercase">No log entries yet</span>
         ) : (
-          entries.map((entry, i) => (
-            <LogLine key={`${entry.ts}-${i}`} entry={entry} />
-          ))
+          entries.map((entry, i) =>
+            entry.isTimingMatrix ? (
+              <TimingMatrix key={`matrix-${i}`} content={entry.message} />
+            ) : (
+              <LogLine key={`${entry.ts}-${i}`} entry={entry} />
+            )
+          )
         )}
       </div>
     </div>
@@ -96,10 +100,18 @@ function LogLine({ entry }: { entry: ScanLogEntry }) {
     <div className="flex items-baseline gap-2.5 py-[2px]">
       <span className="shrink-0 text-white/15">{time}</span>
       <span className={`shrink-0 w-[36px] ${levelColor}`}>{entry.level}</span>
+      {entry.phase && (
+        <span className="shrink-0 w-[80px] text-white/20 truncate">{entry.phase}</span>
+      )}
       <span className={`break-all ${messageColor}`}>{entry.message}</span>
     </div>
   );
 }
 
-
-
+function TimingMatrix({ content }: { content: string }) {
+  return (
+    <div className="my-2 border-t border-white/8 pt-2">
+      <pre className="text-white/50 text-11 leading-relaxed whitespace-pre">{content}</pre>
+    </div>
+  );
+}
