@@ -19,6 +19,36 @@ impl From<rusqlite::Error> for IndexError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanMode {
+    /// Full pipeline: metadata index plus progressive duplicate refinement.
+    Smart,
+    /// Metadata index only; duplicate refinement is skipped.
+    MetadataOnly,
+}
+
+impl Default for ScanMode {
+    fn default() -> Self {
+        Self::Smart
+    }
+}
+
+impl ScanMode {
+    pub fn from_id(value: &str) -> Self {
+        match value {
+            "metadata" => Self::MetadataOnly,
+            _ => Self::Smart,
+        }
+    }
+
+    pub fn as_id(self) -> &'static str {
+        match self {
+            Self::Smart => "smart",
+            Self::MetadataOnly => "metadata",
+        }
+    }
+}
+
 pub struct IndexWriter {
     connection: Connection,
     session_id: Option<i64>,
@@ -1822,5 +1852,16 @@ mod tests {
         if root.exists() {
             fs::remove_dir_all(root).expect("failed to remove test folder");
         }
+    }
+
+    #[test]
+    fn scan_mode_round_trips_ids() {
+        use crate::index::writer::ScanMode;
+        assert_eq!(ScanMode::from_id("smart"), ScanMode::Smart);
+        assert_eq!(ScanMode::from_id("metadata"), ScanMode::MetadataOnly);
+        assert_eq!(ScanMode::from_id("anything-else"), ScanMode::Smart);
+        assert_eq!(ScanMode::Smart.as_id(), "smart");
+        assert_eq!(ScanMode::MetadataOnly.as_id(), "metadata");
+        assert_eq!(ScanMode::default(), ScanMode::Smart);
     }
 }
