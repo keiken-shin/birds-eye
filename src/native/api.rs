@@ -1,3 +1,4 @@
+use crate::index::writer::ScanMode;
 use crate::index::IndexWriter;
 use crate::scanner::{ScanEvent, ScanOptions, Scanner};
 use rusqlite::OptionalExtension;
@@ -8,6 +9,8 @@ use std::path::PathBuf;
 pub struct ScanToIndexRequest {
     pub root: PathBuf,
     pub index_path: PathBuf,
+    #[serde(default)]
+    pub scan_strategy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -28,6 +31,16 @@ pub struct SearchFilesRequest {
     pub index_path: PathBuf,
     pub query: String,
     pub limit: usize,
+    #[serde(default)]
+    pub extensions: Option<Vec<String>>,
+    #[serde(default)]
+    pub kinds: Option<Vec<String>>,
+    #[serde(default)]
+    pub min_bytes: Option<u64>,
+    #[serde(default)]
+    pub max_bytes: Option<u64>,
+    #[serde(default)]
+    pub use_regex: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -118,12 +131,19 @@ pub struct IndexMetadataDto {
     pub files_scanned: i64,
     pub folders_scanned: i64,
     pub bytes_scanned: i64,
+    pub scan_strategy: String,
 }
 
 pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse, String> {
     let scanner = Scanner::new(ScanOptions::new(request.root));
     let events = scanner.scan();
     let mut writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    writer.set_scan_mode(ScanMode::from_id(
+        request
+            .scan_strategy
+            .as_deref()
+            .unwrap_or(ScanMode::default().as_id()),
+    ));
 
     for event in events {
         writer
@@ -223,7 +243,15 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
 pub fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultDto>, String> {
     let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
     let results = writer
-        .search_files(&request.query, request.limit)
+        .search_files_filtered(
+            &request.query,
+            request.limit,
+            request.extensions.as_deref(),
+            request.kinds.as_deref(),
+            request.min_bytes,
+            request.max_bytes,
+            request.use_regex.unwrap_or(false),
+        )
         .map_err(|error| format!("{error:?}"))?
         .into_iter()
         .map(|file| FileSearchResultDto {
@@ -262,7 +290,7 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
     let metadata = writer
         .connection()
         .query_row(
-            "SELECT root_path, status, COALESCE(finished_at, started_at), files_scanned, folders_scanned, bytes_scanned
+            "SELECT root_path, status, COALESCE(finished_at, started_at), files_scanned, folders_scanned, bytes_scanned, scan_strategy
              FROM scan_sessions
              ORDER BY started_at DESC
              LIMIT 1",
@@ -276,6 +304,7 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
                     files_scanned: row.get(3)?,
                     folders_scanned: row.get(4)?,
                     bytes_scanned: row.get(5)?,
+                    scan_strategy: row.get(6)?,
                 })
             },
         )
@@ -290,6 +319,7 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
         files_scanned: 0,
         folders_scanned: 0,
         bytes_scanned: 0,
+        scan_strategy: ScanMode::default().as_id().to_owned(),
     }))
 }
 
@@ -311,8 +341,13 @@ mod tests {
         let response = scan_to_index(ScanToIndexRequest {
             root: root.join("data"),
             index_path: index_path.clone(),
+            scan_strategy: Some("smart".to_owned()),
         })
         .expect("scan command failed");
+        IndexWriter::open(index_path.clone())
+            .expect("failed to open index")
+            .refine_duplicates()
+            .expect("failed to refine duplicates");
         let overview = query_index_overview(IndexQueryRequest {
             index_path,
             limit: 5,
@@ -343,6 +378,7 @@ mod tests {
         scan_to_index(ScanToIndexRequest {
             root: root.join("data"),
             index_path: index_path.clone(),
+            scan_strategy: None,
         })
         .expect("scan command failed");
 
@@ -350,6 +386,11 @@ mod tests {
             index_path,
             query: "report".to_owned(),
             limit: 10,
+            extensions: None,
+            kinds: None,
+            min_bytes: None,
+            max_bytes: None,
+            use_regex: None,
         })
         .expect("search command failed");
 
@@ -375,8 +416,13 @@ mod tests {
         scan_to_index(ScanToIndexRequest {
             root: root.join("data"),
             index_path: index_path.clone(),
+            scan_strategy: None,
         })
         .expect("scan command failed");
+        IndexWriter::open(index_path.clone())
+            .expect("failed to open index")
+            .refine_duplicates()
+            .expect("failed to refine duplicates");
         let overview = query_index_overview(IndexQueryRequest {
             index_path: index_path.clone(),
             limit: 5,
@@ -396,6 +442,196 @@ mod tests {
         .expect("duplicate group files command failed");
 
         assert_eq!(files.len(), 2);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn search_files_with_extension_filter() {
+        let root = test_root("search-ext-filter");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("create dirs");
+        write_file(&root.join("data").join("report.pdf"), &[1; 48]);
+        write_file(&root.join("data").join("video.mp4"), &[2; 64]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+            scan_strategy: None,
+        })
+        .expect("scan failed");
+
+        let results = search_files(SearchFilesRequest {
+            index_path: index_path.clone(),
+            query: String::new(),
+            limit: 10,
+            extensions: Some(vec!["pdf".to_owned()]),
+            kinds: None,
+            min_bytes: None,
+            max_bytes: None,
+            use_regex: None,
+        })
+        .expect("search failed");
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].name.ends_with(".pdf"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn search_files_with_size_filter() {
+        let root = test_root("search-size-filter");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("create dirs");
+        write_file(&root.join("data").join("small.txt"), &[1; 10]);
+        write_file(&root.join("data").join("large.txt"), &[2; 200]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+            scan_strategy: None,
+        })
+        .expect("scan failed");
+
+        let results = search_files(SearchFilesRequest {
+            index_path,
+            query: String::new(),
+            limit: 10,
+            extensions: None,
+            kinds: None,
+            min_bytes: Some(100),
+            max_bytes: None,
+            use_regex: None,
+        })
+        .expect("search failed");
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].name.contains("large"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn search_files_with_regex_query() {
+        let root = test_root("search-regex");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("create dirs");
+        write_file(&root.join("data").join("report_2024.pdf"), &[1; 48]);
+        write_file(&root.join("data").join("notes.txt"), &[2; 24]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+            scan_strategy: None,
+        })
+        .expect("scan failed");
+
+        let results = search_files(SearchFilesRequest {
+            index_path,
+            query: r"report_\d{4}".to_owned(),
+            limit: 10,
+            extensions: None,
+            kinds: None,
+            min_bytes: None,
+            max_bytes: None,
+            use_regex: Some(true),
+        })
+        .expect("search failed");
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].name.starts_with("report_"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn index_metadata_returns_latest_scan_strategy() {
+        let root = test_root("metadata-strategy");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("failed to create folders");
+        write_file(&root.join("data").join("one.bin"), &[1; 48]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+            scan_strategy: Some("metadata".to_owned()),
+        })
+        .expect("scan command failed");
+
+        let metadata = index_metadata(index_path.clone()).expect("metadata");
+        assert_eq!(metadata.scan_strategy, "metadata");
+
+        {
+            let writer = IndexWriter::open(&index_path).expect("open writer for verification");
+            let job_count: i64 = writer
+                .connection()
+                .query_row("SELECT COUNT(*) FROM hash_jobs", [], |r| r.get(0))
+                .expect("count hash_jobs");
+            assert_eq!(
+                job_count, 0,
+                "MetadataOnly scan must not seed hash_jobs"
+            );
+        }
+        cleanup(&root);
+    }
+
+    #[test]
+    fn search_files_with_regex_checks_beyond_limit_window() {
+        let root = test_root("search-regex-limit");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("create dirs");
+        write_file(&root.join("data").join("large.bin"), &[1; 400]);
+        write_file(&root.join("data").join("medium.bin"), &[2; 300]);
+        write_file(&root.join("data").join("target_2026.txt"), &[3; 10]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+            scan_strategy: None,
+        })
+        .expect("scan failed");
+
+        let results = search_files(SearchFilesRequest {
+            index_path,
+            query: r"target_\d{4}".to_owned(),
+            limit: 1,
+            extensions: None,
+            kinds: None,
+            min_bytes: None,
+            max_bytes: None,
+            use_regex: Some(true),
+        })
+        .expect("search failed");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "target_2026.txt");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn search_files_with_invalid_regex_returns_empty_results() {
+        let root = test_root("search-regex-invalid");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("create dirs");
+        write_file(&root.join("data").join("report.pdf"), &[1; 48]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+            scan_strategy: None,
+        })
+        .expect("scan failed");
+
+        let results = search_files(SearchFilesRequest {
+            index_path,
+            query: "[".to_owned(),
+            limit: 10,
+            extensions: None,
+            kinds: None,
+            min_bytes: None,
+            max_bytes: None,
+            use_regex: Some(true),
+        })
+        .expect("search failed");
+
+        assert!(results.is_empty());
         cleanup(&root);
     }
 

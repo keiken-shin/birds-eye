@@ -1,0 +1,117 @@
+import { useEffect, useRef, useState } from "react";
+import type { ScanLogEntry } from "../domain";
+
+interface ScanLogProps {
+  entries: ScanLogEntry[];
+  isActive: boolean;
+}
+
+export function ScanLog({ entries, isActive }: ScanLogProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const programmaticScroll = useRef(false);
+
+  useEffect(() => {
+    if (!autoScroll) return;
+    const el = containerRef.current;
+    if (!el) return;
+    programmaticScroll.current = true;
+    el.scrollTop = el.scrollHeight;
+    // Reset flag after the scroll event has had a chance to fire
+    requestAnimationFrame(() => { programmaticScroll.current = false; });
+  }, [entries, autoScroll]);
+
+  function handleScroll() {
+    if (programmaticScroll.current) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 16;
+    setAutoScroll(atBottom);
+  }
+
+  // Resume auto-scroll when scan becomes active again
+  useEffect(() => {
+    if (isActive) setAutoScroll(true);
+  }, [isActive]);
+
+  return (
+    <div className="flex flex-col min-h-0 flex-1">
+      <div className="flex items-center justify-between border-b border-white/8 px-3.5 py-[8px]">
+        <span className="font-mono text-10 uppercase tracking-[1.5px] text-white/30">Log</span>
+        {!autoScroll && (
+          <button
+            className="font-mono text-9 uppercase text-accent/60 hover:text-accent"
+            type="button"
+            onClick={() => {
+              setAutoScroll(true);
+              const el = containerRef.current;
+              if (el) el.scrollTop = el.scrollHeight;
+            }}
+          >
+            ↓ resume scroll
+          </button>
+        )}
+      </div>
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto bg-black/40 px-3.5 py-2.5 font-mono text-11"
+        style={{ minHeight: "180px", maxHeight: "320px" }}
+      >
+        {entries.length === 0 ? (
+          <span className="text-white/15 uppercase">No log entries yet</span>
+        ) : (
+          entries.map((entry, i) =>
+            entry.isTimingMatrix ? (
+              <TimingMatrix key={`matrix-${i}`} content={entry.message} />
+            ) : (
+              <LogLine key={`${entry.ts}-${i}`} entry={entry} />
+            )
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LogLine({ entry }: { entry: ScanLogEntry }) {
+  const time = new Date(entry.ts).toLocaleTimeString("en-US", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  const levelColor =
+    entry.level === "error"
+      ? "text-danger"
+      : entry.level === "warn"
+      ? "text-[#f5c842]"
+      : "text-white/25";
+
+  const messageColor =
+    entry.level === "error"
+      ? "text-danger/80"
+      : entry.level === "warn"
+      ? "text-[#f5c842]/70"
+      : "text-white/45";
+
+  return (
+    <div className="flex items-baseline gap-2.5 py-[2px]">
+      <span className="shrink-0 text-white/15">{time}</span>
+      <span className={`shrink-0 w-[36px] ${levelColor}`}>{entry.level}</span>
+      {entry.phase && (
+        <span className="shrink-0 w-[80px] text-white/20 truncate">{entry.phase}</span>
+      )}
+      <span className={`break-all ${messageColor}`}>{entry.message}</span>
+    </div>
+  );
+}
+
+function TimingMatrix({ content }: { content: string }) {
+  return (
+    <div className="my-2 border-t border-white/8 pt-2">
+      <pre className="text-white/50 text-11 leading-relaxed whitespace-pre">{content}</pre>
+    </div>
+  );
+}
