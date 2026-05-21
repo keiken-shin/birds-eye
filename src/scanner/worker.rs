@@ -167,10 +167,24 @@ fn run_scan(options: ScanOptions, controller: ScanController, events_tx: Sender<
 
     drop(events_tx.clone());
 
+    let mut last_milestone_files: u64 = 0;
+
     loop {
         thread::sleep(Duration::from_millis(250));
         let snapshot = stats.snapshot(queue.len(), started_at);
         let _ = events_tx.send(ScanEvent::Progress(snapshot.clone()));
+
+        let files = snapshot.files_scanned;
+        if files / 10_000 > last_milestone_files / 10_000 {
+            last_milestone_files = files;
+            let _ = events_tx.send(ScanEvent::Verbose {
+                phase: "scan",
+                message: format!(
+                    "milestone files={files} elapsed={}ms",
+                    started_at.elapsed().as_millis()
+                ),
+            });
+        }
 
         if controller.cancelled.load(Ordering::Relaxed) {
             let _ = events_tx.send(ScanEvent::Cancelled(snapshot));
@@ -259,6 +273,17 @@ impl WorkerContext {
             }
         };
 
+        let dir_start = std::time::Instant::now();
+        let _ = self.events_tx.send(ScanEvent::Verbose {
+            phase: "scan",
+            message: format!(
+                "[worker {}] scanning dir={} queue_depth={}",
+                self.id,
+                dir.display(),
+                self.queue.len()
+            ),
+        });
+
         let mut direct_files = 0;
         let mut direct_bytes = 0;
 
@@ -337,6 +362,18 @@ impl WorkerContext {
             direct_files,
             direct_bytes,
         }));
+
+        let elapsed_ms = dir_start.elapsed().as_millis() as u64;
+        let _ = self.events_tx.send(ScanEvent::Verbose {
+            phase: "scan",
+            message: format!(
+                "[worker {}] dir done path={} files_found={} elapsed={}ms",
+                self.id,
+                dir.display(),
+                direct_files,
+                elapsed_ms
+            ),
+        });
 
         if self.id == 0 {
             let snapshot = self.stats.snapshot(self.queue.len(), self.started_at);
@@ -417,6 +454,33 @@ mod tests {
         }
 
         assert!(saw_terminal_event);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn scanner_emits_verbose_events() {
+        let root = test_root("verbose");
+        fs::create_dir_all(&root).expect("create root");
+        write_file(&root.join("a.txt"), b"hello");
+        write_file(&root.join("b.txt"), b"world");
+
+        let scanner = Scanner::new(ScanOptions {
+            root: root.clone(),
+            workers: 2,
+        });
+        let events = scanner.scan();
+
+        let mut saw_verbose = false;
+        for event in events {
+            if let ScanEvent::Verbose { .. } = event {
+                saw_verbose = true;
+            }
+            if matches!(event, ScanEvent::Finished(_)) {
+                break;
+            }
+        }
+
+        assert!(saw_verbose, "expected at least one Verbose event");
         cleanup(&root);
     }
 
