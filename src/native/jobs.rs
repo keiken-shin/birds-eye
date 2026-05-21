@@ -530,8 +530,28 @@ mod tests {
 
         wait_for_terminal(&manager, response.job_id);
 
-        let metadata = index_metadata(index_path).expect("metadata");
+        let metadata = index_metadata(index_path.clone()).expect("metadata");
         assert_eq!(metadata.scan_strategy, "metadata");
+
+        {
+            let verify_writer = IndexWriter::open(&index_path).expect("open writer for verification");
+            let candidate_count: i64 = verify_writer
+                .connection()
+                .query_row("SELECT COUNT(*) FROM duplicate_candidates", [], |r| r.get(0))
+                .expect("count candidates");
+            let group_count: i64 = verify_writer
+                .connection()
+                .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |r| r.get(0))
+                .expect("count groups");
+            assert_eq!(
+                candidate_count, 0,
+                "MetadataOnly must not create duplicate candidates"
+            );
+            assert_eq!(
+                group_count, 0,
+                "MetadataOnly must not create duplicate groups"
+            );
+        }
         cleanup(&root);
     }
 
