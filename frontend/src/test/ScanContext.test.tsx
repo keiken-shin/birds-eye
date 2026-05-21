@@ -57,6 +57,22 @@ describe("ScanContext theme", () => {
   });
 });
 
+describe("ScanContext scan strategy", () => {
+  it("persists scan strategy preference", () => {
+    window.localStorage.clear();
+    const { result } = renderHook(() => useScanContext(), { wrapper });
+
+    expect(result.current.scanStrategy).toBe("smart");
+
+    act(() => {
+      result.current.setScanStrategy("metadata");
+    });
+
+    expect(result.current.scanStrategy).toBe("metadata");
+    expect(window.localStorage.getItem("birds-eye.scanStrategy")).toBe("metadata");
+  });
+});
+
 describe("ScanContext activeQueueId", () => {
   it("activeQueueId is initially null", () => {
     const { result } = renderHook(() => useScanContext(), { wrapper });
