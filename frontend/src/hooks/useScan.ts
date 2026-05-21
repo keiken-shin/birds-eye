@@ -9,13 +9,18 @@ import {
   startNativeScan,
   type NativeIndexEntry,
   type NativeJobEvent,
+  type NativePhaseTimingEntry,
 } from "../nativeClient";
 import {
+  formatTimingMatrix,
   initialScanState,
   lastSegment,
+  parseScanStrategy,
   type CategoryKey,
   type FolderStats,
+  type ScanLogEntry,
   type ScanState,
+  type ScanStrategy,
   type ScanWorkerCommand,
   type ScanWorkerMessage,
 } from "../domain";
@@ -36,10 +41,12 @@ export function useScan({
   nativeRuntime,
   setRuntimeMessage,
   refreshSavedIndexes,
+  scanStrategy,
 }: {
   nativeRuntime: boolean;
   setRuntimeMessage: React.Dispatch<React.SetStateAction<string>>;
   refreshSavedIndexes: () => Promise<void>;
+  scanStrategy: ScanStrategy;
 }): {
   scan: ScanState;
   workspaceScan: ScanState | null;
@@ -60,6 +67,8 @@ export function useScan({
   clearScan: () => void;
   openSavedIndex: (entry: NativeIndexEntry) => Promise<void>;
   rescanSavedIndex: (entry: NativeIndexEntry) => Promise<void>;
+  lastLogEntry: ScanLogEntry | null;
+  phaseTimings: NativePhaseTimingEntry[] | null;
 } {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -74,6 +83,8 @@ export function useScan({
   const [filter, setFilter] = useState<CategoryKey | "all">("all");
   const [currentIndexPath, setCurrentIndexPath] = useState<string | null>(null);
   const [focusedFolder, setFocusedFolder] = useState<string | null>(null);
+  const [lastLogEntry, setLastLogEntry] = useState<ScanLogEntry | null>(null);
+  const [phaseTimings, setPhaseTimings] = useState<NativePhaseTimingEntry[] | null>(null);
 
   const sortedFolders = useMemo(() => {
     return [...scan.folders].sort((a, b) => b.bytes - a.bytes);
@@ -143,30 +154,55 @@ export function useScan({
 
   async function handleNativeJobEvent(event: NativeJobEvent, options: { replay?: boolean } = {}) {
     if (nativeJobRef.current?.jobId !== event.job_id) return;
+
+    if (event.log_line) {
+      setLastLogEntry({
+        ts: Date.now(),
+        level: "info",
+        message: event.log_line.message,
+        phase: event.log_line.phase,
+      });
+      return;
+    }
+
     if (isWaitingForJobId.current && !options.replay) return;
     if (shouldIgnoreNativeJobEvent(event)) return;
 
-    const isFinalizing = event.message === "finalizing index";
+    const isFinalizing =
+      event.message.toLowerCase().includes("finalizing") ||
+      event.progress_total > 0 ||
+      event.message.includes("Sampling") ||
+      event.message.includes("hashing") ||
+      event.message.includes("Building") ||
+      event.message.includes("Computing") ||
+      event.message.includes("Capturing") ||
+      event.message.includes("Marking");
 
     if (event.status === "Failed") {
       setRuntimeMessage(event.message);
     } else if (isFinalizing) {
-      setRuntimeMessage("Finalizing index");
+      setRuntimeMessage(event.message);
     }
 
     setScan((current) => ({
       ...current,
       status: event.status === "Completed" ? "complete" : event.status === "Cancelled" || event.status === "Failed" ? "cancelled" : "scanning",
       finalizing: isFinalizing,
+      progressCurrent: event.progress_current,
+      progressTotal: event.progress_total,
+      progressLabel: event.progress_total > 0 ? event.message : "",
       processedFiles: Math.max(current.processedFiles, event.files_scanned),
-      totalFiles: Math.max(current.totalFiles, event.files_scanned),
+      totalFiles: event.status === "Completed" ? Math.max(current.totalFiles, event.files_scanned) : current.totalFiles,
       processedBytes: Math.max(current.processedBytes, event.bytes_scanned),
-      totalBytes: Math.max(current.totalBytes, event.bytes_scanned),
+      totalBytes: event.status === "Completed" ? Math.max(current.totalBytes, event.bytes_scanned) : current.totalBytes,
       currentPath: event.current_path ?? current.currentPath,
       elapsedMs: performance.now() - current.startedAt,
     }));
 
     if (event.status === "Completed" && nativeJobRef.current) {
+      if (event.phase_timings && event.phase_timings.length > 0) {
+        setPhaseTimings(event.phase_timings);
+      }
       const indexPath = nativeJobRef.current.indexPath;
       const overview = await queryNativeIndex(indexPath, 1000);
       setScan((current) => mergeNativeOverview(current, overview));
@@ -199,7 +235,7 @@ export function useScan({
       isWaitingForJobId.current = true;
       resetNativeEventState();
 
-      const { jobId, indexPath } = await startNativeScan(folder);
+      const { jobId, indexPath } = await startNativeScan(folder, scanStrategy);
       nativeJobRef.current = { jobId, indexPath };
 
       setScan({
@@ -207,6 +243,7 @@ export function useScan({
         status: "scanning",
         rootName: lastSegment(folder) || folder,
         startedAt: performance.now(),
+        progressLabel: "Scanning files",
         currentPath: folder,
       });
 
@@ -244,6 +281,17 @@ export function useScan({
     };
   }, [nativeRuntime]);
 
+  useEffect(() => {
+    if (scan.status !== "scanning" && scan.status !== "paused") return;
+    const interval = window.setInterval(() => {
+      setScan((current) => {
+        if (current.status !== "scanning" && current.status !== "paused") return current;
+        return { ...current, elapsedMs: performance.now() - current.startedAt };
+      });
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [scan.status]);
+
   const openFolderPicker = useCallback(() => {
     if (nativeRuntime) {
       void startNativeFolderScan();
@@ -254,7 +302,7 @@ export function useScan({
     input.setAttribute("webkitdirectory", "");
     input.setAttribute("directory", "");
     input.click();
-  }, [nativeRuntime]);
+  }, [nativeRuntime, scanStrategy]);
 
   const handleFiles = useCallback((fileList: FileList | null) => {
     const files = Array.from(fileList ?? []);
@@ -271,6 +319,8 @@ export function useScan({
       totalFiles: files.length,
       totalBytes: files.reduce((sum, file) => sum + file.size, 0),
       startedAt: performance.now(),
+      progressTotal: files.length,
+      progressLabel: "Scanning files",
     });
 
     const worker = new Worker(new URL("../scanWorker.ts", import.meta.url), { type: "module" });
@@ -361,7 +411,7 @@ export function useScan({
     let jobId: number;
     let indexPath: string;
     try {
-      ({ jobId, indexPath } = await startNativeScan(entry.root_path));
+      ({ jobId, indexPath } = await startNativeScan(entry.root_path, parseScanStrategy(entry.scan_strategy)));
     } catch (error) {
       nativeJobRef.current = null;
       isWaitingForJobId.current = false;
@@ -376,6 +426,7 @@ export function useScan({
       status: "scanning",
       rootName: lastSegment(entry.root_path) || entry.root_path,
       startedAt: performance.now(),
+      progressLabel: "Scanning files",
       currentPath: entry.root_path,
     });
 
@@ -417,5 +468,7 @@ export function useScan({
     clearScan,
     openSavedIndex,
     rescanSavedIndex,
+    lastLogEntry,
+    phaseTimings,
   };
 }

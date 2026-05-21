@@ -52,6 +52,9 @@ export type ScanStatus = "idle" | "scanning" | "paused" | "complete" | "cancelle
 export type ScanState = {
   status: ScanStatus;
   finalizing: boolean;
+  progressCurrent: number;
+  progressTotal: number;
+  progressLabel: string;
   rootName: string;
   totalFiles: number;
   processedFiles: number;
@@ -145,6 +148,9 @@ export const emptyFolderCategories = (): Record<CategoryKey, number> =>
 export const initialScanState: ScanState = {
   status: "idle",
   finalizing: false,
+  progressCurrent: 0,
+  progressTotal: 0,
+  progressLabel: "",
   rootName: "No folder selected",
   totalFiles: 0,
   processedFiles: 0,
@@ -205,17 +211,45 @@ export type SearchFilters = {
 
 export type QueueItemStatus = "scanning" | "finalizing" | "done" | "loaded";
 
+export type ScanStrategy = "smart" | "metadata";
+
+export const defaultScanStrategy: ScanStrategy = "smart";
+
+export function parseScanStrategy(value: unknown): ScanStrategy {
+  if (value === "smart" || value === "metadata") return value;
+  return defaultScanStrategy;
+}
+
 export type ScanLogEntry = {
   ts: number;
   level: "info" | "warn" | "error";
   message: string;
+  phase?: string;
+  isTimingMatrix?: boolean;
 };
+
+type PhaseTimingEntry = { phase: string; duration_ms: number };
+
+export function formatTimingMatrix(timings: PhaseTimingEntry[]): string {
+  const total = timings.reduce((sum, t) => sum + t.duration_ms, 0);
+  const lines = timings.map((t) => {
+    const secs = (t.duration_ms / 1000).toFixed(1);
+    return `  ${t.phase.padEnd(22)}${secs}s`;
+  });
+  const totalSecs = (total / 1000).toFixed(1);
+  lines.push(`  ${"─".repeat(22)}─────`);
+  lines.push(`  ${"total".padEnd(22)}${totalSecs}s`);
+  return ["── Time Breakdown " + "─".repeat(22), ...lines].join("\n");
+}
 
 export type QueueItem = {
   id: string;
   rootName: string;
   status: QueueItemStatus;
   progress: number;
+  progressCurrent?: number;
+  progressTotal?: number;
+  progressLabel?: string;
   indexPath: string;
   totalFiles?: number;
   totalBytes?: number;

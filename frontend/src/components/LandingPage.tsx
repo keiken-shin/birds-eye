@@ -30,7 +30,7 @@ export function LandingPage({
   openFolderPicker,
   handleFiles,
 }: LandingPageProps) {
-  const { activeQueueId } = useScanContext();
+  const { activeQueueId, scanStrategy, setScanStrategy } = useScanContext();
   const navigate = useNavigate();
 
   function handleStartScan() {
@@ -105,7 +105,7 @@ export function LandingPage({
           <Link to="/library" className={outlineButton}>
             <Database size={17} /> Open Library
           </Link>
-          <ConfigDropdown>
+          <ConfigDropdown scanStrategy={scanStrategy} onScanStrategyChange={setScanStrategy}>
             <button className={`${iconButton} cursor-pointer`} type="button" aria-label="Scan configuration">
               <Settings2 size={18} />
             </button>
