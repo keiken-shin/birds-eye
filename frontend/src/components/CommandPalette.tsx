@@ -3,6 +3,8 @@ import { Eye, FolderOpen, Search, SlidersHorizontal, X } from "lucide-react";
 import { useSearch } from "../hooks/useSearch";
 import { formatBytes, type CategoryKey, type ScanState, type SearchFilters } from "../domain";
 import { categories } from "../domain";
+import { revealInExplorer } from "../nativeClient";
+import { MediaPreview, mediaTypeFromPath } from "./MediaPreview";
 
 const mono = "font-mono text-11 uppercase";
 const ALL_KINDS = Object.keys(categories) as CategoryKey[];
@@ -35,6 +37,7 @@ export function CommandPalette({
   const [maxSizeUnit, setMaxSizeUnit] = useState<SizeUnit>("GB");
   const [useRegex, setUseRegex] = useState(false);
   const [regexError, setRegexError] = useState<string | null>(null);
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const filters: SearchFilters = {
@@ -67,6 +70,7 @@ export function CommandPalette({
     setMaxSizeVal("");
     setUseRegex(false);
     setRegexError(null);
+    setPreviewPath(null);
     setSearchQuery("");
     setFocusedIndex(0);
   }, [setSearchQuery]);
@@ -104,6 +108,7 @@ export function CommandPalette({
 
   useEffect(() => {
     setFocusedIndex(0);
+    setPreviewPath(null);
   }, [searchResults.length]);
 
   useEffect(() => {
@@ -236,37 +241,34 @@ export function CommandPalette({
             </div>
           )}
           {searchResults.map((result, i) => (
-            <div
+            <SearchResultRow
               key={result.path}
-              className={`flex items-center justify-between border-b border-white/5 px-4 py-2.5 ${
-                i === focusedIndex ? "bg-white/[0.04]" : ""
-              }`}
-            >
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-12 font-bold text-primary">{result.path}</p>
-                <p className={`${mono} text-muted`}>{formatBytes(result.size)}</p>
-              </div>
-              <div className="flex shrink-0 gap-1.5 ml-3">
-                <button
-                  className="grid h-7 w-7 place-items-center border border-white/10 text-white/20 cursor-not-allowed"
-                  type="button"
-                  disabled
-                  title="Preview (coming soon)"
-                >
-                  <Eye size={12} />
-                </button>
-                <button
-                  className="grid h-7 w-7 place-items-center border border-white/10 text-white/20 cursor-not-allowed"
-                  type="button"
-                  disabled
-                  title="Reveal in folder (coming soon)"
-                >
-                  <FolderOpen size={12} />
-                </button>
-              </div>
-            </div>
+              focused={i === focusedIndex}
+              nativeRuntime={nativeRuntime}
+              path={result.path}
+              size={result.size}
+              previewActive={previewPath === result.path}
+              onPreview={() => setPreviewPath((current) => current === result.path ? null : result.path)}
+            />
           ))}
         </div>
+
+        {previewPath && (
+          <div className="border-t border-white/10 bg-black/20 p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="min-w-0 truncate font-mono text-10 uppercase text-muted">{previewPath}</p>
+              <button
+                type="button"
+                className="grid h-6 w-6 shrink-0 place-items-center text-white/30 hover:text-white/60"
+                onClick={() => setPreviewPath(null)}
+                aria-label="Close preview"
+              >
+                <X size={13} />
+              </button>
+            </div>
+            <MediaPreview path={previewPath} />
+          </div>
+        )}
 
         <div className="border-t border-white/7 px-4 py-2">
           <span className={`${mono} text-white/15`}>
@@ -276,6 +278,64 @@ export function CommandPalette({
       </div>
     </div>
   );
+}
+
+function SearchResultRow({
+  focused,
+  nativeRuntime,
+  path,
+  size,
+  previewActive,
+  onPreview,
+}: {
+  focused: boolean;
+  nativeRuntime: boolean;
+  path: string;
+  size: number;
+  previewActive: boolean;
+  onPreview: () => void;
+}) {
+  const canPreview = nativeRuntime && mediaTypeFromPath(path) !== "unsupported";
+
+  return (
+    <div
+      className={`flex items-center justify-between border-b border-white/5 px-4 py-2.5 ${
+        focused ? "bg-white/[0.04]" : ""
+      }`}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-12 font-bold text-primary">{path}</p>
+        <p className={`${mono} text-muted`}>{formatBytes(size)}</p>
+      </div>
+      <div className="ml-3 flex shrink-0 gap-1.5">
+        <button
+          className={actionButtonClass(canPreview, previewActive)}
+          type="button"
+          disabled={!canPreview}
+          title={canPreview ? "Preview media" : "Preview is available for media files in native mode"}
+          onClick={onPreview}
+        >
+          <Eye size={12} />
+        </button>
+        <button
+          className={actionButtonClass(nativeRuntime, false)}
+          type="button"
+          disabled={!nativeRuntime}
+          title={nativeRuntime ? "Reveal in Explorer" : "Reveal is available in native mode"}
+          onClick={() => void revealInExplorer(path).catch(() => {})}
+        >
+          <FolderOpen size={12} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function actionButtonClass(enabled: boolean, active: boolean): string {
+  const base = "grid h-7 w-7 place-items-center border transition-colors";
+  if (!enabled) return `${base} cursor-not-allowed border-white/10 text-white/20 opacity-45`;
+  if (active) return `${base} border-accent/40 bg-accent/10 text-accent`;
+  return `${base} border-white/10 text-white/40 hover:border-white/25 hover:text-primary`;
 }
 
 function SizeUnitSelect({

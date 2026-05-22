@@ -2,7 +2,11 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import React from "react";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), isTauri: () => false }));
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string) => path,
+  invoke: vi.fn(),
+  isTauri: () => false,
+}));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 vi.mock("../hooks/useSearch", () => ({
   useSearch: () => ({ searchQuery: "", setSearchQuery: vi.fn(), searchResults: [] }),

@@ -71,6 +71,7 @@ export type NativeDuplicateFile = {
   path: string;
   size: number;
   modified_at: number | null;
+  hash_state: 0 | 2 | 4;
 };
 
 export async function isNativeRuntime() {
@@ -157,10 +158,24 @@ export async function queryNativeDuplicateFiles(indexPath: string, groupId: numb
   });
 }
 
+export type TrashFilesResult = {
+  failed: Array<{ path: string; reason: string }>;
+};
+
+export async function trashFiles(paths: string[]): Promise<TrashFilesResult> {
+  return invoke<TrashFilesResult>("trash_files", {
+    request: { paths },
+  });
+}
+
 export async function listNativeIndexes() {
   return invoke<NativeIndexEntry[]>("list_indexes");
 }
 
 export async function deleteNativeIndex(indexPath: string) {
   await invoke("delete_index", { indexPath });
+}
+
+export async function revealInExplorer(path: string): Promise<void> {
+  await invoke("reveal_in_explorer", { path });
 }

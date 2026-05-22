@@ -3,7 +3,7 @@ use crate::index::IndexWriter;
 use crate::scanner::{ScanEvent, ScanOptions, Scanner};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScanToIndexRequest {
@@ -96,6 +96,116 @@ pub struct DuplicateFileSummaryDto {
     pub path: String,
     pub size: i64,
     pub modified_at: Option<i64>,
+    /// 0 = unresolved (size match only), 2 = sample hash, 4 = full-file XXH3
+    pub hash_state: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TrashFilesRequest {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct TrashFailure {
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct TrashFilesResponse {
+    pub failed: Vec<TrashFailure>,
+}
+
+pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
+    let mut failed = Vec::new();
+    // We call delete() per path (not delete_all) so one failure does not abort the rest.
+    for path in &request.paths {
+        if let Err(error) = trash::delete(path) {
+            failed.push(TrashFailure {
+                path: path.clone(),
+                reason: error.to_string(),
+            });
+        }
+    }
+    TrashFilesResponse { failed }
+}
+
+pub fn reveal_in_explorer(path: String) -> Result<(), String> {
+    let target = reveal_target_path(&path)?;
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+
+        let explorer_path = windows_explorer_path(&target);
+        let mut command = std::process::Command::new("explorer.exe");
+        if target.is_dir() {
+            command.arg(explorer_path);
+        } else {
+            command.raw_arg(format!("/select,\"{explorer_path}\""));
+        }
+        let status = command.status().map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err(format!("explorer.exe exited with status {status}"));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("open")
+            .arg("-R")
+            .arg(&target)
+            .status()
+            .map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err(format!("open exited with status {status}"));
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let open_path = if target.is_dir() {
+            target
+        } else {
+            target
+                .parent()
+                .ok_or_else(|| "path has no parent directory".to_owned())?
+                .to_path_buf()
+        };
+        let status = std::process::Command::new("xdg-open")
+            .arg(&open_path)
+            .status()
+            .map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err(format!("xdg-open exited with status {status}"));
+        }
+    }
+    Ok(())
+}
+
+fn reveal_target_path(path: &str) -> Result<PathBuf, String> {
+    let original = Path::new(path);
+    if original.exists() {
+        return Ok(original
+            .canonicalize()
+            .unwrap_or_else(|_| original.to_path_buf()));
+    }
+
+    original
+        .parent()
+        .filter(|parent| parent.exists())
+        .and_then(|parent| parent.canonicalize().ok())
+        .ok_or_else(|| format!("path does not exist and no existing parent could be resolved: {path}"))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_explorer_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if let Some(rest) = path.strip_prefix(r"\\?\") {
+        return rest.to_owned();
+    }
+    path.into_owned()
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -279,6 +389,7 @@ pub fn duplicate_group_files(
             path: file.path,
             size: file.size,
             modified_at: file.modified_at,
+            hash_state: file.hash_state,
         })
         .collect::<Vec<_>>();
 
@@ -442,6 +553,13 @@ mod tests {
         .expect("duplicate group files command failed");
 
         assert_eq!(files.len(), 2);
+        // After smart-mode refinement, files should have hash_state >= 2
+        // (either sample hash=2 or full-file hash=4)
+        assert!(
+            files.iter().all(|f| f.hash_state == 4),
+            "expected hash_state == 4 after full refinement of small files, got {:?}",
+            files.iter().map(|f| f.hash_state).collect::<Vec<_>>()
+        );
         cleanup(&root);
     }
 
@@ -633,6 +751,52 @@ mod tests {
 
         assert!(results.is_empty());
         cleanup(&root);
+    }
+
+    #[test]
+    fn trash_files_nonexistent_path_is_recorded_as_failure() {
+        let response = trash_files(TrashFilesRequest {
+            paths: vec!["/this/path/does/not/exist/xyz.bin".to_owned()],
+        });
+        assert_eq!(response.failed.len(), 1);
+        assert_eq!(response.failed[0].path, "/this/path/does/not/exist/xyz.bin");
+    }
+
+    #[test]
+    fn reveal_target_path_falls_back_to_existing_parent_for_missing_file() {
+        let root = test_root("reveal-target");
+        let folder = root.join("folder with spaces");
+        fs::create_dir_all(&folder).expect("create dirs");
+        let missing_file = folder.join("missing image.png");
+
+        let target = reveal_target_path(&missing_file.to_string_lossy())
+            .expect("missing file should resolve to existing parent");
+
+        assert_eq!(target, folder.canonicalize().expect("canonical folder"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn reveal_target_path_errors_when_no_existing_target_can_be_resolved() {
+        let root = test_root("reveal-missing-target");
+        let missing_file = root.join("missing-folder").join("missing image.png");
+
+        let target = reveal_target_path(&missing_file.to_string_lossy());
+
+        assert!(target.is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_explorer_path_strips_verbatim_prefixes() {
+        assert_eq!(
+            windows_explorer_path(Path::new(r"\\?\C:\Users\me\photo.jpg")),
+            r"C:\Users\me\photo.jpg"
+        );
+        assert_eq!(
+            windows_explorer_path(Path::new(r"\\?\UNC\server\share\photo.jpg")),
+            r"\\server\share\photo.jpg"
+        );
     }
 
     fn test_root(name: &str) -> PathBuf {
