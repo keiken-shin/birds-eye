@@ -1,6 +1,7 @@
 import React, { useRef, useCallback } from "react";
 import { formatBytes, formatCount } from "../domain";
 import { ComparisonPanel } from "./ComparisonPanel";
+import type { ComparisonPanelProps } from "./ComparisonPanel";
 import { AuditQueue } from "./AuditQueue";
 import type { ScanState } from "../domain";
 import type { NativeDuplicateFile } from "../nativeClient";
@@ -70,17 +71,6 @@ function GroupsPanel({
       </button>
     </div>
   );
-}
-
-interface ComparisonPanelProps {
-  files: NativeDuplicateFile[];
-  cursor: number;
-  setCursor: (n: number) => void;
-  staged: Map<string, NativeDuplicateFile>;
-  stage: (file: NativeDuplicateFile) => void;
-  unstage: (path: string) => void;
-  nativeRuntime: boolean;
-  videoRefs?: React.MutableRefObject<HTMLVideoElement[]>;
 }
 
 function ComparisonPanelWithExpanders(props: ComparisonPanelProps) {

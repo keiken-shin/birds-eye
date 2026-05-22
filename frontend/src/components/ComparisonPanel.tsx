@@ -9,7 +9,7 @@ import { suggestKeep } from "../utils/smartMoves";
 import { MediaPreview } from "./MediaPreview";
 import { truncatePath } from "../utils/pathUtils";
 
-interface ComparisonPanelProps {
+export interface ComparisonPanelProps {
   files: NativeDuplicateFile[];
   cursor: number;
   setCursor: (n: number) => void;
