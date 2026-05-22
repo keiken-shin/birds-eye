@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { suggestKeep } from "../components/ComparisonPanel";
+import { suggestKeep } from "../utils/smartMoves";
 import type { NativeDuplicateFile } from "../nativeClient";
 
 const file = (path: string, modified_at: number, size = 100): NativeDuplicateFile =>
