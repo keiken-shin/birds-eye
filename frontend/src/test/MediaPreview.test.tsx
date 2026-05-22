@@ -1,6 +1,39 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { mediaTypeFromPath } from "../components/MediaPreview";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { mockConvertFileSrc, mockIsTauri } = vi.hoisted(() => ({
+  mockIsTauri: vi.fn(),
+  mockConvertFileSrc: vi.fn((path: string) => `asset://${path}`),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string) => mockConvertFileSrc(path),
+  isTauri: () => mockIsTauri(),
+}));
+
+import { mediaSrcFromPath, mediaTypeFromPath } from "../components/MediaPreview";
+
+describe("mediaSrcFromPath", () => {
+  beforeEach(() => {
+    mockIsTauri.mockReturnValue(false);
+    mockConvertFileSrc.mockClear();
+  });
+
+  it("uses convertFileSrc in Tauri runtime", () => {
+    mockIsTauri.mockReturnValue(true);
+
+    expect(mediaSrcFromPath("C:\\Users\\me\\photo.jpg")).toBe("asset://C:\\Users\\me\\photo.jpg");
+    expect(mockConvertFileSrc).toHaveBeenCalledWith("C:\\Users\\me\\photo.jpg");
+  });
+
+  it("leaves existing URLs alone", () => {
+    mockIsTauri.mockReturnValue(true);
+
+    expect(mediaSrcFromPath("file:///tmp/photo.jpg")).toBe("file:///tmp/photo.jpg");
+    expect(mediaSrcFromPath("data:image/png;base64,abc")).toBe("data:image/png;base64,abc");
+    expect(mockConvertFileSrc).not.toHaveBeenCalled();
+  });
+});
 
 describe("mediaTypeFromPath", () => {
   it.each([
