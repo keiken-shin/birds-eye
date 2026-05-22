@@ -48,10 +48,22 @@ export function ResizablePanelGroup({ id, children, className }: GroupProps) {
     (entry: PanelEntry) => {
       if (panels.current.has(entry.id)) return;
       panels.current.set(entry.id, entry);
+      const saved = localStorage.getItem(`rp:${id}:${entry.id}`);
+      const parsedSize = saved !== null ? Number(saved) : entry.defaultSize;
+      const size = Number.isFinite(parsedSize) ? parsedSize : entry.defaultSize;
+
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        if (entry.collapsible && size === 0) {
+          next.add(entry.id);
+        } else {
+          next.delete(entry.id);
+        }
+        return next;
+      });
+
       setSizes((prev) => {
         if (prev.has(entry.id)) return prev;
-        const saved = localStorage.getItem(`rp:${id}:${entry.id}`);
-        const size = saved !== null ? Number(saved) : entry.defaultSize;
         return new Map(prev).set(entry.id, size);
       });
     },
