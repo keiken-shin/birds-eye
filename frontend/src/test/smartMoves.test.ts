@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeSmartMoves, suggestKeep } from "../utils/smartMoves";
+import { computeSmartMoves, suggestKeep, groupByParentFolder } from "../utils/smartMoves";
 import type { NativeDuplicateFile } from "../nativeClient";
 
 const f = (path: string, modified_at: number | null): NativeDuplicateFile =>
@@ -118,5 +118,46 @@ describe("suggestKeep", () => {
   it("breaks recency tie by shallowest path", () => {
     const files = [f("/a/b/c/img.jpg", 1000), f("/x/img.jpg", 1000)];
     expect(suggestKeep(files)).toBe("/x/img.jpg");
+  });
+});
+
+describe("groupByParentFolder", () => {
+  const f = (path: string, modified_at: number | null, size = 500) =>
+    ({ path, size, modified_at, hash_state: 4 as const });
+
+  it("returns [] for empty input", () => {
+    expect(groupByParentFolder([])).toEqual([]);
+  });
+
+  it("returns [] when all files share the same parent", () => {
+    const files = [f("/photos/a.jpg", 1000), f("/photos/b.jpg", 2000)];
+    expect(groupByParentFolder(files)).toEqual([]);
+  });
+
+  it("returns a FolderMove when files split across two folders", () => {
+    const files = [
+      f("/photos/a.jpg", 2000),
+      f("/photos/b.jpg", 1500),
+      f("/backup/a.jpg", 1000),
+      f("/backup/b.jpg", 500),
+    ];
+    const result = groupByParentFolder(files);
+    expect(result).toHaveLength(1);
+    expect(result[0].keepFolder).toBe("/photos");
+    expect(result[0].stageFolder).toBe("/backup");
+    expect(result[0].fileCount).toBe(2);
+    expect(result[0].reclaimableBytes).toBe(1000);
+  });
+
+  it("uses suggestKeep heuristic — prefers non-suspect folder", () => {
+    const files = [f("/backup/a.jpg", 2000), f("/photos/a.jpg", 1000)];
+    const result = groupByParentFolder(files);
+    expect(result).toHaveLength(1);
+    expect(result[0].keepFolder).toBe("/photos");
+  });
+
+  it("returns [] when only one file per folder", () => {
+    const files = [f("/a/x.jpg", 1000), f("/b/y.jpg", 2000)];
+    expect(groupByParentFolder(files)).toEqual([]);
   });
 });
