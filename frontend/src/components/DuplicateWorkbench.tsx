@@ -4,6 +4,7 @@ import { ComparisonPanel } from "./ComparisonPanel";
 import type { ComparisonPanelProps } from "./ComparisonPanel";
 import { AuditQueue } from "./AuditQueue";
 import type { ScanState } from "../domain";
+import type { TrashProgress } from "../hooks/useAuditQueue";
 import type { NativeDuplicateFile } from "../nativeClient";
 import {
   ResizablePanelGroup,
@@ -26,6 +27,8 @@ interface DuplicateWorkbenchProps {
   stage: (file: NativeDuplicateFile) => void;
   unstage: (path: string) => void;
   trashStaged: () => Promise<void>;
+  trashProgress: TrashProgress;
+  dismissProgress: () => void;
   onCollapse: () => void;
   nativeRuntime: boolean;
 }
@@ -118,6 +121,8 @@ export function DuplicateWorkbench({
   stage,
   unstage,
   trashStaged,
+  trashProgress,
+  dismissProgress,
   onCollapse,
   nativeRuntime,
 }: DuplicateWorkbenchProps) {
@@ -188,6 +193,8 @@ export function DuplicateWorkbench({
             stage={stage}
             unstage={unstage}
             trashStaged={trashStaged}
+            trashProgress={trashProgress}
+            dismissProgress={dismissProgress}
             duplicateFiles={duplicateFiles}
           />
         </ResizablePanel>

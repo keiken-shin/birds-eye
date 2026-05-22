@@ -1,9 +1,26 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { trashFiles } from "../nativeClient";
 import type { NativeDuplicateFile } from "../nativeClient";
 
+export interface TrashProgress {
+  status: "idle" | "running" | "done";
+  total: number;
+  completed: number;
+  bytesCleared: number;
+  log: string[];
+}
+
+const INITIAL_PROGRESS: TrashProgress = {
+  status: "idle",
+  total: 0,
+  completed: 0,
+  bytesCleared: 0,
+  log: [],
+};
+
 export function useAuditQueue(
-  setRuntimeMessage: React.Dispatch<React.SetStateAction<string>>
+  setRuntimeMessage: Dispatch<SetStateAction<string>>
 ): {
   staged: Map<string, NativeDuplicateFile>;
   stagedBytes: number;
@@ -11,8 +28,11 @@ export function useAuditQueue(
   unstage: (path: string) => void;
   trashStaged: () => Promise<void>;
   clearQueue: () => void;
+  trashProgress: TrashProgress;
+  dismissProgress: () => void;
 } {
   const [staged, setStaged] = useState<Map<string, NativeDuplicateFile>>(new Map());
+  const [trashProgress, setTrashProgress] = useState<TrashProgress>(INITIAL_PROGRESS);
   const stagedRef = useRef(staged);
   stagedRef.current = staged;
 
@@ -34,24 +54,47 @@ export function useAuditQueue(
   }, []);
 
   const trashStaged = useCallback(async () => {
-    const paths = Array.from(stagedRef.current.keys());
-    if (paths.length === 0) return;
-    try {
-      const result = await trashFiles(paths);
-      const failedSet = new Set(result.failed.map((f) => f.path));
-      setStaged((prev) => {
-        const next = new Map(prev);
-        for (const path of paths) {
-          if (!failedSet.has(path)) next.delete(path);
+    const entries = Array.from(stagedRef.current.entries());
+    if (entries.length === 0) return;
+
+    setTrashProgress({
+      status: "running",
+      total: entries.length,
+      completed: 0,
+      bytesCleared: 0,
+      log: [],
+    });
+
+    const failed: Array<{ path: string; reason: string }> = [];
+
+    for (const [path, file] of entries) {
+      try {
+        const result = await trashFiles([path]);
+        if (result.failed.length > 0) {
+          failed.push(...result.failed);
+        } else {
+          setStaged((prev) => {
+            const next = new Map(prev);
+            next.delete(path);
+            return next;
+          });
+          setTrashProgress((prev) => ({
+            ...prev,
+            completed: prev.completed + 1,
+            bytesCleared: prev.bytesCleared + file.size,
+            log: [path, ...prev.log].slice(0, 20),
+          }));
         }
-        return next;
-      });
-      if (result.failed.length > 0) {
-        const reasons = result.failed.map((f) => `${f.path}: ${f.reason}`).join("; ");
-        setRuntimeMessage(`Failed to trash ${result.failed.length} file(s): ${reasons}`);
+      } catch {
+        failed.push({ path, reason: "Trash operation failed" });
       }
-    } catch (error) {
-      setRuntimeMessage(error instanceof Error ? error.message : "Trash operation failed");
+    }
+
+    setTrashProgress((prev) => ({ ...prev, status: "done" }));
+
+    if (failed.length > 0) {
+      const reasons = failed.map((f) => `${f.path}: ${f.reason}`).join("; ");
+      setRuntimeMessage(`Failed to trash ${failed.length} file(s): ${reasons}`);
     }
   }, [setRuntimeMessage]);
 
@@ -59,5 +102,16 @@ export function useAuditQueue(
     setStaged(new Map());
   }, []);
 
-  return { staged, stagedBytes, stage, unstage, trashStaged, clearQueue };
+  const dismissProgress = useCallback(() => setTrashProgress(INITIAL_PROGRESS), []);
+
+  return {
+    staged,
+    stagedBytes,
+    stage,
+    unstage,
+    trashStaged,
+    clearQueue,
+    trashProgress,
+    dismissProgress,
+  };
 }
