@@ -36,7 +36,7 @@ export function MediaPreview({ path }: MediaPreviewProps) {
   if (type === "audio") return <AudioPreview src={src} />;
   if (type === "gltf") return <ThreeDPreview src={src} loaderType="gltf" />;
   if (type === "fbx") return <ThreeDPreview src={src} loaderType="fbx" />;
-  return <UnsupportedPreview ext={path.split(".").pop()?.toUpperCase() ?? "?"} />;
+  return <UnsupportedPreview ext={path.split(".").pop() ?? "?"} />;
 }
 
 function ImagePreview({ src }: { src: string }) {
@@ -93,6 +93,10 @@ function ThreeDPreview({ src, loaderType }: { src: string; loaderType: "gltf" | 
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    setError(false);
+  }, [src, loaderType]);
+
+  useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
@@ -137,7 +141,7 @@ function ThreeDPreview({ src, loaderType }: { src: string; loaderType: "gltf" | 
       new FBXLoader().load(src, (fbx) => centerAndAdd(fbx), undefined, () => setError(true));
     }
 
-    let animId: number;
+    let animId = -1;
     const animate = () => {
       animId = requestAnimationFrame(animate);
       controls.update();
@@ -148,6 +152,13 @@ function ThreeDPreview({ src, loaderType }: { src: string; loaderType: "gltf" | 
     return () => {
       cancelAnimationFrame(animId);
       controls.dispose();
+      scene.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry.dispose();
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+          mats.forEach((m) => m.dispose());
+        }
+      });
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
