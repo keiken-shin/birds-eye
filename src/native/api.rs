@@ -118,6 +118,7 @@ pub struct TrashFilesResponse {
 
 pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
     let mut failed = Vec::new();
+    // We call delete() per path (not delete_all) so one failure does not abort the rest.
     for path in &request.paths {
         if let Err(error) = trash::delete(path) {
             failed.push(TrashFailure {
