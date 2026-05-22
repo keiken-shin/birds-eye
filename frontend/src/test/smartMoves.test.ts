@@ -1,9 +1,8 @@
-// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { computeSmartMoves } from "../utils/smartMoves";
 import type { NativeDuplicateFile } from "../nativeClient";
 
-const f = (path: string, modified_at: number): NativeDuplicateFile =>
+const f = (path: string, modified_at: number | null): NativeDuplicateFile =>
   ({ path, size: 100, modified_at, hash_state: 4 });
 
 describe("computeSmartMoves", () => {
@@ -69,6 +68,22 @@ describe("computeSmartMoves", () => {
     expect(result[0].targetFolder).toBe("/x");
   });
 
+  it("treats null modified_at as epoch 0 (oldest) in recency tiebreak", () => {
+    // /a has null modified_at, /b has 5000, /c has 100
+    // /b should win on recency; /a and /c are outliers
+    const files = [
+      f("/a/x.jpg", null),
+      f("/b/x.jpg", 5000),
+      f("/c/x.jpg", 100),
+    ];
+    const result = computeSmartMoves(files);
+    expect(result).toHaveLength(1);
+    expect(result[0].targetFolder).toBe("/b");
+    expect(result[0].filesToMove).toEqual(
+      expect.arrayContaining(["/a/x.jpg", "/c/x.jpg"])
+    );
+  });
+
   it("reason string mentions counts", () => {
     const files = [
       f("/docs/a.jpg", 3000),
@@ -77,7 +92,7 @@ describe("computeSmartMoves", () => {
       f("/archive/a.jpg", 500),
     ];
     const [move] = computeSmartMoves(files);
-    expect(move.reason).toContain("2");   // dominant count
-    expect(move.reason).toContain("4");   // total count
+    expect(move.reason).toMatch(/\b2\b/);   // dominant count
+    expect(move.reason).toMatch(/\b4\b/);   // total count
   });
 });
