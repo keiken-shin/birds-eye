@@ -6,6 +6,7 @@ import type { NativeDuplicateFile } from "../nativeClient";
 import { revealInExplorer } from "../nativeClient";
 import { suggestKeep } from "../utils/smartMoves";
 import { MediaPreview } from "./MediaPreview";
+import { truncatePath } from "../utils/pathUtils";
 
 interface ComparisonPanelProps {
   files: NativeDuplicateFile[];
@@ -20,6 +21,15 @@ interface ComparisonPanelProps {
 export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unstage, nativeRuntime }: ComparisonPanelProps) {
   const left = files[cursor];
   const right = files[cursor + 1];
+
+  const diffFields = new Set<string>();
+  if (left && right) {
+    if (left.size !== right.size) diffFields.add("size");
+    if (left.modified_at !== right.modified_at) diffFields.add("modified");
+    const leftFolder = left.path.replace(/[\\/][^\\/]+$/, "");
+    const rightFolder = right.path.replace(/[\\/][^\\/]+$/, "");
+    if (leftFolder !== rightFolder) diffFields.add("folder");
+  }
 
   if (!left || !right) {
     return (
@@ -61,6 +71,7 @@ export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unsta
           label="A"
           isKept={!staged.has(left.path)}
           isSuggested={left.path === suggestedPath}
+          diffFields={diffFields}
           onKeep={handleKeepLeft}
           onStage={() => stage(left)}
           nativeRuntime={nativeRuntime}
@@ -70,6 +81,7 @@ export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unsta
           label="B"
           isKept={!staged.has(right.path)}
           isSuggested={right.path === suggestedPath}
+          diffFields={diffFields}
           onKeep={handleKeepRight}
           onStage={() => stage(right)}
           nativeRuntime={nativeRuntime}
@@ -108,12 +120,13 @@ interface CopyCardProps {
   label: "A" | "B";
   isKept: boolean;
   isSuggested: boolean;
+  diffFields: Set<string>;
   onKeep: () => void;
   onStage: () => void;
   nativeRuntime: boolean;
 }
 
-function CopyCard({ file, label, isKept, isSuggested, onKeep, onStage, nativeRuntime }: CopyCardProps) {
+function CopyCard({ file, label, isKept, isSuggested, diffFields, onKeep, onStage, nativeRuntime }: CopyCardProps) {
   const folder = file.path.replace(/[\\/][^\\/]+$/, "");
 
   return (
@@ -129,12 +142,22 @@ function CopyCard({ file, label, isKept, isSuggested, onKeep, onStage, nativeRun
       <MediaPreview path={file.path} />
 
       <div className="flex flex-col gap-3 p-3">
-        <Field label="path" value={file.path} mono />
+        <Field label="path" value={truncatePath(file.path)} fullValue={file.path} mono />
         <div className="grid grid-cols-2 gap-3">
-          <Field label="size" value={formatBytes(file.size)} />
-          <Field label="modified" value={file.modified_at ? formatDate(file.modified_at) : "—"} />
+          <Field label="size" value={formatBytes(file.size)} isDiff={diffFields.has("size")} />
+          <Field
+            label="modified"
+            value={file.modified_at ? formatDate(file.modified_at) : "—"}
+            isDiff={diffFields.has("modified")}
+          />
         </div>
-        <Field label="folder" value={folder} mono />
+        <Field
+          label="folder"
+          value={truncatePath(folder)}
+          fullValue={folder}
+          mono
+          isDiff={diffFields.has("folder")}
+        />
         <ConfidenceField hashState={file.hash_state} />
         <div className="mt-1 flex items-center gap-2">
           <button
@@ -153,11 +176,24 @@ function CopyCard({ file, label, isKept, isSuggested, onKeep, onStage, nativeRun
   );
 }
 
-function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Field({
+  label, value, fullValue, mono, isDiff,
+}: {
+  label: string;
+  value: string;
+  fullValue?: string;
+  mono?: boolean;
+  isDiff?: boolean;
+}) {
   return (
-    <div className="grid gap-0.5">
+    <div className={`grid gap-0.5 ${isDiff ? "border-l-2 border-amber-400/60 pl-2" : ""}`}>
       <span className="font-mono text-10 uppercase text-muted">{label}</span>
-      <span className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-13 text-primary ${mono ? "font-mono" : ""}`}>{value}</span>
+      <span
+        title={fullValue}
+        className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-13 ${mono ? "font-mono" : ""} ${isDiff ? "text-amber-300" : "text-primary"}`}
+      >
+        {value}
+      </span>
     </div>
   );
 }
