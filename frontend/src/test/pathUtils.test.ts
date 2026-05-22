@@ -23,4 +23,15 @@ describe("truncatePath", () => {
   it("returns path unchanged when already short", () => {
     expect(truncatePath("D:\\a\\b.txt")).toBe("D:\\a\\b.txt");
   });
+
+  it("clamps keepSegments=0 to 1 to prevent garbage output", () => {
+    const path = "D:\\a\\b\\c\\d\\e.txt";
+    expect(truncatePath(path, 0)).toBe(truncatePath(path, 1));
+  });
+
+  it("normalizes mixed separators in paths before splitting", () => {
+    const mixed = "D:\\a/b/c/d/e.txt";
+    const consistent = "D:\\a\\b\\c\\d\\e.txt";
+    expect(truncatePath(mixed)).toBe(truncatePath(consistent));
+  });
 });
