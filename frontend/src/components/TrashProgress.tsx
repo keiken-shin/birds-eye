@@ -7,15 +7,20 @@ interface TrashProgressProps {
 }
 
 export function TrashProgress({ progress, onDismiss }: TrashProgressProps) {
-  const { status, total, completed, bytesCleared, log } = progress;
+  const { status, total, completed, failedCount, bytesCleared, log } = progress;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
   const isDone = status === "done";
+  const hasFailures = failedCount > 0;
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 font-mono">
       <div className="border-b border-primary/10 pb-3">
         <p className="text-11 font-black uppercase text-primary">
-          {isDone ? "Purge Complete" : `Purging - ${completed}/${total} Files`}
+          {isDone
+            ? hasFailures
+              ? `Purge Finished - ${failedCount} Failed`
+              : "Purge Complete"
+            : `Purging - ${completed}/${total} Files`}
         </p>
         <p className="mt-1 text-10 text-muted">{formatBytes(bytesCleared)} cleared</p>
       </div>

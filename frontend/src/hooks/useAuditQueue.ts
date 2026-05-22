@@ -7,6 +7,7 @@ export interface TrashProgress {
   status: "idle" | "running" | "done";
   total: number;
   completed: number;
+  failedCount: number;
   bytesCleared: number;
   log: string[];
 }
@@ -15,6 +16,7 @@ const INITIAL_PROGRESS: TrashProgress = {
   status: "idle",
   total: 0,
   completed: 0,
+  failedCount: 0,
   bytesCleared: 0,
   log: [],
 };
@@ -61,36 +63,39 @@ export function useAuditQueue(
       status: "running",
       total: entries.length,
       completed: 0,
+      failedCount: 0,
       bytesCleared: 0,
       log: [],
     });
 
     const failed: Array<{ path: string; reason: string }> = [];
 
-    for (const [path, file] of entries) {
-      try {
-        const result = await trashFiles([path]);
-        if (result.failed.length > 0) {
-          failed.push(...result.failed);
-        } else {
-          setStaged((prev) => {
-            const next = new Map(prev);
-            next.delete(path);
-            return next;
-          });
-          setTrashProgress((prev) => ({
-            ...prev,
-            completed: prev.completed + 1,
-            bytesCleared: prev.bytesCleared + file.size,
-            log: [path, ...prev.log].slice(0, 20),
-          }));
-        }
-      } catch {
-        failed.push({ path, reason: "Trash operation failed" });
-      }
+    try {
+      const result = await trashFiles(entries.map(([path]) => path));
+      failed.push(...result.failed);
+    } catch {
+      failed.push(...entries.map(([path]) => ({ path, reason: "Trash operation failed" })));
     }
 
-    setTrashProgress((prev) => ({ ...prev, status: "done" }));
+    const failedPaths = new Set(failed.map((failure) => failure.path));
+    const successfulEntries = entries.filter(([path]) => !failedPaths.has(path));
+
+    if (successfulEntries.length > 0) {
+      setStaged((prev) => {
+        const next = new Map(prev);
+        for (const [path] of successfulEntries) next.delete(path);
+        return next;
+      });
+    }
+
+    setTrashProgress({
+      status: "done",
+      total: entries.length,
+      completed: entries.length,
+      failedCount: failed.length,
+      bytesCleared: successfulEntries.reduce((sum, [, file]) => sum + file.size, 0),
+      log: successfulEntries.map(([path]) => path).reverse().slice(0, 20),
+    });
 
     if (failed.length > 0) {
       const reasons = failed.map((f) => `${f.path}: ${f.reason}`).join("; ");

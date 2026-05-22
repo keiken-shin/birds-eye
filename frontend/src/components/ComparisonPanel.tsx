@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useId } from "react";
 import type React from "react";
 import { Check, ChevronLeft, ChevronRight, FolderOpen, Trash2 } from "lucide-react";
 import { formatBytes } from "../domain";
@@ -239,20 +239,29 @@ function Field({
 
 function ConfidenceField({ hashState }: { hashState: number }) {
   const [showTip, setShowTip] = useState(false);
+  const tooltipId = useId();
   return (
     <div className="grid gap-0.5">
       <span className="font-mono text-10 uppercase text-muted">hash confidence</span>
       <div className="relative flex items-center gap-1">
         <span className="text-13 text-primary">{confidenceLabel(hashState)}</span>
-        <span
-          className="cursor-help select-none font-mono text-10 text-muted/50 hover:text-muted"
+        <button
+          type="button"
+          aria-label="Explain hash confidence"
+          aria-describedby={showTip ? tooltipId : undefined}
+          className="cursor-help select-none border-0 bg-transparent p-0 font-mono text-10 text-muted/50 hover:text-muted focus:text-muted focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
           onMouseEnter={() => setShowTip(true)}
           onMouseLeave={() => setShowTip(false)}
+          onFocus={() => setShowTip(true)}
+          onBlur={() => setShowTip(false)}
         >
           ⓘ
-        </span>
+        </button>
         {showTip && (
-          <div className="pointer-events-none absolute bottom-full left-0 z-50 mb-1.5 w-60 border border-white/15 bg-[#0d0d0d] p-2 font-mono text-10 leading-relaxed text-muted shadow-overlay">
+          <div
+            id={tooltipId}
+            className="pointer-events-none absolute bottom-full left-0 z-50 mb-1.5 w-60 border border-white/15 bg-[#0d0d0d] p-2 font-mono text-10 leading-relaxed text-muted shadow-overlay"
+          >
             {confidenceTip(hashState)}
           </div>
         )}
