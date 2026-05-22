@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import type React from "react";
 import { ChevronLeft, ChevronRight, FolderOpen } from "lucide-react";
 import { formatBytes } from "../domain";
@@ -23,6 +23,26 @@ interface ComparisonPanelProps {
 export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unstage, nativeRuntime, videoRefs }: ComparisonPanelProps) {
   const left = files[cursor];
   const right = files[cursor + 1];
+
+  const videoRef0 = useCallback(
+    (el: HTMLVideoElement | null) => {
+      if (videoRefs) {
+        if (el) videoRefs.current[0] = el;
+        else delete videoRefs.current[0];
+      }
+    },
+    [videoRefs]
+  );
+
+  const videoRef1 = useCallback(
+    (el: HTMLVideoElement | null) => {
+      if (videoRefs) {
+        if (el) videoRefs.current[1] = el;
+        else delete videoRefs.current[1];
+      }
+    },
+    [videoRefs]
+  );
 
   const diffFields = new Set<string>();
   if (left && right) {
@@ -77,7 +97,7 @@ export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unsta
           onKeep={handleKeepLeft}
           onStage={() => stage(left)}
           nativeRuntime={nativeRuntime}
-          videoRef={videoRefs ? (el) => { if (el && videoRefs) videoRefs.current[0] = el; } : undefined}
+          videoRef={videoRefs ? videoRef0 : undefined}
         />
         <CopyCard
           file={right}
@@ -88,7 +108,7 @@ export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unsta
           onKeep={handleKeepRight}
           onStage={() => stage(right)}
           nativeRuntime={nativeRuntime}
-          videoRef={videoRefs ? (el) => { if (el && videoRefs) videoRefs.current[1] = el; } : undefined}
+          videoRef={videoRefs ? videoRef1 : undefined}
         />
       </div>
 
@@ -146,8 +166,8 @@ function CopyCard({ file, label, isKept, isSuggested, diffFields, onKeep, onStag
       {/* Media preview region */}
       <div
         ref={(wrapper) => {
-          if (wrapper && videoRef) {
-            videoRef(wrapper.querySelector("video"));
+          if (videoRef) {
+            videoRef(wrapper ? wrapper.querySelector("video") : null);
           }
         }}
       >
