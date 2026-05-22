@@ -185,6 +185,7 @@ export function DuplicateWorkbench({
           <AuditQueue
             staged={staged}
             stagedBytes={stagedBytes}
+            stage={stage}
             unstage={unstage}
             trashStaged={trashStaged}
             duplicateFiles={duplicateFiles}

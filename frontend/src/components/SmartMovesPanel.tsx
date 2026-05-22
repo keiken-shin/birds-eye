@@ -1,78 +1,80 @@
-import { useMemo } from "react";
-import { computeSmartMoves } from "../utils/smartMoves";
+import { formatBytes } from "../domain";
+import { truncatePath } from "../utils/pathUtils";
+import { computeSmartMoves, groupByParentFolder } from "../utils/smartMoves";
 import type { NativeDuplicateFile } from "../nativeClient";
 
 interface SmartMovesPanelProps {
   duplicateFiles: NativeDuplicateFile[];
+  stage: (file: NativeDuplicateFile) => void;
 }
 
-export function SmartMovesPanel({ duplicateFiles }: SmartMovesPanelProps) {
-  const groups = useMemo(() => computeSmartMoves(duplicateFiles), [duplicateFiles]);
+export function SmartMovesPanel({ duplicateFiles, stage }: SmartMovesPanelProps) {
+  const folderMoves = groupByParentFolder(duplicateFiles);
+  const fileMoves = computeSmartMoves(duplicateFiles);
+
+  if (folderMoves.length === 0 && fileMoves.length === 0) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-4 text-center">
+        <p className="text-12 text-muted/50">No move suggestions for this group.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-1 flex-col gap-3 overflow-hidden p-4">
-      <div>
-        <h3 className="font-mono text-11 font-black uppercase text-muted">Smart Moves</h3>
-        <p className="text-10 text-muted/60">Consolidation suggestions based on folder overlap</p>
-      </div>
-
-      {groups.length === 0 ? (
-        <p className="text-12 text-muted/50">No consolidation opportunities found.</p>
-      ) : (
-        <div className="flex flex-1 flex-col gap-3 overflow-y-auto">
-          {groups.map((group) => (
-            <MoveCard
-              key={group.targetFolder}
-              targetFolder={group.targetFolder}
-              filesToMove={group.filesToMove}
-              reason={group.reason}
-            />
+    <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+      {folderMoves.length > 0 ? (
+        <>
+          <h3 className="font-mono text-10 uppercase text-muted">Folder Moves</h3>
+          {folderMoves.map((move, idx) => (
+            <div key={`${move.keepFolder}-${move.stageFolder}-${idx}`} className="border border-white/10 bg-white/[0.02] p-3">
+              <div className="grid gap-1">
+                <div className="flex items-baseline gap-1.5">
+                  <span className="font-mono text-10 uppercase text-muted">Keep</span>
+                  <span
+                    className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-11 text-primary"
+                    title={move.keepFolder}
+                  >
+                    {truncatePath(move.keepFolder)}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="font-mono text-10 uppercase text-muted">Stage</span>
+                  <span
+                    className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-11 text-muted"
+                    title={move.stageFolder}
+                  >
+                    {truncatePath(move.stageFolder)}
+                  </span>
+                </div>
+              </div>
+              <p className="mt-1.5 font-mono text-10 text-muted">
+                {move.fileCount} files / {formatBytes(move.reclaimableBytes)} reclaimable
+              </p>
+              <button
+                type="button"
+                onClick={() => move.files.forEach(stage)}
+                className="mt-2 w-full border border-primary/30 py-1.5 font-mono text-10 uppercase text-primary hover:bg-primary/10"
+              >
+                Apply - Stage {move.fileCount} files
+              </button>
+            </div>
           ))}
-        </div>
-      )}
-
-      <p className="mt-auto border-t border-primary/10 pt-3 font-mono text-10 text-muted/60">
-        Moves are not applied automatically — use your OS to act on these suggestions.
-      </p>
-    </div>
-  );
-}
-
-function MoveCard({
-  targetFolder,
-  filesToMove,
-  reason,
-}: {
-  targetFolder: string;
-  filesToMove: string[];
-  reason: string;
-}) {
-  return (
-    <div className="border border-white/10 bg-white/[0.02] p-3">
-      <p className="font-mono text-10 font-black uppercase text-primary">Consolidate here</p>
-      <p
-        className="mt-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-11 text-primary"
-        title={targetFolder}
-      >
-        {targetFolder}
-      </p>
-      <p className="mt-1 text-10 text-muted">{reason}</p>
-      <div className="mt-2 flex flex-col gap-0.5 border-t border-white/10 pt-2">
-        <p className="font-mono text-10 uppercase text-muted/60">Move these files here:</p>
-        {filesToMove.map((path) => (
-          <p
-            key={path}
-            className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-10 text-muted"
-            title={path}
-          >
-            {lastSegment(path)}
+        </>
+      ) : (
+        <>
+          <p className="font-mono text-10 text-muted/50">
+            No folder-level patterns detected - showing file suggestions.
           </p>
-        ))}
-      </div>
+          {fileMoves.map((move, idx) => (
+            <div key={`${move.targetFolder}-${idx}`} className="border border-white/10 bg-white/[0.02] p-3">
+              <p className="font-mono text-11 text-primary" title={move.targetFolder}>
+                {truncatePath(move.targetFolder)}
+              </p>
+              <p className="mt-1 text-12 text-muted">{move.reason}</p>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
-}
-
-function lastSegment(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
