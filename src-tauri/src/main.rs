@@ -2,6 +2,7 @@ use birds_eye::native::api::{
     index_metadata,
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
     search_files as search_index_files, trash_files as do_trash_files,
+    reveal_in_explorer as do_reveal_in_explorer,
     DuplicateFileSummaryDto, DuplicateGroupFilesRequest,
     FileSearchResultDto, IndexMetadataDto, IndexOverviewDto, IndexQueryRequest,
     ScanToIndexRequest, ScanToIndexResponse, SearchFilesRequest,
@@ -167,6 +168,11 @@ fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
     do_trash_files(request)
 }
 
+#[tauri::command]
+fn reveal_in_explorer(path: String) -> Result<(), String> {
+    do_reveal_in_explorer(path)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -186,6 +192,7 @@ fn main() {
             scan_job_events,
             scan_job_status,
             trash_files,
+            reveal_in_explorer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Birds Eye desktop shell");

@@ -175,3 +175,7 @@ export async function listNativeIndexes() {
 export async function deleteNativeIndex(indexPath: string) {
   await invoke("delete_index", { indexPath });
 }
+
+export async function revealInExplorer(path: string): Promise<void> {
+  await invoke("reveal_in_explorer", { path });
+}
