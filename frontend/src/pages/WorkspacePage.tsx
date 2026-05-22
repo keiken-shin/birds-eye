@@ -141,7 +141,11 @@ export function WorkspacePage() {
           scan={workspaceScan}
         />
         <FoldersTable sortedFolders={workspaceSortedFolders} />
-        <DetailGrid largestFiles={workspaceScan.largestFiles} extensions={workspaceScan.extensions} />
+        <DetailGrid
+          largestFiles={workspaceScan.largestFiles}
+          extensions={workspaceScan.extensions}
+          nativeRuntime={nativeRuntime}
+        />
         <DuplicatesSection
           duplicateCandidates={workspaceScan.duplicateCandidates}
           selectedDuplicateGroup={selectedDuplicateGroup}
