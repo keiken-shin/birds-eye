@@ -105,6 +105,7 @@ pub struct DuplicateFileSummary {
     pub path: String,
     pub size: i64,
     pub modified_at: Option<i64>,
+    pub hash_state: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -505,7 +506,7 @@ impl IndexWriter {
         limit: usize,
     ) -> Result<Vec<DuplicateFileSummary>, IndexError> {
         let mut statement = self.connection.prepare(
-            "SELECT files.path, files.size, files.modified_at
+            "SELECT files.path, files.size, files.modified_at, files.hash_state
              FROM duplicate_group_files dgf
              JOIN files ON files.id = dgf.file_id
              WHERE dgf.group_id = ?1 AND files.deleted_at IS NULL
@@ -517,6 +518,7 @@ impl IndexWriter {
                 path: row.get(0)?,
                 size: row.get(1)?,
                 modified_at: row.get(2)?,
+                hash_state: row.get(3)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
