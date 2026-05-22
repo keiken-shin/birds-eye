@@ -96,6 +96,7 @@ pub struct DuplicateFileSummaryDto {
     pub path: String,
     pub size: i64,
     pub modified_at: Option<i64>,
+    /// 0 = unresolved (size match only), 2 = sample hash, 4 = full-file XXH3
     pub hash_state: i64,
 }
 
@@ -444,11 +445,11 @@ mod tests {
         .expect("duplicate group files command failed");
 
         assert_eq!(files.len(), 2);
-        // After smart-mode refinement, files should have hash_state > 0
+        // After smart-mode refinement, files should have hash_state >= 2
         // (either sample hash=2 or full-file hash=4)
         assert!(
-            files.iter().all(|f| f.hash_state >= 2),
-            "expected hash_state >= 2 after refinement, got {:?}",
+            files.iter().all(|f| f.hash_state == 4),
+            "expected hash_state == 4 after full refinement of small files, got {:?}",
             files.iter().map(|f| f.hash_state).collect::<Vec<_>>()
         );
         cleanup(&root);
