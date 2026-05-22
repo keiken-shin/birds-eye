@@ -82,6 +82,7 @@ export function DuplicateWorkbench({
         stagedBytes={stagedBytes}
         unstage={unstage}
         trashStaged={trashStaged}
+        duplicateFiles={duplicateFiles}
       />
     </section>
   );
