@@ -2,6 +2,7 @@ import { CopyCheck } from "lucide-react";
 import { formatBytes, formatCount } from "../domain";
 import { formatDate } from "../utils/displayUtils";
 import { ScrollableRows } from "./ScrollableRows";
+import { DuplicateWorkbench } from "./DuplicateWorkbench";
 import type { ScanState } from "../domain";
 import type { NativeDuplicateFile } from "../nativeClient";
 
@@ -12,6 +13,14 @@ interface DuplicatesSectionProps {
   selectedDuplicateGroup: number | null;
   selectDuplicateCandidate: (candidate: DuplicateCandidate) => void;
   duplicateFiles: NativeDuplicateFile[];
+  onClearSelection: () => void;
+  comparisonCursor: number;
+  setComparisonCursor: (n: number) => void;
+  staged: Map<string, NativeDuplicateFile>;
+  stagedBytes: number;
+  stage: (file: NativeDuplicateFile) => void;
+  unstage: (path: string) => void;
+  trashStaged: () => Promise<void>;
 }
 
 export function DuplicatesSection({
@@ -19,7 +28,34 @@ export function DuplicatesSection({
   selectedDuplicateGroup,
   selectDuplicateCandidate,
   duplicateFiles,
+  onClearSelection,
+  comparisonCursor,
+  setComparisonCursor,
+  staged,
+  stagedBytes,
+  stage,
+  unstage,
+  trashStaged,
 }: DuplicatesSectionProps) {
+  if (selectedDuplicateGroup !== null) {
+    return (
+      <DuplicateWorkbench
+        duplicateCandidates={duplicateCandidates}
+        selectedDuplicateGroup={selectedDuplicateGroup}
+        selectDuplicateCandidate={selectDuplicateCandidate}
+        duplicateFiles={duplicateFiles}
+        comparisonCursor={comparisonCursor}
+        setComparisonCursor={setComparisonCursor}
+        staged={staged}
+        stagedBytes={stagedBytes}
+        stage={stage}
+        unstage={unstage}
+        trashStaged={trashStaged}
+        onCollapse={onClearSelection}
+      />
+    );
+  }
+
   return (
     <section className={panelClass}>
       <div className={panelHeaderClass}>
@@ -32,35 +68,22 @@ export function DuplicatesSection({
       {duplicateCandidates.length === 0 ? (
         <div className={compactEmptyClass}>Files with identical sizes will appear here as duplicate candidates.</div>
       ) : (
-        <>
-          <ScrollableRows compact>
-            {duplicateCandidates.map((candidate) => (
-              <button
-                className={duplicateRowClass(selectedDuplicateGroup === candidate.id)}
-                key={candidate.id ?? candidate.size}
-                type="button"
-                onClick={() => void selectDuplicateCandidate(candidate)}
-              >
-                <div className="grid gap-1">
-                  <strong className="text-primary">{formatBytes(candidate.reclaimableBytes)} reclaimable</strong>
-                  <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-muted">{formatCount(candidate.files)} files at {formatBytes(candidate.size)} each</span>
-                </div>
-                <small className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-muted">{candidate.samples.join(" | ")}</small>
-              </button>
-            ))}
-          </ScrollableRows>
-          {duplicateFiles.length > 0 && (
-            <div className="mt-3 grid border-t border-primary/15">
-              {duplicateFiles.map((file) => (
-                <div className={fileRowClass} key={file.path}>
-                  <span className={pathClass}>{file.path}</span>
-                  <strong className={valueClass}>{formatBytes(file.size)}</strong>
-                  <small className={smallClass}>{file.modified_at ? formatDate(file.modified_at) : "-"}</small>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
+        <ScrollableRows compact>
+          {duplicateCandidates.map((candidate) => (
+            <button
+              className={duplicateRowClass(selectedDuplicateGroup === candidate.id)}
+              key={candidate.id ?? candidate.size}
+              type="button"
+              onClick={() => void selectDuplicateCandidate(candidate)}
+            >
+              <div className="grid gap-1">
+                <strong className="text-primary">{formatBytes(candidate.reclaimableBytes)} reclaimable</strong>
+                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-muted">{formatCount(candidate.files)} files at {formatBytes(candidate.size)} each</span>
+              </div>
+              <small className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-muted">{candidate.samples.join(" | ")}</small>
+            </button>
+          ))}
+        </ScrollableRows>
       )}
     </section>
   );
@@ -78,11 +101,3 @@ const panelHeaderClass = "mb-4 flex items-baseline justify-between gap-4 upperca
 const panelTitleClass = "text-17 font-black uppercase text-primary";
 const panelMetaClass = "inline-flex items-center gap-1.5 font-mono text-11 uppercase text-muted";
 const compactEmptyClass = "grid min-h-[150px] place-items-center border border-dashed border-primary/20 bg-[radial-gradient(circle,rgba(244,241,234,0.08)_1px,transparent_1.2px)] bg-[length:18px_18px] p-6 text-center text-muted";
-const fileRowClass = "grid min-h-12 grid-cols-[minmax(0,1fr)_110px_72px] items-center gap-3 border-t border-primary/10 max-sm:grid-cols-1 max-sm:gap-1 max-sm:py-2.5";
-const pathClass = "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-subtle";
-const valueClass = "text-right text-primary max-sm:text-left";
-const smallClass = "text-right font-mono text-muted max-sm:text-left";
-
-
-
-
