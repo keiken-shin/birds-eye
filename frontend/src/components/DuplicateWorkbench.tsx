@@ -101,7 +101,7 @@ function ComparisonPanelWithExpanders(props: ComparisonPanelProps) {
               className="cursor-pointer font-mono flex items-center justify-center gap-1 uppercase text-muted hover:text-primary"
             >
               <PanelLeftOpen size={16} /> 
-              <span className="font-sm font-black">Groups</span>
+              <span className="text-sm font-black">Groups</span>
             </button>
           )}
           {auditCollapsed && (
