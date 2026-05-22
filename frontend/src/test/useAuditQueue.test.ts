@@ -36,14 +36,13 @@ describe("useAuditQueue", () => {
     expect(result.current.stagedBytes).toBe(200);
   });
 
-  it("trashStaged trashes staged paths sequentially", async () => {
+  it("trashStaged trashes staged paths in one native call", async () => {
     mockTrashFiles.mockResolvedValue({ failed: [] });
     const { result } = renderHook(() => useAuditQueue(vi.fn()));
     act(() => { result.current.stage(fileA); result.current.stage(fileB); });
     await act(async () => result.current.trashStaged());
-    expect(mockTrashFiles).toHaveBeenCalledTimes(2);
-    expect(mockTrashFiles).toHaveBeenNthCalledWith(1, ["/a/file.zip"]);
-    expect(mockTrashFiles).toHaveBeenNthCalledWith(2, ["/b/file.zip"]);
+    expect(mockTrashFiles).toHaveBeenCalledTimes(1);
+    expect(mockTrashFiles).toHaveBeenCalledWith(["/a/file.zip", "/b/file.zip"]);
   });
 
   it("trashStaged clears successfully trashed paths from staged", async () => {
@@ -55,9 +54,7 @@ describe("useAuditQueue", () => {
   });
 
   it("trashStaged keeps failed paths in staged and reports error", async () => {
-    mockTrashFiles
-      .mockResolvedValueOnce({ failed: [{ path: "/a/file.zip", reason: "Permission denied" }] })
-      .mockResolvedValueOnce({ failed: [] });
+    mockTrashFiles.mockResolvedValue({ failed: [{ path: "/a/file.zip", reason: "Permission denied" }] });
     const setRuntimeMessage = vi.fn();
     const { result } = renderHook(() => useAuditQueue(setRuntimeMessage));
     act(() => { result.current.stage(fileA); result.current.stage(fileB); });
@@ -65,6 +62,21 @@ describe("useAuditQueue", () => {
     expect(result.current.staged.has("/a/file.zip")).toBe(true);
     expect(result.current.staged.has("/b/file.zip")).toBe(false);
     expect(setRuntimeMessage).toHaveBeenCalledWith(expect.stringContaining("Permission denied"));
+  });
+
+  it("trashStaged records failed files in progress", async () => {
+    mockTrashFiles.mockResolvedValue({ failed: [{ path: "/a/file.zip", reason: "Permission denied" }] });
+    const { result } = renderHook(() => useAuditQueue(vi.fn()));
+    act(() => { result.current.stage(fileA); result.current.stage(fileB); });
+    await act(async () => result.current.trashStaged());
+    expect(result.current.trashProgress).toMatchObject({
+      status: "done",
+      total: 2,
+      completed: 2,
+      failedCount: 1,
+      bytesCleared: 100,
+    });
+    expect(result.current.trashProgress.log).toEqual(["/b/file.zip"]);
   });
 
   it("trashStaged records progress for completed files", async () => {
@@ -91,6 +103,7 @@ describe("useAuditQueue", () => {
       status: "idle",
       total: 0,
       completed: 0,
+      failedCount: 0,
       bytesCleared: 0,
       log: [],
     });

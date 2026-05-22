@@ -131,7 +131,7 @@ pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
 }
 
 pub fn reveal_in_explorer(path: String) -> Result<(), String> {
-    let target = reveal_target_path(&path);
+    let target = reveal_target_path(&path)?;
 
     #[cfg(target_os = "windows")]
     {
@@ -144,15 +144,21 @@ pub fn reveal_in_explorer(path: String) -> Result<(), String> {
         } else {
             command.raw_arg(format!("/select,\"{explorer_path}\""));
         }
-        command.spawn().map_err(|e| e.to_string())?;
+        let status = command.status().map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err(format!("explorer.exe exited with status {status}"));
+        }
     }
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
+        let status = std::process::Command::new("open")
             .arg("-R")
             .arg(&target)
-            .spawn()
+            .status()
             .map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err(format!("open exited with status {status}"));
+        }
     }
     #[cfg(target_os = "linux")]
     {
@@ -164,27 +170,30 @@ pub fn reveal_in_explorer(path: String) -> Result<(), String> {
                 .ok_or_else(|| "path has no parent directory".to_owned())?
                 .to_path_buf()
         };
-        std::process::Command::new("xdg-open")
+        let status = std::process::Command::new("xdg-open")
             .arg(&open_path)
-            .spawn()
+            .status()
             .map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err(format!("xdg-open exited with status {status}"));
+        }
     }
     Ok(())
 }
 
-fn reveal_target_path(path: &str) -> PathBuf {
+fn reveal_target_path(path: &str) -> Result<PathBuf, String> {
     let original = Path::new(path);
     if original.exists() {
-        return original
+        return Ok(original
             .canonicalize()
-            .unwrap_or_else(|_| original.to_path_buf());
+            .unwrap_or_else(|_| original.to_path_buf()));
     }
 
     original
         .parent()
         .filter(|parent| parent.exists())
         .and_then(|parent| parent.canonicalize().ok())
-        .unwrap_or_else(|| original.to_path_buf())
+        .ok_or_else(|| format!("path does not exist and no existing parent could be resolved: {path}"))
 }
 
 #[cfg(target_os = "windows")]
@@ -760,10 +769,21 @@ mod tests {
         fs::create_dir_all(&folder).expect("create dirs");
         let missing_file = folder.join("missing image.png");
 
-        let target = reveal_target_path(&missing_file.to_string_lossy());
+        let target = reveal_target_path(&missing_file.to_string_lossy())
+            .expect("missing file should resolve to existing parent");
 
         assert_eq!(target, folder.canonicalize().expect("canonical folder"));
         cleanup(&root);
+    }
+
+    #[test]
+    fn reveal_target_path_errors_when_no_existing_target_can_be_resolved() {
+        let root = test_root("reveal-missing-target");
+        let missing_file = root.join("missing-folder").join("missing image.png");
+
+        let target = reveal_target_path(&missing_file.to_string_lossy());
+
+        assert!(target.is_err());
     }
 
     #[cfg(target_os = "windows")]
