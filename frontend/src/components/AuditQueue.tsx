@@ -9,12 +9,13 @@ type Tab = "queue" | "moves";
 interface AuditQueueProps {
   staged: Map<string, NativeDuplicateFile>;
   stagedBytes: number;
+  stage: (file: NativeDuplicateFile) => void;
   unstage: (path: string) => void;
   trashStaged: () => Promise<void>;
   duplicateFiles: NativeDuplicateFile[];
 }
 
-export function AuditQueue({ staged, stagedBytes, unstage, trashStaged, duplicateFiles }: AuditQueueProps) {
+export function AuditQueue({ staged, stagedBytes, stage, unstage, trashStaged, duplicateFiles }: AuditQueueProps) {
   const [activeTab, setActiveTab] = useState<Tab>("queue");
   const [showConfidence, setShowConfidence] = useState(false);
   const entries = Array.from(staged.values());
@@ -117,7 +118,7 @@ export function AuditQueue({ staged, stagedBytes, unstage, trashStaged, duplicat
           </div>
         </div>
       ) : (
-        <SmartMovesPanel duplicateFiles={duplicateFiles} />
+        <SmartMovesPanel duplicateFiles={duplicateFiles} stage={stage} />
       )}
     </div>
   );
