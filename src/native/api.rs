@@ -96,6 +96,7 @@ pub struct DuplicateFileSummaryDto {
     pub path: String,
     pub size: i64,
     pub modified_at: Option<i64>,
+    pub hash_state: i64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -279,6 +280,7 @@ pub fn duplicate_group_files(
             path: file.path,
             size: file.size,
             modified_at: file.modified_at,
+            hash_state: file.hash_state,
         })
         .collect::<Vec<_>>();
 
@@ -442,6 +444,13 @@ mod tests {
         .expect("duplicate group files command failed");
 
         assert_eq!(files.len(), 2);
+        // After smart-mode refinement, files should have hash_state > 0
+        // (either sample hash=2 or full-file hash=4)
+        assert!(
+            files.iter().all(|f| f.hash_state >= 2),
+            "expected hash_state >= 2 after refinement, got {:?}",
+            files.iter().map(|f| f.hash_state).collect::<Vec<_>>()
+        );
         cleanup(&root);
     }
 
