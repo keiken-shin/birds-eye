@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { trashFiles } from "../nativeClient";
 import type { NativeDuplicateFile } from "../nativeClient";
 
@@ -13,6 +13,8 @@ export function useAuditQueue(
   clearQueue: () => void;
 } {
   const [staged, setStaged] = useState<Map<string, NativeDuplicateFile>>(new Map());
+  const stagedRef = useRef(staged);
+  stagedRef.current = staged;
 
   const stagedBytes = useMemo(
     () => Array.from(staged.values()).reduce((sum, f) => sum + f.size, 0),
@@ -32,22 +34,26 @@ export function useAuditQueue(
   }, []);
 
   const trashStaged = useCallback(async () => {
-    const paths = Array.from(staged.keys());
+    const paths = Array.from(stagedRef.current.keys());
     if (paths.length === 0) return;
-    const result = await trashFiles(paths);
-    const failedSet = new Set(result.failed.map((f) => f.path));
-    setStaged((prev) => {
-      const next = new Map(prev);
-      for (const path of paths) {
-        if (!failedSet.has(path)) next.delete(path);
+    try {
+      const result = await trashFiles(paths);
+      const failedSet = new Set(result.failed.map((f) => f.path));
+      setStaged((prev) => {
+        const next = new Map(prev);
+        for (const path of paths) {
+          if (!failedSet.has(path)) next.delete(path);
+        }
+        return next;
+      });
+      if (result.failed.length > 0) {
+        const reasons = result.failed.map((f) => `${f.path}: ${f.reason}`).join("; ");
+        setRuntimeMessage(`Failed to trash ${result.failed.length} file(s): ${reasons}`);
       }
-      return next;
-    });
-    if (result.failed.length > 0) {
-      const reasons = result.failed.map((f) => `${f.path}: ${f.reason}`).join("; ");
-      setRuntimeMessage(`Failed to trash ${result.failed.length} file(s): ${reasons}`);
+    } catch (error) {
+      setRuntimeMessage(error instanceof Error ? error.message : "Trash operation failed");
     }
-  }, [staged, setRuntimeMessage]);
+  }, [setRuntimeMessage]);
 
   const clearQueue = useCallback(() => {
     setStaged(new Map());
