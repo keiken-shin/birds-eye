@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useScanContext } from "../context/ScanContext";
 import { StorageReadout } from "../components/StorageReadout";
@@ -10,6 +10,7 @@ import { DetailGrid } from "../components/DetailGrid";
 import { DuplicatesSection } from "../components/DuplicatesSection";
 import { CommandPalette } from "../components/CommandPalette";
 import { useDuplicates } from "../hooks/useDuplicates";
+import { useAuditQueue } from "../hooks/useAuditQueue";
 import { parentPath, isDescendantPath } from "../utils/pathUtils";
 
 export function WorkspacePage() {
@@ -24,14 +25,38 @@ export function WorkspacePage() {
     setRuntimeMessage,
   } = useScanContext();
 
-  const { duplicateFiles, selectedDuplicateGroup, selectDuplicateCandidate, clearDuplicates } =
-    useDuplicates({ currentIndexPath: workspaceIndexPath, setRuntimeMessage });
+  const {
+    duplicateFiles,
+    selectedDuplicateGroup,
+    comparisonCursor,
+    setComparisonCursor,
+    selectDuplicateCandidate,
+    clearDuplicates,
+  } = useDuplicates({ currentIndexPath: workspaceIndexPath, setRuntimeMessage });
+
+  const { staged, stagedBytes, stage, unstage, trashStaged, clearQueue } =
+    useAuditQueue(setRuntimeMessage);
 
   useEffect(() => {
-    if (workspaceIndexPath === null) clearDuplicates();
-  }, [workspaceIndexPath, clearDuplicates]);
+    if (workspaceIndexPath === null) {
+      clearDuplicates();
+      clearQueue();
+    }
+  }, [workspaceIndexPath, clearDuplicates, clearQueue]);
 
-  // Derive sorted/filtered folders from the frozen workspace snapshot
+  const handleClearSelection = useCallback(() => {
+    clearDuplicates();
+    clearQueue();
+  }, [clearDuplicates, clearQueue]);
+
+  const handleTrashStaged = useCallback(async () => {
+    await trashStaged();
+    if (selectedDuplicateGroup !== null && workspaceScan) {
+      const candidate = workspaceScan.duplicateCandidates.find((c) => c.id === selectedDuplicateGroup);
+      if (candidate) await selectDuplicateCandidate(candidate);
+    }
+  }, [trashStaged, selectedDuplicateGroup, workspaceScan, selectDuplicateCandidate]);
+
   const workspaceSortedFolders = useMemo(() => {
     if (!workspaceScan) return [];
     return [...workspaceScan.folders].sort((a, b) => b.bytes - a.bytes);
@@ -113,11 +138,16 @@ export function WorkspacePage() {
           selectedDuplicateGroup={selectedDuplicateGroup}
           selectDuplicateCandidate={selectDuplicateCandidate}
           duplicateFiles={duplicateFiles}
+          onClearSelection={handleClearSelection}
+          comparisonCursor={comparisonCursor}
+          setComparisonCursor={setComparisonCursor}
+          staged={staged}
+          stagedBytes={stagedBytes}
+          stage={stage}
+          unstage={unstage}
+          trashStaged={handleTrashStaged}
         />
       </section>
     </>
   );
 }
-
-
-
