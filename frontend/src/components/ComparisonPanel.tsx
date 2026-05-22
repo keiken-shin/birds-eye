@@ -41,7 +41,7 @@ export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unsta
     <div className="flex flex-1 flex-col gap-3 p-5 min-w-0">
       <div className="flex items-baseline justify-between gap-4 uppercase">
         <h3 className="text-13 font-black uppercase text-primary">Copy Comparison</h3>
-        <span className={confidenceBadgeClass(left.hash_state)}>{confidence}</span>
+        <span className={confidenceBadgeClass(Math.max(left.hash_state, right.hash_state))}>{confidence}</span>
       </div>
 
       {suggestedPath && (

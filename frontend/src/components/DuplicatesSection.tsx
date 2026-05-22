@@ -69,10 +69,10 @@ export function DuplicatesSection({
         <div className={compactEmptyClass}>Files with identical sizes will appear here as duplicate candidates.</div>
       ) : (
         <ScrollableRows compact>
-          {duplicateCandidates.map((candidate) => (
+          {duplicateCandidates.map((candidate, idx) => (
             <button
               className={duplicateRowClass(selectedDuplicateGroup === candidate.id)}
-              key={candidate.id ?? candidate.size}
+              key={candidate.id ?? `size-${candidate.size}-${idx}`}
               type="button"
               onClick={() => void selectDuplicateCandidate(candidate)}
             >

@@ -41,9 +41,9 @@ export function DuplicateWorkbench({
       <div className="flex w-[200px] shrink-0 flex-col gap-1 border-r border-primary/15 p-4">
         <h3 className="mb-2 font-mono text-11 font-black uppercase text-muted">Duplicate Groups</h3>
         <div className="flex flex-1 flex-col gap-1 overflow-y-auto">
-          {duplicateCandidates.map((candidate) => (
+          {duplicateCandidates.map((candidate, idx) => (
             <button
-              key={candidate.id ?? candidate.size}
+              key={candidate.id ?? `size-${candidate.size}-${idx}`}
               type="button"
               onClick={() => void selectDuplicateCandidate(candidate)}
               className={groupRowClass(selectedDuplicateGroup === candidate.id)}
