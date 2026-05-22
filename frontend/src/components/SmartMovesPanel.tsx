@@ -24,7 +24,7 @@ export function SmartMovesPanel({ duplicateFiles, stage }: SmartMovesPanelProps)
     <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
       {folderMoves.length > 0 ? (
         <>
-          <h3 className="font-mono text-10 uppercase text-muted">Folder Moves</h3>
+          <h3 className="text-13 font-black uppercase text-primary">Folder Moves</h3>
           {folderMoves.map((move, idx) => (
             <div key={`${move.keepFolder}-${move.stageFolder}-${idx}`} className="border border-white/10 bg-white/[0.02] p-3">
               <div className="grid gap-1">

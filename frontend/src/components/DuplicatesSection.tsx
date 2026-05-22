@@ -1,9 +1,3 @@
-import { useState } from "react";
-import { CopyCheck } from "lucide-react";
-import { formatBytes, formatCount } from "../domain";
-import { formatDate } from "../utils/displayUtils";
-import { BulkTriageGrid } from "./BulkTriageGrid";
-import { ScrollableRows } from "./ScrollableRows";
 import { DuplicateWorkbench } from "./DuplicateWorkbench";
 import type { ScanState } from "../domain";
 import type { TrashProgress } from "../hooks/useAuditQueue";
@@ -16,7 +10,6 @@ interface DuplicatesSectionProps {
   selectedDuplicateGroup: number | null;
   selectDuplicateCandidate: (candidate: DuplicateCandidate) => void;
   duplicateFiles: NativeDuplicateFile[];
-  onClearSelection: () => void;
   comparisonCursor: number;
   setComparisonCursor: (n: number) => void;
   staged: Map<string, NativeDuplicateFile>;
@@ -34,7 +27,6 @@ export function DuplicatesSection({
   selectedDuplicateGroup,
   selectDuplicateCandidate,
   duplicateFiles,
-  onClearSelection,
   comparisonCursor,
   setComparisonCursor,
   staged,
@@ -46,9 +38,7 @@ export function DuplicatesSection({
   dismissProgress,
   nativeRuntime,
 }: DuplicatesSectionProps) {
-  const [viewMode, setViewMode] = useState<"list" | "bulk">("list");
-
-  if (selectedDuplicateGroup !== null) {
+  if (duplicateCandidates.length > 0) {
     return (
       <DuplicateWorkbench
         duplicateCandidates={duplicateCandidates}
@@ -64,80 +54,23 @@ export function DuplicatesSection({
         trashStaged={trashStaged}
         trashProgress={trashProgress}
         dismissProgress={dismissProgress}
-        onCollapse={onClearSelection}
         nativeRuntime={nativeRuntime}
       />
     );
   }
 
   return (
-    <section className={panelClass}>
+    <section id="duplicates" className={panelClass}>
       <div className={panelHeaderClass}>
         <h2 className={panelTitleClass}>Duplicate Candidates</h2>
-        <div className="flex items-center gap-3">
-          <div className="flex border border-white/10">
-            <button
-              type="button"
-              onClick={() => setViewMode("list")}
-              className={viewToggleClass(viewMode === "list")}
-            >
-              List
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("bulk")}
-              className={viewToggleClass(viewMode === "bulk")}
-            >
-              Bulk Grid
-            </button>
-          </div>
-          <span className={panelMetaClass}><CopyCheck size={14} /> Size + partial + full hash</span>
-        </div>
+        <span className={panelMetaClass}>Size + partial + full hash</span>
       </div>
       <p className="-mt-1 mb-3 text-13 leading-normal text-muted">
         Duplicate groups start by identical file size, then matching candidates are refined with partial hashes and full-file hashes. A 100% confidence group means matching full hashes.
       </p>
-      {duplicateCandidates.length === 0 ? (
-        <div className={compactEmptyClass}>Files with identical sizes will appear here as duplicate candidates.</div>
-      ) : viewMode === "bulk" ? (
-        <BulkTriageGrid
-          duplicateCandidates={duplicateCandidates}
-          onOpenWorkbench={(candidate) => void selectDuplicateCandidate(candidate)}
-        />
-      ) : (
-        <ScrollableRows compact>
-          {duplicateCandidates.map((candidate, idx) => (
-            <button
-              className={duplicateRowClass(selectedDuplicateGroup === candidate.id)}
-              key={candidate.id ?? `size-${candidate.size}-${idx}`}
-              type="button"
-              onClick={() => void selectDuplicateCandidate(candidate)}
-            >
-              <div className="grid gap-1">
-                <strong className="text-primary">{formatBytes(candidate.reclaimableBytes)} reclaimable</strong>
-                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-muted">{formatCount(candidate.files)} files at {formatBytes(candidate.size)} each</span>
-              </div>
-              <small className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-muted">{candidate.samples.join(" | ")}</small>
-            </button>
-          ))}
-        </ScrollableRows>
-      )}
+      <div className={compactEmptyClass}>Files with identical sizes will appear here as duplicate candidates.</div>
     </section>
   );
-}
-
-function duplicateRowClass(active: boolean) {
-  return [
-    "grid min-h-[58px] w-full cursor-pointer grid-cols-[minmax(220px,0.45fr)_minmax(0,1fr)] items-center gap-4 border-0 border-t border-primary/10 bg-transparent p-0 text-left text-inherit max-sm:grid-cols-1 max-sm:py-2.5",
-    active ? "bg-primary/10" : "hover:bg-primary/[0.055]",
-  ].join(" ");
-}
-
-function viewToggleClass(active: boolean): string {
-  const base = "px-3 py-1 font-mono text-10 uppercase";
-  return active
-    ? `${base} bg-primary/15 text-primary`
-    : `${base} text-muted hover:text-primary`;
 }
 
 const panelClass = "relative mt-5 border border-white/15 bg-white/[0.045] p-5 shadow-overlay before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-4.5 before:w-4.5 before:border-l-2 before:border-t-2 before:border-primary/55";
