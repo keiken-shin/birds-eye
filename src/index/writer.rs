@@ -1555,7 +1555,7 @@ mod tests {
     }
 
     #[test]
-    fn finished_scan_prepares_duplicate_refinement_without_hashing() {
+    fn finished_scan_finalizes_metadata_without_duplicate_refinement() {
         let root = test_root("progressive-refinement");
         fs::create_dir_all(&root).expect("failed to create folder");
         write_file(&root.join("one.bin"), &[1; 32]);
@@ -1609,8 +1609,8 @@ mod tests {
             .expect("failed to read root rollup");
 
         assert_eq!(session_status, "complete");
-        assert_eq!(duplicate_candidates, 1);
-        assert_eq!(pending_hash_jobs, 2);
+        assert_eq!(duplicate_candidates, 0);
+        assert_eq!(pending_hash_jobs, 0);
         assert_eq!(duplicate_groups, 0);
         assert_eq!(hashed_files, 0);
         assert_eq!(root_total_bytes, 128);
