@@ -34,22 +34,18 @@ export function useAuditQueue(
   const trashStaged = useCallback(async () => {
     const paths = Array.from(staged.keys());
     if (paths.length === 0) return;
-    try {
-      const result = await trashFiles(paths);
-      const failedSet = new Set(result.failed.map((f) => f.path));
-      setStaged((prev) => {
-        const next = new Map(prev);
-        for (const path of paths) {
-          if (!failedSet.has(path)) next.delete(path);
-        }
-        return next;
-      });
-      if (result.failed.length > 0) {
-        const reasons = result.failed.map((f) => `${f.path}: ${f.reason}`).join("; ");
-        setRuntimeMessage(`Failed to trash ${result.failed.length} file(s): ${reasons}`);
+    const result = await trashFiles(paths);
+    const failedSet = new Set(result.failed.map((f) => f.path));
+    setStaged((prev) => {
+      const next = new Map(prev);
+      for (const path of paths) {
+        if (!failedSet.has(path)) next.delete(path);
       }
-    } catch (error) {
-      setRuntimeMessage(error instanceof Error ? error.message : "Trash operation failed");
+      return next;
+    });
+    if (result.failed.length > 0) {
+      const reasons = result.failed.map((f) => `${f.path}: ${f.reason}`).join("; ");
+      setRuntimeMessage(`Failed to trash ${result.failed.length} file(s): ${reasons}`);
     }
   }, [staged, setRuntimeMessage]);
 
