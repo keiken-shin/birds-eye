@@ -176,7 +176,7 @@ function ConfidenceField({ hashState }: { hashState: number }) {
           ⓘ
         </span>
         {showTip && (
-          <div className="absolute bottom-full left-0 z-50 mb-1.5 w-60 border border-white/15 bg-[#0d0d0d] p-2 font-mono text-10 leading-relaxed text-muted shadow-overlay">
+          <div className="pointer-events-none absolute bottom-full left-0 z-50 mb-1.5 w-60 border border-white/15 bg-[#0d0d0d] p-2 font-mono text-10 leading-relaxed text-muted shadow-overlay">
             {confidenceTip(hashState)}
           </div>
         )}
