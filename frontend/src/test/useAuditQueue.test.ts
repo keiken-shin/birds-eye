@@ -1,0 +1,71 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { useAuditQueue } from "../hooks/useAuditQueue";
+import type { NativeDuplicateFile } from "../nativeClient";
+
+const mockTrashFiles = vi.fn();
+
+vi.mock("../nativeClient", async () => {
+  const actual = await vi.importActual<typeof import("../nativeClient")>("../nativeClient");
+  return { ...actual, trashFiles: (...args: unknown[]) => mockTrashFiles(...args) };
+});
+
+const fileA: NativeDuplicateFile = { path: "/a/file.zip", size: 100, modified_at: 1000, hash_state: 4 };
+const fileB: NativeDuplicateFile = { path: "/b/file.zip", size: 100, modified_at: 2000, hash_state: 4 };
+
+describe("useAuditQueue", () => {
+  beforeEach(() => mockTrashFiles.mockReset());
+
+  it("stage adds a file to the staged map", () => {
+    const { result } = renderHook(() => useAuditQueue(vi.fn()));
+    act(() => result.current.stage(fileA));
+    expect(result.current.staged.has("/a/file.zip")).toBe(true);
+  });
+
+  it("unstage removes a file from the staged map", () => {
+    const { result } = renderHook(() => useAuditQueue(vi.fn()));
+    act(() => result.current.stage(fileA));
+    act(() => result.current.unstage("/a/file.zip"));
+    expect(result.current.staged.size).toBe(0);
+  });
+
+  it("stagedBytes is the sum of staged file sizes", () => {
+    const { result } = renderHook(() => useAuditQueue(vi.fn()));
+    act(() => { result.current.stage(fileA); result.current.stage(fileB); });
+    expect(result.current.stagedBytes).toBe(200);
+  });
+
+  it("trashStaged calls trashFiles with all staged paths", async () => {
+    mockTrashFiles.mockResolvedValue({ failed: [] });
+    const { result } = renderHook(() => useAuditQueue(vi.fn()));
+    act(() => { result.current.stage(fileA); result.current.stage(fileB); });
+    await act(async () => result.current.trashStaged());
+    expect(mockTrashFiles).toHaveBeenCalledWith(["/a/file.zip", "/b/file.zip"]);
+  });
+
+  it("trashStaged clears successfully trashed paths from staged", async () => {
+    mockTrashFiles.mockResolvedValue({ failed: [] });
+    const { result } = renderHook(() => useAuditQueue(vi.fn()));
+    act(() => { result.current.stage(fileA); result.current.stage(fileB); });
+    await act(async () => result.current.trashStaged());
+    expect(result.current.staged.size).toBe(0);
+  });
+
+  it("trashStaged keeps failed paths in staged and reports error", async () => {
+    mockTrashFiles.mockResolvedValue({ failed: [{ path: "/a/file.zip", reason: "Permission denied" }] });
+    const setRuntimeMessage = vi.fn();
+    const { result } = renderHook(() => useAuditQueue(setRuntimeMessage));
+    act(() => { result.current.stage(fileA); result.current.stage(fileB); });
+    await act(async () => result.current.trashStaged());
+    expect(result.current.staged.has("/a/file.zip")).toBe(true);
+    expect(result.current.staged.has("/b/file.zip")).toBe(false);
+    expect(setRuntimeMessage).toHaveBeenCalledWith(expect.stringContaining("Permission denied"));
+  });
+
+  it("clearQueue empties the staged map", () => {
+    const { result } = renderHook(() => useAuditQueue(vi.fn()));
+    act(() => { result.current.stage(fileA); result.current.stage(fileB); });
+    act(() => result.current.clearQueue());
+    expect(result.current.staged.size).toBe(0);
+  });
+});
