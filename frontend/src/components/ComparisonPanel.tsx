@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type React from "react";
 import { ChevronLeft, ChevronRight, FolderOpen } from "lucide-react";
 import { formatBytes } from "../domain";
 import { formatDate } from "../utils/displayUtils";
@@ -16,9 +17,10 @@ interface ComparisonPanelProps {
   stage: (file: NativeDuplicateFile) => void;
   unstage: (path: string) => void;
   nativeRuntime: boolean;
+  videoRefs?: React.MutableRefObject<HTMLVideoElement[]>;
 }
 
-export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unstage, nativeRuntime }: ComparisonPanelProps) {
+export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unstage, nativeRuntime, videoRefs }: ComparisonPanelProps) {
   const left = files[cursor];
   const right = files[cursor + 1];
 
@@ -75,6 +77,7 @@ export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unsta
           onKeep={handleKeepLeft}
           onStage={() => stage(left)}
           nativeRuntime={nativeRuntime}
+          videoRef={videoRefs ? (el) => { if (el && videoRefs) videoRefs.current[0] = el; } : undefined}
         />
         <CopyCard
           file={right}
@@ -85,6 +88,7 @@ export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unsta
           onKeep={handleKeepRight}
           onStage={() => stage(right)}
           nativeRuntime={nativeRuntime}
+          videoRef={videoRefs ? (el) => { if (el && videoRefs) videoRefs.current[1] = el; } : undefined}
         />
       </div>
 
@@ -124,9 +128,10 @@ interface CopyCardProps {
   onKeep: () => void;
   onStage: () => void;
   nativeRuntime: boolean;
+  videoRef?: (el: HTMLVideoElement | null) => void;
 }
 
-function CopyCard({ file, label, isKept, isSuggested, diffFields, onKeep, onStage, nativeRuntime }: CopyCardProps) {
+function CopyCard({ file, label, isKept, isSuggested, diffFields, onKeep, onStage, nativeRuntime, videoRef }: CopyCardProps) {
   const folder = file.path.replace(/[\\/][^\\/]+$/, "");
 
   return (
@@ -139,7 +144,15 @@ function CopyCard({ file, label, isKept, isSuggested, diffFields, onKeep, onStag
       </div>
 
       {/* Media preview region */}
-      <MediaPreview path={file.path} />
+      <div
+        ref={(wrapper) => {
+          if (wrapper && videoRef) {
+            videoRef(wrapper.querySelector("video"));
+          }
+        }}
+      >
+        <MediaPreview path={file.path} />
+      </div>
 
       <div className="flex flex-col gap-3 p-3">
         <Field label="path" value={truncatePath(file.path)} fullValue={file.path} mono />

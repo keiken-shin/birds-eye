@@ -1,3 +1,4 @@
+import React, { useRef, useCallback } from "react";
 import { formatBytes, formatCount } from "../domain";
 import { ComparisonPanel } from "./ComparisonPanel";
 import { AuditQueue } from "./AuditQueue";
@@ -37,8 +38,39 @@ export function DuplicateWorkbench({
   onCollapse,
   nativeRuntime,
 }: DuplicateWorkbenchProps) {
+  const videoRefs = useRef<HTMLVideoElement[]>([]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "a" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        const left = duplicateFiles[comparisonCursor];
+        const right = duplicateFiles[comparisonCursor + 1];
+        if (left && right) { unstage(left.path); stage(right); }
+      } else if (e.key === "d" || e.key === "ArrowRight") {
+        e.preventDefault();
+        const left = duplicateFiles[comparisonCursor];
+        const right = duplicateFiles[comparisonCursor + 1];
+        if (left && right) { unstage(right.path); stage(left); }
+      } else if (e.key === " ") {
+        e.preventDefault();
+        const [v0, v1] = videoRefs.current;
+        if (v0 && v1) {
+          if (v0.paused) { void v0.play(); void v1.play(); }
+          else { v0.pause(); v1.pause(); }
+        }
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (comparisonCursor < duplicateFiles.length - 2) {
+          setComparisonCursor(comparisonCursor + 1);
+        }
+      }
+    },
+    [duplicateFiles, comparisonCursor, setComparisonCursor, stage, unstage]
+  );
+
   return (
-    <section className={workbenchClass}>
+    <section className={workbenchClass} tabIndex={0} onKeyDown={handleKeyDown}>
       {/* Left: group list */}
       <div className="flex w-[200px] shrink-0 flex-col gap-1 border-r border-primary/15 p-4">
         <h3 className="mb-2 font-mono text-11 font-black uppercase text-muted">Duplicate Groups</h3>
@@ -74,6 +106,7 @@ export function DuplicateWorkbench({
         stage={stage}
         unstage={unstage}
         nativeRuntime={nativeRuntime}
+        videoRefs={videoRefs}
       />
 
       {/* Right: audit queue */}
