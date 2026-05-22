@@ -6,6 +6,7 @@ import { BulkTriageGrid } from "./BulkTriageGrid";
 import { ScrollableRows } from "./ScrollableRows";
 import { DuplicateWorkbench } from "./DuplicateWorkbench";
 import type { ScanState } from "../domain";
+import type { TrashProgress } from "../hooks/useAuditQueue";
 import type { NativeDuplicateFile } from "../nativeClient";
 
 type DuplicateCandidate = ScanState["duplicateCandidates"][number];
@@ -23,6 +24,8 @@ interface DuplicatesSectionProps {
   stage: (file: NativeDuplicateFile) => void;
   unstage: (path: string) => void;
   trashStaged: () => Promise<void>;
+  trashProgress: TrashProgress;
+  dismissProgress: () => void;
   nativeRuntime: boolean;
 }
 
@@ -39,6 +42,8 @@ export function DuplicatesSection({
   stage,
   unstage,
   trashStaged,
+  trashProgress,
+  dismissProgress,
   nativeRuntime,
 }: DuplicatesSectionProps) {
   const [viewMode, setViewMode] = useState<"list" | "bulk">("list");
@@ -57,6 +62,8 @@ export function DuplicatesSection({
         stage={stage}
         unstage={unstage}
         trashStaged={trashStaged}
+        trashProgress={trashProgress}
+        dismissProgress={dismissProgress}
         onCollapse={onClearSelection}
         nativeRuntime={nativeRuntime}
       />

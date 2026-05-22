@@ -35,7 +35,7 @@ export function WorkspacePage() {
     clearDuplicates,
   } = useDuplicates({ currentIndexPath: workspaceIndexPath, setRuntimeMessage });
 
-  const { staged, stagedBytes, stage, unstage, trashStaged, clearQueue } =
+  const { staged, stagedBytes, stage, unstage, trashStaged, clearQueue, trashProgress, dismissProgress } =
     useAuditQueue(setRuntimeMessage);
 
   useEffect(() => {
@@ -159,6 +159,8 @@ export function WorkspacePage() {
           stage={stage}
           unstage={unstage}
           trashStaged={handleTrashStaged}
+          trashProgress={trashProgress}
+          dismissProgress={dismissProgress}
           nativeRuntime={nativeRuntime}
         />
       </section>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { formatBytes } from "../domain";
 import { SmartMovesPanel } from "./SmartMovesPanel";
+import type { TrashProgress } from "../hooks/useAuditQueue";
 import type { NativeDuplicateFile } from "../nativeClient";
 
 type Tab = "queue" | "moves";
@@ -12,10 +13,19 @@ interface AuditQueueProps {
   stage: (file: NativeDuplicateFile) => void;
   unstage: (path: string) => void;
   trashStaged: () => Promise<void>;
+  trashProgress: TrashProgress;
+  dismissProgress: () => void;
   duplicateFiles: NativeDuplicateFile[];
 }
 
-export function AuditQueue({ staged, stagedBytes, stage, unstage, trashStaged, duplicateFiles }: AuditQueueProps) {
+export function AuditQueue({
+  staged,
+  stagedBytes,
+  stage,
+  unstage,
+  trashStaged,
+  duplicateFiles,
+}: AuditQueueProps) {
   const [activeTab, setActiveTab] = useState<Tab>("queue");
   const [showConfidence, setShowConfidence] = useState(false);
   const entries = Array.from(staged.values());

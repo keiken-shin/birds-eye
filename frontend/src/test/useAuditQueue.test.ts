@@ -36,14 +36,14 @@ describe("useAuditQueue", () => {
     expect(result.current.stagedBytes).toBe(200);
   });
 
-  it("trashStaged calls trashFiles with all staged paths", async () => {
+  it("trashStaged trashes staged paths sequentially", async () => {
     mockTrashFiles.mockResolvedValue({ failed: [] });
     const { result } = renderHook(() => useAuditQueue(vi.fn()));
     act(() => { result.current.stage(fileA); result.current.stage(fileB); });
     await act(async () => result.current.trashStaged());
-    expect(mockTrashFiles).toHaveBeenCalledWith(
-      expect.arrayContaining(["/a/file.zip", "/b/file.zip"])
-    );
+    expect(mockTrashFiles).toHaveBeenCalledTimes(2);
+    expect(mockTrashFiles).toHaveBeenNthCalledWith(1, ["/a/file.zip"]);
+    expect(mockTrashFiles).toHaveBeenNthCalledWith(2, ["/b/file.zip"]);
   });
 
   it("trashStaged clears successfully trashed paths from staged", async () => {
@@ -55,7 +55,9 @@ describe("useAuditQueue", () => {
   });
 
   it("trashStaged keeps failed paths in staged and reports error", async () => {
-    mockTrashFiles.mockResolvedValue({ failed: [{ path: "/a/file.zip", reason: "Permission denied" }] });
+    mockTrashFiles
+      .mockResolvedValueOnce({ failed: [{ path: "/a/file.zip", reason: "Permission denied" }] })
+      .mockResolvedValueOnce({ failed: [] });
     const setRuntimeMessage = vi.fn();
     const { result } = renderHook(() => useAuditQueue(setRuntimeMessage));
     act(() => { result.current.stage(fileA); result.current.stage(fileB); });
@@ -63,6 +65,35 @@ describe("useAuditQueue", () => {
     expect(result.current.staged.has("/a/file.zip")).toBe(true);
     expect(result.current.staged.has("/b/file.zip")).toBe(false);
     expect(setRuntimeMessage).toHaveBeenCalledWith(expect.stringContaining("Permission denied"));
+  });
+
+  it("trashStaged records progress for completed files", async () => {
+    mockTrashFiles.mockResolvedValue({ failed: [] });
+    const { result } = renderHook(() => useAuditQueue(vi.fn()));
+    act(() => { result.current.stage(fileA); result.current.stage(fileB); });
+    await act(async () => result.current.trashStaged());
+    expect(result.current.trashProgress).toMatchObject({
+      status: "done",
+      total: 2,
+      completed: 2,
+      bytesCleared: 200,
+    });
+    expect(result.current.trashProgress.log).toEqual(["/b/file.zip", "/a/file.zip"]);
+  });
+
+  it("dismissProgress resets trash progress to idle", async () => {
+    mockTrashFiles.mockResolvedValue({ failed: [] });
+    const { result } = renderHook(() => useAuditQueue(vi.fn()));
+    act(() => result.current.stage(fileA));
+    await act(async () => result.current.trashStaged());
+    act(() => result.current.dismissProgress());
+    expect(result.current.trashProgress).toEqual({
+      status: "idle",
+      total: 0,
+      completed: 0,
+      bytesCleared: 0,
+      log: [],
+    });
   });
 
   it("trashStaged does not call trashFiles when staged is empty", async () => {
