@@ -28,7 +28,7 @@ export function useDuplicates({
     setComparisonCursor(0);
     if (!candidate.id || !currentIndexPath) return;
     try {
-      const files = await queryNativeDuplicateFiles(currentIndexPath, candidate.id, 24);
+      const files = await queryNativeDuplicateFiles(currentIndexPath, candidate.id, 500);
       setDuplicateFiles(files);
     } catch (error) {
       setRuntimeMessage(error instanceof Error ? error.message : "Duplicate details failed");

@@ -44,6 +44,13 @@ export function WorkspacePage() {
     }
   }, [workspaceIndexPath, clearDuplicates, clearQueue]);
 
+  useEffect(() => {
+    if (selectedDuplicateGroup !== null && duplicateFiles.length > 0 && duplicateFiles.length < 2) {
+      clearDuplicates();
+      clearQueue();
+    }
+  }, [duplicateFiles, selectedDuplicateGroup, clearDuplicates, clearQueue]);
+
   const handleClearSelection = useCallback(() => {
     clearDuplicates();
     clearQueue();
