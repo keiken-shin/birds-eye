@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -29,7 +29,7 @@ interface MediaPreviewProps {
 
 export function MediaPreview({ path }: MediaPreviewProps) {
   const type = mediaTypeFromPath(path);
-  const src = convertFileSrc(path);
+  const src = mediaSrcFromPath(path);
 
   if (type === "image") return <ImagePreview src={src} />;
   if (type === "video") return <VideoPreview src={src} />;
@@ -39,8 +39,18 @@ export function MediaPreview({ path }: MediaPreviewProps) {
   return <UnsupportedPreview ext={path.split(".").pop() ?? "?"} />;
 }
 
+export function mediaSrcFromPath(path: string): string {
+  if (/^(https?:|blob:|data:|file:)/i.test(path)) return path;
+  return isTauri() ? convertFileSrc(path) : path;
+}
+
 function ImagePreview({ src }: { src: string }) {
   const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setError(false);
+  }, [src]);
+
   if (error) return <PreviewUnavailable />;
   return (
     <div className="flex h-[160px] w-full items-center justify-center overflow-hidden bg-white/[0.03]">
@@ -56,6 +66,11 @@ function ImagePreview({ src }: { src: string }) {
 
 function VideoPreview({ src }: { src: string }) {
   const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setError(false);
+  }, [src]);
+
   if (error) return <PreviewUnavailable />;
   return (
     <div className="h-[160px] w-full bg-black">
@@ -72,6 +87,11 @@ function VideoPreview({ src }: { src: string }) {
 
 function AudioPreview({ src }: { src: string }) {
   const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setError(false);
+  }, [src]);
+
   if (error) return <PreviewUnavailable />;
   return (
     <div className="flex h-[160px] w-full flex-col items-center justify-center gap-3 bg-white/[0.03]">
@@ -103,7 +123,13 @@ function ThreeDPreview({ src, loaderType }: { src: string; loaderType: "gltf" | 
     const width = container.clientWidth || 300;
     const height = 160;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    } catch {
+      setError(true);
+      return;
+    }
     renderer.setSize(width, height);
     renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(renderer.domElement);
