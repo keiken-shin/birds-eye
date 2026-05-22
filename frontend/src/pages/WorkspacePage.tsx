@@ -23,6 +23,7 @@ export function WorkspacePage() {
     setFocusedFolder,
     nativeRuntime,
     setRuntimeMessage,
+    refreshWorkspaceIndex,
   } = useScanContext();
 
   const {
@@ -62,7 +63,8 @@ export function WorkspacePage() {
       const candidate = workspaceScan.duplicateCandidates.find((c) => c.id === selectedDuplicateGroup);
       if (candidate) await selectDuplicateCandidate(candidate);
     }
-  }, [trashStaged, selectedDuplicateGroup, workspaceScan, selectDuplicateCandidate]);
+    await refreshWorkspaceIndex();
+  }, [trashStaged, selectedDuplicateGroup, workspaceScan, selectDuplicateCandidate, refreshWorkspaceIndex]);
 
   const workspaceSortedFolders = useMemo(() => {
     if (!workspaceScan) return [];
