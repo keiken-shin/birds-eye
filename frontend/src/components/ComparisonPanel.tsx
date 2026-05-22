@@ -10,9 +10,10 @@ interface ComparisonPanelProps {
   staged: Map<string, NativeDuplicateFile>;
   stage: (file: NativeDuplicateFile) => void;
   unstage: (path: string) => void;
+  nativeRuntime: boolean;
 }
 
-export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unstage }: ComparisonPanelProps) {
+export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unstage, nativeRuntime }: ComparisonPanelProps) {
   const left = files[cursor];
   const right = files[cursor + 1];
 
@@ -58,6 +59,7 @@ export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unsta
           isSuggested={left.path === suggestedPath}
           onKeep={handleKeepLeft}
           onStage={() => stage(left)}
+          nativeRuntime={nativeRuntime}
         />
         <CopyCard
           file={right}
@@ -66,6 +68,7 @@ export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unsta
           isSuggested={right.path === suggestedPath}
           onKeep={handleKeepRight}
           onStage={() => stage(right)}
+          nativeRuntime={nativeRuntime}
         />
       </div>
 
@@ -103,9 +106,10 @@ interface CopyCardProps {
   isSuggested: boolean;
   onKeep: () => void;
   onStage: () => void;
+  nativeRuntime: boolean;
 }
 
-function CopyCard({ file, label, isKept, isSuggested, onKeep, onStage }: CopyCardProps) {
+function CopyCard({ file, label, isKept, isSuggested, onKeep, onStage, nativeRuntime }: CopyCardProps) {
   const folder = file.path.replace(/[\\/][^\\/]+$/, "");
 
   return (

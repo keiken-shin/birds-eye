@@ -153,6 +153,7 @@ export function WorkspacePage() {
           stage={stage}
           unstage={unstage}
           trashStaged={handleTrashStaged}
+          nativeRuntime={nativeRuntime}
         />
       </section>
     </>
