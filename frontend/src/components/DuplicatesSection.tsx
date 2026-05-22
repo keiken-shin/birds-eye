@@ -21,6 +21,7 @@ interface DuplicatesSectionProps {
   stage: (file: NativeDuplicateFile) => void;
   unstage: (path: string) => void;
   trashStaged: () => Promise<void>;
+  nativeRuntime: boolean;
 }
 
 export function DuplicatesSection({
@@ -36,6 +37,7 @@ export function DuplicatesSection({
   stage,
   unstage,
   trashStaged,
+  nativeRuntime,
 }: DuplicatesSectionProps) {
   if (selectedDuplicateGroup !== null) {
     return (
@@ -52,6 +54,7 @@ export function DuplicatesSection({
         unstage={unstage}
         trashStaged={trashStaged}
         onCollapse={onClearSelection}
+        nativeRuntime={nativeRuntime}
       />
     );
   }

@@ -19,6 +19,7 @@ interface DuplicateWorkbenchProps {
   unstage: (path: string) => void;
   trashStaged: () => Promise<void>;
   onCollapse: () => void;
+  nativeRuntime: boolean;
 }
 
 export function DuplicateWorkbench({
@@ -34,6 +35,7 @@ export function DuplicateWorkbench({
   unstage,
   trashStaged,
   onCollapse,
+  nativeRuntime,
 }: DuplicateWorkbenchProps) {
   return (
     <section className={workbenchClass}>
@@ -71,6 +73,7 @@ export function DuplicateWorkbench({
         staged={staged}
         stage={stage}
         unstage={unstage}
+        nativeRuntime={nativeRuntime}
       />
 
       {/* Right: audit queue */}
