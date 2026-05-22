@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { formatBytes } from "../domain";
 import { SmartMovesPanel } from "./SmartMovesPanel";
-import type { TrashProgress } from "../hooks/useAuditQueue";
+import { TrashProgress } from "./TrashProgress";
+import type { TrashProgress as TrashProgressState } from "../hooks/useAuditQueue";
 import type { NativeDuplicateFile } from "../nativeClient";
 
 type Tab = "queue" | "moves";
@@ -13,7 +14,7 @@ interface AuditQueueProps {
   stage: (file: NativeDuplicateFile) => void;
   unstage: (path: string) => void;
   trashStaged: () => Promise<void>;
-  trashProgress: TrashProgress;
+  trashProgress: TrashProgressState;
   dismissProgress: () => void;
   duplicateFiles: NativeDuplicateFile[];
 }
@@ -24,11 +25,21 @@ export function AuditQueue({
   stage,
   unstage,
   trashStaged,
+  trashProgress,
+  dismissProgress,
   duplicateFiles,
 }: AuditQueueProps) {
   const [activeTab, setActiveTab] = useState<Tab>("queue");
   const [showConfidence, setShowConfidence] = useState(false);
   const entries = Array.from(staged.values());
+
+  if (trashProgress.status !== "idle") {
+    return (
+      <div className="flex w-[220px] shrink-0 flex-col border-l border-primary/15">
+        <TrashProgress progress={trashProgress} onDismiss={dismissProgress} />
+      </div>
+    );
+  }
 
   return (
     <div className="flex w-[220px] shrink-0 flex-col border-l border-primary/15">
