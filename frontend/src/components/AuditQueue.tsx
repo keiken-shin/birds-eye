@@ -108,7 +108,7 @@ export function AuditQueue({
                       <button
                         type="button"
                         onClick={() => unstage(file.path)}
-                        className="font-mono flex items-center jusitfy-center gap-1 !text-xs uppercase text-muted hover:text-primary"
+                        className="font-mono flex items-center justify-center gap-1 !text-xs uppercase text-muted hover:text-primary"
                       >
                         <span>unstage</span>
                         <MinusIcon size={14} />
