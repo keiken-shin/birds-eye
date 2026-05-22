@@ -1,7 +1,10 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useState } from "react";
+import { ChevronLeft, ChevronRight, FolderOpen } from "lucide-react";
 import { formatBytes } from "../domain";
 import { formatDate } from "../utils/displayUtils";
 import type { NativeDuplicateFile } from "../nativeClient";
+import { revealInExplorer } from "../nativeClient";
+import { MediaPreview } from "./MediaPreview";
 
 interface ComparisonPanelProps {
   files: NativeDuplicateFile[];
@@ -120,6 +123,10 @@ function CopyCard({ file, label, isKept, isSuggested, onKeep, onStage, nativeRun
         </span>
         <span className={cardBadgeClass(isKept)}>{isKept ? "keeping" : "staged"}</span>
       </div>
+
+      {/* Media preview region */}
+      <MediaPreview path={file.path} />
+
       <div className="flex flex-col gap-3 p-3">
         <Field label="path" value={file.path} mono />
         <div className="grid grid-cols-2 gap-3">
@@ -127,14 +134,19 @@ function CopyCard({ file, label, isKept, isSuggested, onKeep, onStage, nativeRun
           <Field label="modified" value={file.modified_at ? formatDate(file.modified_at) : "—"} />
         </div>
         <Field label="folder" value={folder} mono />
-        <Field label="hash confidence" value={confidenceLabel(file.hash_state)} />
-        <button
-          type="button"
-          onClick={isKept ? onStage : onKeep}
-          className={cardToggleClass(isKept)}
-        >
-          {isKept ? "Stage for trash" : "Keep this instead"}
-        </button>
+        <ConfidenceField hashState={file.hash_state} />
+        <div className="mt-1 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={isKept ? onStage : onKeep}
+            className={cardToggleClass(isKept)}
+          >
+            {isKept ? "Stage for trash" : "Keep this instead"}
+          </button>
+          {nativeRuntime && (
+            <RevealButton path={file.path} />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -145,6 +157,53 @@ function Field({ label, value, mono }: { label: string; value: string; mono?: bo
     <div className="grid gap-0.5">
       <span className="font-mono text-10 uppercase text-muted">{label}</span>
       <span className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-13 text-primary ${mono ? "font-mono" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+function ConfidenceField({ hashState }: { hashState: number }) {
+  const [showTip, setShowTip] = useState(false);
+  return (
+    <div className="grid gap-0.5">
+      <span className="font-mono text-10 uppercase text-muted">hash confidence</span>
+      <div className="relative flex items-center gap-1">
+        <span className="text-13 text-primary">{confidenceLabel(hashState)}</span>
+        <span
+          className="cursor-help select-none font-mono text-10 text-muted/50 hover:text-muted"
+          onMouseEnter={() => setShowTip(true)}
+          onMouseLeave={() => setShowTip(false)}
+        >
+          ⓘ
+        </span>
+        {showTip && (
+          <div className="absolute bottom-full left-0 z-50 mb-1.5 w-60 border border-white/15 bg-[#0d0d0d] p-2 font-mono text-10 leading-relaxed text-muted shadow-overlay">
+            {confidenceTip(hashState)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RevealButton({ path }: { path: string }) {
+  const [showTip, setShowTip] = useState(false);
+  return (
+    <div className="relative ml-auto shrink-0">
+      <button
+        type="button"
+        aria-label="Reveal in Explorer"
+        onClick={() => void revealInExplorer(path).catch(() => {})}
+        onMouseEnter={() => setShowTip(true)}
+        onMouseLeave={() => setShowTip(false)}
+        className="grid h-7 w-7 place-items-center border border-white/15 text-muted hover:border-white/30 hover:text-primary"
+      >
+        <FolderOpen size={12} />
+      </button>
+      {showTip && (
+        <div className="pointer-events-none absolute bottom-full right-0 z-50 mb-1 whitespace-nowrap border border-white/15 bg-[#0d0d0d] px-1.5 py-0.5 font-mono text-10 text-muted">
+          Reveal in Explorer
+        </div>
+      )}
     </div>
   );
 }
@@ -167,6 +226,14 @@ function confidenceLabel(hashState: number): string {
   if (hashState >= 4) return "Full-file XXH3 ✓";
   if (hashState >= 2) return "Sample hash";
   return "Size match only";
+}
+
+function confidenceTip(hashState: number): string {
+  if (hashState >= 4)
+    return "The entire file was hashed end-to-end. Content is confirmed identical.";
+  if (hashState >= 2)
+    return "A chunk of each file was hashed and matched. Very likely identical, but not fully verified.";
+  return "Files match by size alone. There's a small chance they differ in content — verify before deleting.";
 }
 
 function confidenceBadgeClass(hashState: number): string {
@@ -200,7 +267,7 @@ function cardBadgeClass(isKept: boolean): string {
 }
 
 function cardToggleClass(isKept: boolean): string {
-  const base = "mt-1 w-full border py-1.5 font-mono text-10 uppercase transition-colors";
+  const base = "flex-1 border py-1.5 font-mono text-10 uppercase transition-colors";
   return isKept
     ? `${base} border-white/15 text-muted hover:border-white/30 hover:text-primary`
     : `${base} border-primary/30 text-primary hover:bg-primary/10`;
