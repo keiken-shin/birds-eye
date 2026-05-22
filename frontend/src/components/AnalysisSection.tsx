@@ -1,5 +1,10 @@
 import { ChevronLeft } from "lucide-react";
 import { TreemapCanvas } from "./TreemapCanvas";
+import {
+  ResizablePanel,
+  ResizablePanelGroup,
+  ResizablePanelHandle,
+} from "./ResizablePanel";
 import { makeDuplicateHint, makeCategoryHint } from "../utils/displayUtils";
 import { parentPath } from "../utils/pathUtils";
 import { lastSegment } from "../domain";
@@ -9,21 +14,39 @@ interface AnalysisSectionProps {
   filteredFolders: Array<FolderStats & { displayBytes: number }>;
   focusedFolder: string | null;
   setFocusedFolder: (folder: string | null) => void;
+  onOpenDuplicateCandidate: (candidate: ScanState["duplicateCandidates"][number]) => void;
   scan: ScanState;
 }
 
-function Recommendation({ text }: { text: string }) {
+function Recommendation({ text, onClick }: { text: string; onClick?: () => void }) {
   return (
-    <button className="min-h-[50px] border-0 border-t border-primary/15 bg-transparent p-0 text-left font-mono text-xs uppercase text-primary hover:bg-white/[0.055]" type="button">
+    <button
+      className={`min-h-[50px] border-0 border-t border-primary/15 bg-transparent p-0 text-left font-mono text-xs uppercase ${onClick ? "text-primary hover:bg-white/[0.055]" : "cursor-default text-muted"}`}
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+    >
       {text}
     </button>
   );
 }
 
-export function AnalysisSection({ filteredFolders, focusedFolder, setFocusedFolder, scan }: AnalysisSectionProps) {
+export function AnalysisSection({
+  filteredFolders,
+  focusedFolder,
+  setFocusedFolder,
+  onOpenDuplicateCandidate,
+  scan,
+}: AnalysisSectionProps) {
+  const firstDuplicateCandidate = scan.duplicateCandidates.find(
+    (candidate) => candidate.id !== undefined && candidate.files >= 2
+  );
+
   return (
-    <section className="grid grid-cols-[minmax(0,1fr)_340px] gap-4.5 max-[1080px]:grid-cols-1" id="treemap">
-      <div className={panelClass}>
+    <section id="treemap">
+      <ResizablePanelGroup id="analysis-grid" className="gap-4.5 max-[1080px]:flex-col">
+      <ResizablePanel id="space-distribution" minSize={520}>
+        <div className={panelClass}>
         <div className={panelHeaderClass}>
           <h2 className={panelTitleClass}>Space Distribution</h2>
           <span className={panelMetaClass}>
@@ -53,26 +76,35 @@ export function AnalysisSection({ filteredFolders, focusedFolder, setFocusedFold
         ) : (
           <TreemapCanvas folders={filteredFolders} onSelect={(folder) => setFocusedFolder(folder.path)} />
         )}
-      </div>
+        </div>
+      </ResizablePanel>
 
-      <aside className={`${panelClass} grid content-start gap-2.5`}>
+      <ResizablePanelHandle leftPanelId="space-distribution" className="max-[1080px]:hidden" />
+
+      <ResizablePanel id="cleanup-intelligence" defaultSize={340} minSize={260} className="h-full">
+        <aside className={`${panelClass} h-full grid content-start gap-2.5`}>
         <div className={`${panelHeaderClass} mb-2`}>
           <h2 className={panelTitleClass}>Cleanup Intelligence</h2>
           <span className={panelMetaClass}>Read-only</span>
         </div>
-        <Recommendation text={makeDuplicateHint(scan)} />
+        <Recommendation
+          text={makeDuplicateHint(scan)}
+          onClick={firstDuplicateCandidate ? () => onOpenDuplicateCandidate(firstDuplicateCandidate) : undefined}
+        />
         <Recommendation text={makeCategoryHint(scan, "installers", "installer cache")} />
         <Recommendation text={makeCategoryHint(scan, "archives", "archive payloads")} />
         <Recommendation text={makeCategoryHint(scan, "videos", "video library")} />
         <button className="min-h-[50px] cursor-not-allowed border-0 border-t border-primary/15 bg-transparent p-0 text-left font-mono text-xs uppercase text-muted opacity-70" type="button" disabled>
           Suggested moves engine - coming soon
         </button>
-      </aside>
+        </aside>
+      </ResizablePanel>
+      </ResizablePanelGroup>
     </section>
   );
 }
 
-const panelClass = "relative border border-white/15 bg-white/[0.045] p-5 shadow-overlay before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-4.5 before:w-4.5 before:border-l-2 before:border-t-2 before:border-primary/55";
+const panelClass = "relative min-w-0 border border-white/15 bg-white/[0.045] p-5 shadow-overlay before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-4.5 before:w-4.5 before:border-l-2 before:border-t-2 before:border-primary/55";
 const panelHeaderClass = "mb-4 flex items-baseline justify-between gap-4 uppercase";
 const panelTitleClass = "text-17 font-black uppercase text-primary";
 const panelMetaClass = "inline-flex items-center gap-1.5 font-mono text-11 uppercase text-muted";

@@ -48,7 +48,7 @@ export function LibraryPage() {
   }
 
   return (
-    <section className="relative z-[1] mx-auto max-w-[1440px] min-w-0 px-[42px] pb-[118px] pt-10 max-sm:px-4 max-sm:pb-28">
+    <section className="relative z-[1] mx-auto min-w-0 px-[42px] pb-[118px] pt-10 max-sm:px-4 max-sm:pb-28">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className={`${mono} mb-1 text-accent`}>Saved indexes</p>

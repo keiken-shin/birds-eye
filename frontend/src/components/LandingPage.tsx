@@ -49,7 +49,7 @@ export function LandingPage({
 
   return (
     <section
-      className="relative z-[1] mx-auto grid min-h-screen max-w-[1480px] grid-rows-[auto_minmax(176px,224px)_auto] gap-7 px-[42px] pb-32 pt-7 max-[1080px]:grid-rows-[auto_auto_auto] max-sm:min-h-svh max-sm:gap-5 max-sm:px-4 max-sm:pb-28 max-sm:pt-6"
+      className="relative z-[1] mx-auto grid min-h-screen grid-rows-[auto_minmax(176px,224px)_auto] gap-7 px-[42px] pb-32 pt-7 max-[1080px]:grid-rows-[auto_auto_auto] max-sm:min-h-svh max-sm:gap-5 max-sm:px-4 max-sm:pb-28 max-sm:pt-6"
       id="dashboard"
       aria-label="Birds Eye launch interface"
     >
