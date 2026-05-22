@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import type React from "react";
-import { ChevronLeft, ChevronRight, FolderOpen } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, FolderOpen, Trash2 } from "lucide-react";
 import { formatBytes } from "../domain";
 import { formatDate } from "../utils/displayUtils";
 import type { NativeDuplicateFile } from "../nativeClient";
@@ -112,29 +112,33 @@ export function ComparisonPanel({ files, cursor, setCursor, staged, stage, unsta
         />
       </div>
 
-      {files.length > 2 && (
         <div className="flex items-center justify-between border-t border-primary/10 pt-3 font-mono text-11 text-muted">
-          <span>{files.length} copies · viewing {cursor + 1}–{Math.min(cursor + 2, files.length)} of {files.length}</span>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={cursor === 0}
-              onClick={() => setCursor(cursor - 1)}
-              className="grid h-6 w-6 place-items-center border border-white/15 disabled:opacity-30"
-            >
-              <ChevronLeft size={12} />
-            </button>
-            <button
-              type="button"
-              disabled={cursor >= files.length - 2}
-              onClick={() => setCursor(cursor + 1)}
-              className="grid h-6 w-6 place-items-center border border-white/15 disabled:opacity-30"
-            >
-              <ChevronRight size={12} />
-            </button>
-          </div>
+          {files.length <= 2 ?
+            <span>{files.length} copies · viewing 1–1 of 1</span>
+            : (
+            <>
+              <span>{files.length} copies · viewing {cursor + 1}–{Math.min(cursor + 2, files.length)} of {files.length}</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={cursor === 0}
+                  onClick={() => setCursor(cursor - 1)}
+                  className="grid h-6 w-6 place-items-center border border-white/15 disabled:opacity-30"
+                >
+                  <ChevronLeft size={12} />
+                </button>
+                <button
+                  type="button"
+                  disabled={cursor >= files.length - 2}
+                  onClick={() => setCursor(cursor + 1)}
+                  className="grid h-6 w-6 place-items-center border border-white/15 disabled:opacity-30"
+                >
+                  <ChevronRight size={12} />
+                </button>
+              </div>
+            </>
+          )}
         </div>
-      )}
     </div>
   );
 }
@@ -196,9 +200,11 @@ function CopyCard({ file, label, isKept, isSuggested, diffFields, onKeep, onStag
           <button
             type="button"
             onClick={isKept ? onStage : onKeep}
+            aria-label={isKept ? "Stage for trash" : "Keep this instead"}
+            title={isKept ? "Stage for trash" : "Keep this instead"}
             className={cardToggleClass(isKept)}
           >
-            {isKept ? "Stage for trash" : "Keep this instead"}
+            {isKept ? <Trash2 size={13} /> : <Check size={13} />}
           </button>
           {nativeRuntime && (
             <RevealButton path={file.path} />
@@ -323,7 +329,7 @@ function cardBadgeClass(isKept: boolean): string {
 }
 
 function cardToggleClass(isKept: boolean): string {
-  const base = "flex-1 border py-1.5 font-mono text-10 uppercase transition-colors";
+  const base = "grid h-7 w-7 shrink-0 place-items-center border transition-colors";
   return isKept
     ? `${base} border-white/15 text-muted hover:border-white/30 hover:text-primary`
     : `${base} border-primary/30 text-primary hover:bg-primary/10`;

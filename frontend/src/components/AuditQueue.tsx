@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
+import { ChevronRight, ClipboardList, Sparkles, Trash2, CircleHelp, MinusIcon } from "lucide-react";
 import { formatBytes } from "../domain";
 import { SmartMovesPanel } from "./SmartMovesPanel";
 import { TrashProgress } from "./TrashProgress";
@@ -35,14 +36,14 @@ export function AuditQueue({
 
   if (trashProgress.status !== "idle") {
     return (
-      <div className="flex w-[220px] shrink-0 flex-col border-l border-primary/15">
+      <div className="flex h-full w-full flex-col border-l border-primary/15">
         <TrashProgress progress={trashProgress} onDismiss={dismissProgress} />
       </div>
     );
   }
 
   return (
-    <div className="flex w-[220px] shrink-0 flex-col border-l border-primary/15">
+    <div className="flex h-full w-full flex-col border-l border-primary/15">
       {/* Tab bar */}
       <div className="flex border-b border-primary/15">
         <TabButton label="Audit Queue" active={activeTab === "queue"} onClick={() => setActiveTab("queue")} />
@@ -58,9 +59,10 @@ export function AuditQueue({
               <button
                 type="button"
                 onClick={() => setShowConfidence((v) => !v)}
-                className="flex w-full items-center gap-1 font-mono text-10 uppercase text-muted hover:text-primary"
+                className="flex w-full items-center gap-1 cursor-pointer !text-xs !font-bold uppercase text-muted hover:text-primary"
               >
-                <span>{showConfidence ? "▾" : "▸"}</span>
+                <ChevronRight size={13} className={showConfidence ? "rotate-90 transition-transform" : "transition-transform"} />
+                <CircleHelp size={13} />
                 <span>Confidence explained</span>
               </button>
               {showConfidence && (
@@ -85,7 +87,7 @@ export function AuditQueue({
               )}
             </div>
 
-            <h3 className="font-mono text-11 font-black uppercase text-muted">Staged for Trash</h3>
+            <h3 className="text-13 font-black uppercase text-primary">Staged for Trash</h3>
 
             {entries.length === 0 ? (
               <p className="text-12 text-muted/50">
@@ -106,9 +108,10 @@ export function AuditQueue({
                       <button
                         type="button"
                         onClick={() => unstage(file.path)}
-                        className="font-mono text-10 uppercase text-muted hover:text-primary"
+                        className="font-mono flex items-center jusitfy-center gap-1 !text-xs uppercase text-muted hover:text-primary"
                       >
-                        unstage ×
+                        <span>unstage</span>
+                        <MinusIcon size={14} />
                       </button>
                     </div>
                   </div>
@@ -126,7 +129,7 @@ export function AuditQueue({
               type="button"
               disabled={entries.length === 0}
               onClick={() => void trashStaged()}
-              className="flex w-full items-center justify-center gap-2 border border-white/20 py-2.5 font-mono text-11 uppercase text-primary transition-colors hover:border-primary/50 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-30"
+              className="flex w-full items-center justify-center gap-2 border border-white/20 py-2.5 font-mono cursor-pointer !text-xs uppercase text-primary transition-colors hover:border-primary/50 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-30"
             >
               <Trash2 size={12} />
               {entries.length > 0
@@ -145,20 +148,31 @@ export function AuditQueue({
   );
 }
 
-function TabButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+function TabButton({
+  icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon?: ReactNode;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={tabButtonClass(active)}
     >
+      {icon && icon}
       {label}
     </button>
   );
 }
 
 function tabButtonClass(active: boolean): string {
-  const base = "flex-1 border-r border-primary/15 py-2 font-mono text-10 uppercase last:border-r-0";
+  const base = "cursor-pointer inline-flex flex-1 items-center justify-center gap-2 border-r border-primary/15 py-3 px-2 !text-xs !font-black uppercase last:border-r-0";
   return active
     ? `${base} bg-primary/10 text-primary`
     : `${base} text-muted hover:text-primary`;

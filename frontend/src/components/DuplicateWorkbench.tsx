@@ -1,8 +1,10 @@
 import React, { useRef, useCallback } from "react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { formatBytes, formatCount } from "../domain";
 import { ComparisonPanel } from "./ComparisonPanel";
 import type { ComparisonPanelProps } from "./ComparisonPanel";
 import { AuditQueue } from "./AuditQueue";
+import { VirtualRows } from "./VirtualRows";
 import type { ScanState } from "../domain";
 import type { TrashProgress } from "../hooks/useAuditQueue";
 import type { NativeDuplicateFile } from "../nativeClient";
@@ -29,7 +31,6 @@ interface DuplicateWorkbenchProps {
   trashStaged: () => Promise<void>;
   trashProgress: TrashProgress;
   dismissProgress: () => void;
-  onCollapse: () => void;
   nativeRuntime: boolean;
 }
 
@@ -37,22 +38,37 @@ interface GroupsPanelProps {
   duplicateCandidates: DuplicateCandidate[];
   selectedDuplicateGroup: number | null;
   selectDuplicateCandidate: (c: DuplicateCandidate) => void;
-  onCollapse: () => void;
 }
 
 function GroupsPanel({
   duplicateCandidates,
   selectedDuplicateGroup,
   selectDuplicateCandidate,
-  onCollapse,
 }: GroupsPanelProps) {
+  const { collapse } = useCollapsedPanel("groups");
   return (
     <div className="flex h-full flex-col gap-1 border-r border-primary/15 p-4">
-      <h3 className="mb-2 font-mono text-11 font-black uppercase text-muted">Duplicate Groups</h3>
-      <div className="flex flex-1 flex-col gap-1 overflow-y-auto">
-        {duplicateCandidates.map((candidate, idx) => (
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h3 className="text-13 font-black uppercase text-primary">Duplicate Groups</h3>
+        <button
+          type="button"
+          onClick={collapse}
+          aria-label="Collapse duplicate groups"
+          title="Collapse duplicate groups"
+          className="cursor-pointer grid h-7 w-7 shrink-0 place-items-center text-muted hover:border-white/30 hover:text-primary"
+        >
+          <PanelLeftClose size={16} />
+        </button>
+      </div>
+      <div className="flex-1 min-h-0">
+        <VirtualRows
+          items={duplicateCandidates}
+          estimateRowHeight={70}
+          maxHeight={999}
+          className="h-full max-h-none"
+          getKey={(candidate, idx) => candidate.id ?? `size-${candidate.size}-${idx}`}
+          renderItem={(candidate, idx) => (
           <button
-            key={candidate.id ?? `size-${candidate.size}-${idx}`}
             type="button"
             onClick={() => void selectDuplicateCandidate(candidate)}
             className={groupRowClass(selectedDuplicateGroup === candidate.id)}
@@ -63,15 +79,9 @@ function GroupsPanel({
             </span>
             <span className="font-mono text-10 text-muted/60">{candidate.samples[0] ?? ""}</span>
           </button>
-        ))}
+          )}
+        />
       </div>
-      <button
-        type="button"
-        onClick={onCollapse}
-        className="mt-auto border-t border-primary/10 pt-3 text-left font-mono text-11 uppercase text-muted hover:text-primary"
-      >
-        ← collapse workbench
-      </button>
     </div>
   );
 }
@@ -83,14 +93,15 @@ function ComparisonPanelWithExpanders(props: ComparisonPanelProps) {
   return (
     <div className="relative flex h-full flex-1 flex-col">
       {(groupsCollapsed || auditCollapsed) && (
-        <div className="flex items-center gap-2 border-b border-primary/10 px-3 py-1.5">
+        <div className="flex items-center gap-2 border-b border-primary/10 px-3 py-2.5">
           {groupsCollapsed && (
             <button
               type="button"
               onClick={expandGroups}
-              className="font-mono text-10 uppercase text-muted hover:text-primary"
+              className="cursor-pointer font-mono flex items-center justify-center gap-1 uppercase text-muted hover:text-primary"
             >
-              ‹ Groups
+              <PanelLeftOpen size={16} /> 
+              <span className="font-sm font-black">Groups</span>
             </button>
           )}
           {auditCollapsed && (
@@ -123,7 +134,6 @@ export function DuplicateWorkbench({
   trashStaged,
   trashProgress,
   dismissProgress,
-  onCollapse,
   nativeRuntime,
 }: DuplicateWorkbenchProps) {
   const videoRefs = useRef<HTMLVideoElement[]>([]);
@@ -158,14 +168,13 @@ export function DuplicateWorkbench({
   );
 
   return (
-    <section className={workbenchClass} tabIndex={0} onKeyDown={handleKeyDown}>
+    <section id="duplicates" className={workbenchClass} tabIndex={0} onKeyDown={handleKeyDown}>
       <ResizablePanelGroup id="workbench" className="flex-1">
         <ResizablePanel id="groups" defaultSize={200} minSize={140} collapsible>
           <GroupsPanel
             duplicateCandidates={duplicateCandidates}
             selectedDuplicateGroup={selectedDuplicateGroup}
             selectDuplicateCandidate={selectDuplicateCandidate}
-            onCollapse={onCollapse}
           />
         </ResizablePanel>
 
@@ -184,7 +193,7 @@ export function DuplicateWorkbench({
           />
         </ResizablePanel>
 
-        <ResizablePanelHandle leftPanelId="comparison" />
+        <ResizablePanelHandle rightPanelId="audit" />
 
         <ResizablePanel id="audit" defaultSize={220} minSize={160} collapsible>
           <AuditQueue
@@ -204,9 +213,9 @@ export function DuplicateWorkbench({
 }
 
 function groupRowClass(active: boolean): string {
-  const base = "flex w-full flex-col items-start gap-0.5 border-b border-primary/10 px-2 py-2.5 text-left";
+  const base = "cursor-pointer flex w-full flex-col items-start gap-0.5 border-b border-primary/10 px-2 py-2.5 text-left";
   return active ? `${base} bg-primary/10` : `${base} hover:bg-primary/[0.055]`;
 }
 
 const workbenchClass =
-  "relative mt-5 flex min-h-[480px] border border-white/15 bg-white/[0.045] shadow-overlay before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-4.5 before:w-4.5 before:border-l-2 before:border-t-2 before:border-primary/55";
+  "relative mt-5 flex h-[min(72vh,760px)] min-h-[480px] border border-white/15 bg-white/[0.045] shadow-overlay before:pointer-events-none before:absolute before:-left-px before:-top-px before:h-4.5 before:w-4.5 before:border-l-2 before:border-t-2 before:border-primary/55";

@@ -20,7 +20,8 @@ interface GroupCtx {
   sizes: Map<string, number>;
   collapsed: Set<string>;
   registerPanel: (entry: PanelEntry) => void;
-  startResize: (leftPanelId: string, startClientX: number) => void;
+  startResize: (panelId: string, startClientX: number, direction?: 1 | -1) => void;
+  collapse: (panelId: string) => void;
   expand: (panelId: string) => void;
 }
 
@@ -58,33 +59,33 @@ export function ResizablePanelGroup({ id, children, className }: GroupProps) {
   );
 
   const startResize = useCallback(
-    (leftPanelId: string, startClientX: number) => {
+    (panelId: string, startClientX: number, direction: 1 | -1 = 1) => {
       let lastX = startClientX;
 
       const onMove = (e: PointerEvent) => {
-        const delta = e.clientX - lastX;
+        const delta = (e.clientX - lastX) * direction;
         lastX = e.clientX;
         setSizes((prev) => {
-          const panel = panels.current.get(leftPanelId);
+          const panel = panels.current.get(panelId);
           if (!panel) return prev;
-          const current = prev.get(leftPanelId) ?? panel.defaultSize;
+          const current = prev.get(panelId) ?? panel.defaultSize;
           const next = new Map(prev);
 
           if (panel.collapsible && current + delta < panel.minSize / 2) {
             const lastGood = current > 0 ? current : panel.defaultSize;
-            localStorage.setItem(`rp:${id}:${leftPanelId}:last`, String(lastGood));
-            next.set(leftPanelId, 0);
-            setCollapsed((c) => new Set(c).add(leftPanelId));
-            localStorage.setItem(`rp:${id}:${leftPanelId}`, "0");
+            localStorage.setItem(`rp:${id}:${panelId}:last`, String(lastGood));
+            next.set(panelId, 0);
+            setCollapsed((c) => new Set(c).add(panelId));
+            localStorage.setItem(`rp:${id}:${panelId}`, "0");
           } else {
             const clamped = Math.max(panel.minSize, current + delta);
-            next.set(leftPanelId, clamped);
+            next.set(panelId, clamped);
             setCollapsed((c) => {
               const s = new Set(c);
-              s.delete(leftPanelId);
+              s.delete(panelId);
               return s;
             });
-            localStorage.setItem(`rp:${id}:${leftPanelId}`, String(clamped));
+            localStorage.setItem(`rp:${id}:${panelId}`, String(clamped));
           }
           return next;
         });
@@ -118,8 +119,22 @@ export function ResizablePanelGroup({ id, children, className }: GroupProps) {
     [id]
   );
 
+  const collapse = useCallback(
+    (panelId: string) => {
+      const panel = panels.current.get(panelId);
+      if (!panel || !panel.collapsible) return;
+      const current = sizes.get(panelId) ?? panel.defaultSize;
+      const lastGood = current > 0 ? current : panel.defaultSize;
+      localStorage.setItem(`rp:${id}:${panelId}:last`, String(lastGood));
+      setSizes((prev) => new Map(prev).set(panelId, 0));
+      setCollapsed((prev) => new Set(prev).add(panelId));
+      localStorage.setItem(`rp:${id}:${panelId}`, "0");
+    },
+    [id, sizes]
+  );
+
   return (
-    <Ctx.Provider value={{ groupId: id, sizes, collapsed, registerPanel, startResize, expand }}>
+    <Ctx.Provider value={{ groupId: id, sizes, collapsed, registerPanel, startResize, collapse, expand }}>
       <div className={`flex ${className ?? ""}`}>{children}</div>
     </Ctx.Provider>
   );
@@ -167,28 +182,34 @@ export function ResizablePanel({
 }
 
 interface HandleProps {
-  leftPanelId: string;
+  leftPanelId?: string;
+  rightPanelId?: string;
+  className?: string;
 }
 
-export function ResizablePanelHandle({ leftPanelId }: HandleProps) {
+export function ResizablePanelHandle({ leftPanelId, rightPanelId, className }: HandleProps) {
   const { startResize } = useGroup();
+  const panelId = leftPanelId ?? rightPanelId;
+  if (!panelId) throw new Error("ResizablePanelHandle requires leftPanelId or rightPanelId");
+
   return (
     <div
       role="separator"
       aria-orientation="vertical"
-      className="relative z-10 w-px shrink-0 cursor-col-resize bg-white/10 transition-colors hover:bg-primary/50 active:bg-primary/70"
+      className={`relative z-10 w-px shrink-0 cursor-col-resize bg-white/10 transition-colors hover:bg-primary/50 active:bg-primary/70 ${className ?? ""}`}
       onPointerDown={(e) => {
         e.preventDefault();
-        startResize(leftPanelId, e.clientX);
+        startResize(panelId, e.clientX, rightPanelId ? -1 : 1);
       }}
     />
   );
 }
 
 export function useCollapsedPanel(panelId: string) {
-  const { collapsed, expand } = useGroup();
+  const { collapsed, collapse, expand } = useGroup();
   return {
     isCollapsed: collapsed.has(panelId),
+    collapse: () => collapse(panelId),
     expand: () => expand(panelId),
   };
 }

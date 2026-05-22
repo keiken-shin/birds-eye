@@ -1,7 +1,6 @@
 import { useMemo, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useScanContext } from "../context/ScanContext";
-import { StorageReadout } from "../components/StorageReadout";
 import { MetricGrid } from "../components/MetricGrid";
 import { FilterBar } from "../components/FilterBar";
 import { AnalysisSection } from "../components/AnalysisSection";
@@ -52,11 +51,6 @@ export function WorkspacePage() {
     }
   }, [duplicateFiles, selectedDuplicateGroup, clearDuplicates, clearQueue]);
 
-  const handleClearSelection = useCallback(() => {
-    clearDuplicates();
-    clearQueue();
-  }, [clearDuplicates, clearQueue]);
-
   const handleTrashStaged = useCallback(async () => {
     await trashStaged();
     if (selectedDuplicateGroup !== null && workspaceScan) {
@@ -65,6 +59,22 @@ export function WorkspacePage() {
     }
     await refreshWorkspaceIndex();
   }, [trashStaged, selectedDuplicateGroup, workspaceScan, selectDuplicateCandidate, refreshWorkspaceIndex]);
+
+  const handleOpenDuplicateCandidate = useCallback(
+    async (candidate: Parameters<typeof selectDuplicateCandidate>[0]) => {
+      await selectDuplicateCandidate(candidate);
+      document.getElementById("duplicates")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    },
+    [selectDuplicateCandidate]
+  );
+
+  useEffect(() => {
+    if (!workspaceScan || selectedDuplicateGroup !== null) return;
+    const firstCandidate = workspaceScan.duplicateCandidates.find(
+      (candidate) => candidate.id !== undefined && candidate.files >= 2
+    );
+    if (firstCandidate) void selectDuplicateCandidate(firstCandidate);
+  }, [workspaceScan, selectedDuplicateGroup, selectDuplicateCandidate]);
 
   const workspaceSortedFolders = useMemo(() => {
     if (!workspaceScan) return [];
@@ -120,7 +130,7 @@ export function WorkspacePage() {
   return (
     <>
       <CommandPalette currentIndexPath={workspaceIndexPath} nativeRuntime={nativeRuntime} scan={workspaceScan} />
-      <section className="relative z-[1] mx-auto max-w-[1440px] min-w-0 px-[42px] pb-[118px] max-sm:px-4 max-sm:pb-28">
+      <section className="relative z-[1] min-w-0 px-[42px] pb-[118px] max-sm:px-4 max-sm:pb-28">
         <header className="mb-4.5 grid gap-2 border-t border-primary/20 pt-5">
           <p className="m-0 text-13 font-bold uppercase text-accent">Workspace / storage intelligence</p>
           <h2 className="max-w-[860px] text-[clamp(28px,3vw,46px)] font-black uppercase leading-[0.95] text-primary">
@@ -131,16 +141,16 @@ export function WorkspacePage() {
             <kbd className="border border-white/15 px-1 font-mono text-10 text-white/40">Ctrl+K</kbd> to search files.
           </span>
         </header>
-        <StorageReadout scan={workspaceScan} />
         <MetricGrid scan={workspaceScan} />
         <FilterBar filter={filter} setFilter={setFilter} />
         <AnalysisSection
           filteredFolders={workspaceFilteredFolders}
           focusedFolder={focusedFolder}
           setFocusedFolder={setFocusedFolder}
+          onOpenDuplicateCandidate={(candidate) => void handleOpenDuplicateCandidate(candidate)}
           scan={workspaceScan}
         />
-        <FoldersTable sortedFolders={workspaceSortedFolders} />
+        <FoldersTable sortedFolders={workspaceSortedFolders} nativeRuntime={nativeRuntime} />
         <DetailGrid
           largestFiles={workspaceScan.largestFiles}
           extensions={workspaceScan.extensions}
@@ -151,7 +161,6 @@ export function WorkspacePage() {
           selectedDuplicateGroup={selectedDuplicateGroup}
           selectDuplicateCandidate={selectDuplicateCandidate}
           duplicateFiles={duplicateFiles}
-          onClearSelection={handleClearSelection}
           comparisonCursor={comparisonCursor}
           setComparisonCursor={setComparisonCursor}
           staged={staged}
