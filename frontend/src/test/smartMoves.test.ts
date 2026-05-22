@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeSmartMoves } from "../utils/smartMoves";
+import { computeSmartMoves, suggestKeep } from "../utils/smartMoves";
 import type { NativeDuplicateFile } from "../nativeClient";
 
 const f = (path: string, modified_at: number | null): NativeDuplicateFile =>
@@ -94,5 +94,29 @@ describe("computeSmartMoves", () => {
     const [move] = computeSmartMoves(files);
     expect(move.reason).toMatch(/\b2\b/);   // dominant count
     expect(move.reason).toMatch(/\b4\b/);   // total count
+  });
+});
+
+describe("suggestKeep", () => {
+  const f = (path: string, modified_at: number | null) =>
+    ({ path, size: 100, modified_at, hash_state: 4 as const });
+
+  it("returns empty string for empty input", () => {
+    expect(suggestKeep([])).toBe("");
+  });
+
+  it("prefers file without suspect keywords", () => {
+    const files = [f("/backup/img.jpg", 2000), f("/photos/img.jpg", 1000)];
+    expect(suggestKeep(files)).toBe("/photos/img.jpg");
+  });
+
+  it("breaks suspect tie by most recently modified", () => {
+    const files = [f("/a/img.jpg", 1000), f("/b/img.jpg", 5000)];
+    expect(suggestKeep(files)).toBe("/b/img.jpg");
+  });
+
+  it("breaks recency tie by shallowest path", () => {
+    const files = [f("/a/b/c/img.jpg", 1000), f("/x/img.jpg", 1000)];
+    expect(suggestKeep(files)).toBe("/x/img.jpg");
   });
 });

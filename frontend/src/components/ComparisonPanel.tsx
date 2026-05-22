@@ -4,6 +4,7 @@ import { formatBytes } from "../domain";
 import { formatDate } from "../utils/displayUtils";
 import type { NativeDuplicateFile } from "../nativeClient";
 import { revealInExplorer } from "../nativeClient";
+import { suggestKeep } from "../utils/smartMoves";
 import { MediaPreview } from "./MediaPreview";
 
 interface ComparisonPanelProps {
@@ -206,20 +207,6 @@ function RevealButton({ path }: { path: string }) {
       )}
     </div>
   );
-}
-
-export function suggestKeep(files: NativeDuplicateFile[]): string {
-  if (files.length === 0) return "";
-  const SUSPECT = /\b(backup|old|archive|copy|temp|202\d)\b/i;
-  return [...files].sort((a, b) => {
-    const aSuspect = SUSPECT.test(a.path) ? 1 : 0;
-    const bSuspect = SUSPECT.test(b.path) ? 1 : 0;
-    if (aSuspect !== bSuspect) return aSuspect - bSuspect;
-    const aTime = a.modified_at ?? 0;
-    const bTime = b.modified_at ?? 0;
-    if (aTime !== bTime) return bTime - aTime;
-    return a.path.split(/[\\/]/).length - b.path.split(/[\\/]/).length;
-  })[0].path;
 }
 
 function confidenceLabel(hashState: number): string {
