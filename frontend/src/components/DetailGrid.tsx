@@ -1,13 +1,16 @@
+import { FolderOpen } from "lucide-react";
 import { formatBytes, formatCount } from "../domain";
+import { revealInExplorer } from "../nativeClient";
 import { ScrollableRows } from "./ScrollableRows";
 import type { ScanState } from "../domain";
 
 interface DetailGridProps {
   largestFiles: ScanState["largestFiles"];
   extensions: ScanState["extensions"];
+  nativeRuntime: boolean;
 }
 
-export function DetailGrid({ largestFiles, extensions }: DetailGridProps) {
+export function DetailGrid({ largestFiles, extensions, nativeRuntime }: DetailGridProps) {
   return (
     <section className="grid grid-cols-2 gap-4.5 max-[1080px]:grid-cols-1">
       <div className={panelClass}>
@@ -23,7 +26,20 @@ export function DetailGrid({ largestFiles, extensions }: DetailGridProps) {
               <div className={fileRowClass} key={file.path}>
                 <span className={pathClass}>{file.path}</span>
                 <strong className={valueClass}>{formatBytes(file.bytes)}</strong>
-                <small className={smallClass}>{file.extension}</small>
+                <div className="flex items-center justify-end gap-2 max-sm:justify-start">
+                  <small className={smallClass}>{file.extension}</small>
+                  {nativeRuntime && (
+                    <button
+                      type="button"
+                      aria-label={`Reveal ${file.name} in Explorer`}
+                      title="Reveal in Explorer"
+                      onClick={() => void revealInExplorer(file.path).catch(() => {})}
+                      className="grid h-6 w-6 shrink-0 place-items-center border border-white/10 text-muted transition-colors hover:border-white/25 hover:text-primary"
+                    >
+                      <FolderOpen size={12} />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </ScrollableRows>
@@ -58,10 +74,10 @@ const panelHeaderClass = "mb-4 flex items-baseline justify-between gap-4 upperca
 const panelTitleClass = "text-17 font-black uppercase text-primary";
 const panelMetaClass = "inline-flex items-center gap-1.5 font-mono text-11 uppercase text-muted";
 const compactEmptyClass = "grid min-h-[150px] place-items-center border border-dashed border-primary/20 bg-[radial-gradient(circle,rgba(244,241,234,0.08)_1px,transparent_1.2px)] bg-[length:18px_18px] p-6 text-center text-muted";
-const fileRowClass = "grid min-h-12 grid-cols-[minmax(0,1fr)_110px_72px] items-center gap-3 border-t border-primary/10 max-sm:grid-cols-1 max-sm:gap-1 max-sm:py-2.5";
+const fileRowClass = "grid min-h-12 grid-cols-[minmax(0,1fr)_110px_96px] items-center gap-3 border-t border-primary/10 max-sm:grid-cols-1 max-sm:gap-1 max-sm:py-2.5";
 const pathClass = "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-subtle";
 const valueClass = "text-right text-primary max-sm:text-left";
-const smallClass = "text-right font-mono text-muted max-sm:text-left";
+const smallClass = "min-w-0 text-right font-mono text-muted max-sm:text-left";
 
 
 

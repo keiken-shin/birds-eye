@@ -3,7 +3,7 @@ use crate::index::IndexWriter;
 use crate::scanner::{ScanEvent, ScanOptions, Scanner};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScanToIndexRequest {
@@ -131,34 +131,72 @@ pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
 }
 
 pub fn reveal_in_explorer(path: String) -> Result<(), String> {
+    let target = reveal_target_path(&path);
+
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer")
-            .arg(format!("/select,{path}"))
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        use std::os::windows::process::CommandExt;
+
+        let explorer_path = windows_explorer_path(&target);
+        let mut command = std::process::Command::new("explorer.exe");
+        if target.is_dir() {
+            command.arg(explorer_path);
+        } else {
+            command.raw_arg(format!("/select,\"{explorer_path}\""));
+        }
+        command.spawn().map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
-            .args(["-R", &path])
+            .arg("-R")
+            .arg(&target)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "linux")]
     {
-        let parent = std::path::Path::new(&path)
-            .parent()
-            .ok_or_else(|| "path has no parent directory".to_owned())?
-            .to_str()
-            .ok_or_else(|| "path contains non-UTF-8 characters".to_owned())?
-            .to_owned();
+        let open_path = if target.is_dir() {
+            target
+        } else {
+            target
+                .parent()
+                .ok_or_else(|| "path has no parent directory".to_owned())?
+                .to_path_buf()
+        };
         std::process::Command::new("xdg-open")
-            .arg(&parent)
+            .arg(&open_path)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+fn reveal_target_path(path: &str) -> PathBuf {
+    let original = Path::new(path);
+    if original.exists() {
+        return original
+            .canonicalize()
+            .unwrap_or_else(|_| original.to_path_buf());
+    }
+
+    original
+        .parent()
+        .filter(|parent| parent.exists())
+        .and_then(|parent| parent.canonicalize().ok())
+        .unwrap_or_else(|| original.to_path_buf())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_explorer_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if let Some(rest) = path.strip_prefix(r"\\?\") {
+        return rest.to_owned();
+    }
+    path.into_owned()
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -713,6 +751,32 @@ mod tests {
         });
         assert_eq!(response.failed.len(), 1);
         assert_eq!(response.failed[0].path, "/this/path/does/not/exist/xyz.bin");
+    }
+
+    #[test]
+    fn reveal_target_path_falls_back_to_existing_parent_for_missing_file() {
+        let root = test_root("reveal-target");
+        let folder = root.join("folder with spaces");
+        fs::create_dir_all(&folder).expect("create dirs");
+        let missing_file = folder.join("missing image.png");
+
+        let target = reveal_target_path(&missing_file.to_string_lossy());
+
+        assert_eq!(target, folder.canonicalize().expect("canonical folder"));
+        cleanup(&root);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_explorer_path_strips_verbatim_prefixes() {
+        assert_eq!(
+            windows_explorer_path(Path::new(r"\\?\C:\Users\me\photo.jpg")),
+            r"C:\Users\me\photo.jpg"
+        );
+        assert_eq!(
+            windows_explorer_path(Path::new(r"\\?\UNC\server\share\photo.jpg")),
+            r"\\server\share\photo.jpg"
+        );
     }
 
     fn test_root(name: &str) -> PathBuf {
