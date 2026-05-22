@@ -40,6 +40,7 @@ type ScanContextValue = {
   clearScan: () => void;
   openSavedIndex: (entry: NativeIndexEntry) => Promise<void>;
   rescanSavedIndex: (entry: NativeIndexEntry) => Promise<void>;
+  refreshWorkspaceIndex: () => Promise<void>;
   queueItems: QueueItem[];
   scanHistoryItems: QueueItem[];
   activeQueueId: string | null;

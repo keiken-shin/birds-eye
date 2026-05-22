@@ -67,6 +67,7 @@ export function useScan({
   clearScan: () => void;
   openSavedIndex: (entry: NativeIndexEntry) => Promise<void>;
   rescanSavedIndex: (entry: NativeIndexEntry) => Promise<void>;
+  refreshWorkspaceIndex: () => Promise<void>;
   lastLogEntry: ScanLogEntry | null;
   phaseTimings: NativePhaseTimingEntry[] | null;
 } {
@@ -448,6 +449,26 @@ export function useScan({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setRuntimeMessage]);
 
+  const refreshWorkspaceIndex = useCallback(async () => {
+    if (!workspaceIndexPath) return;
+    try {
+      const overview = await queryNativeIndex(workspaceIndexPath, 500);
+      const freshCandidates = overview.duplicate_groups.map((group) => ({
+        id: group.id,
+        size: group.size,
+        files: group.file_count,
+        reclaimableBytes: group.reclaimable_bytes,
+        samples: [`confidence ${(group.confidence * 100).toFixed(0)}%`],
+        confidence: "size-match" as const,
+      }));
+      setWorkspaceScan((prev) =>
+        prev === null ? null : { ...prev, duplicateCandidates: freshCandidates }
+      );
+    } catch (error) {
+      setRuntimeMessage(error instanceof Error ? error.message : "Index refresh failed");
+    }
+  }, [workspaceIndexPath, setRuntimeMessage]);
+
   return {
     scan,
     workspaceScan,
@@ -468,6 +489,7 @@ export function useScan({
     clearScan,
     openSavedIndex,
     rescanSavedIndex,
+    refreshWorkspaceIndex,
     lastLogEntry,
     phaseTimings,
   };
