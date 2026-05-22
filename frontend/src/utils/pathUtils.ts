@@ -16,12 +16,17 @@ export function isDescendantPath(path: string, parent: string): boolean {
 }
 
 export function truncatePath(path: string, keepSegments = 2): string {
+  // Guard against keepSegments < 1 to prevent garbage output
+  if (keepSegments < 1) keepSegments = 1;
+
+  // Normalize mixed separators before splitting
   const sep = path.includes("\\") ? "\\" : "/";
-  const parts = path.split(sep).filter(Boolean);
+  const normalised = path.replace(/[\\/]/g, sep);
+  const parts = normalised.split(sep).filter(Boolean);
   const isWin = parts[0]?.endsWith(":");
   const rootCount = isWin ? 1 : 0;
 
-  if (parts.length <= rootCount + keepSegments) return path;
+  if (parts.length <= rootCount + keepSegments) return normalised;
 
   const root = isWin ? `${parts[0]}${sep}` : sep;
   const tail = parts.slice(-keepSegments).join(sep);
