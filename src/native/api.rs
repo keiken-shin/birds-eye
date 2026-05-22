@@ -100,6 +100,35 @@ pub struct DuplicateFileSummaryDto {
     pub hash_state: i64,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct TrashFilesRequest {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct TrashFailure {
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct TrashFilesResponse {
+    pub failed: Vec<TrashFailure>,
+}
+
+pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
+    let mut failed = Vec::new();
+    for path in &request.paths {
+        if let Err(error) = trash::delete(path) {
+            failed.push(TrashFailure {
+                path: path.clone(),
+                reason: error.to_string(),
+            });
+        }
+    }
+    TrashFilesResponse { failed }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct MediaSummaryDto {
     pub media_kind: String,
@@ -643,6 +672,15 @@ mod tests {
 
         assert!(results.is_empty());
         cleanup(&root);
+    }
+
+    #[test]
+    fn trash_files_nonexistent_path_is_recorded_as_failure() {
+        let response = trash_files(TrashFilesRequest {
+            paths: vec!["/this/path/does/not/exist/xyz.bin".to_owned()],
+        });
+        assert_eq!(response.failed.len(), 1);
+        assert_eq!(response.failed[0].path, "/this/path/does/not/exist/xyz.bin");
     }
 
     fn test_root(name: &str) -> PathBuf {

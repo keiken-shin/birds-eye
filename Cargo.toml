@@ -11,6 +11,7 @@ serde = { version = "1", features = ["derive"] }
 regex = "1"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 rayon = "1"
+trash = "3"
 
 [lib]
 name = "birds_eye"
