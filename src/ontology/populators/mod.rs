@@ -10,6 +10,8 @@ use crate::ontology::relations::{assert_relation, NewRelation};
 use crate::ontology::vocabulary::EntityKind;
 use crate::ontology::OntologyError;
 use rusqlite::Connection;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CostTier {
@@ -38,21 +40,21 @@ impl BudgetTier {
 #[derive(Debug, Clone)]
 pub struct PopulatorContext {
     pub budget: BudgetTier,
-    pub pause: bool,
+    pub pause: Arc<AtomicBool>,
     counters: PopulatorReport,
 }
 
 impl PopulatorContext {
-    pub fn new(budget: BudgetTier) -> Self {
+    pub fn new(budget: BudgetTier, pause: Arc<AtomicBool>) -> Self {
         Self {
             budget,
-            pause: false,
+            pause,
             counters: PopulatorReport::default(),
         }
     }
 
     pub fn is_paused(&self) -> bool {
-        self.pause
+        self.pause.load(Ordering::Relaxed)
     }
 
     pub fn note_file(&mut self) {
@@ -210,6 +212,10 @@ mod tests {
     use crate::ontology::vocabulary::predicates;
     use rusqlite::Connection;
 
+    fn dummy_ctx() -> PopulatorContext {
+        PopulatorContext::new(BudgetTier::Standard, Arc::new(AtomicBool::new(false)))
+    }
+
     fn migrated_conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         for (_, sql) in ALL_MIGRATIONS {
@@ -254,10 +260,20 @@ mod tests {
     }
 
     #[test]
+    fn context_observes_externally_flipped_pause_flag() {
+        let pause = Arc::new(AtomicBool::new(false));
+        let ctx = PopulatorContext::new(BudgetTier::Standard, Arc::clone(&pause));
+
+        assert!(!ctx.is_paused());
+        pause.store(true, Ordering::Relaxed);
+        assert!(ctx.is_paused());
+    }
+
+    #[test]
     fn emit_property_writes_when_not_rejected() {
         let mut conn = migrated_conn();
         let (entity_id, _) = seed_two_file_entities(&conn);
-        let mut ctx = PopulatorContext::new(BudgetTier::Standard);
+        let mut ctx = dummy_ctx();
 
         let emitted = emit_property(
             &mut conn,
@@ -285,7 +301,7 @@ mod tests {
         let mut conn = migrated_conn();
         let (entity_id, _) = seed_two_file_entities(&conn);
         reject_property(&conn, entity_id, "role", "scratch", Some("wrong role")).unwrap();
-        let mut ctx = PopulatorContext::new(BudgetTier::Standard);
+        let mut ctx = dummy_ctx();
 
         let emitted = emit_property(
             &mut conn,
@@ -309,7 +325,7 @@ mod tests {
     fn emit_relation_writes_when_not_rejected() {
         let mut conn = migrated_conn();
         let (source, derivative) = seed_two_file_entities(&conn);
-        let mut ctx = PopulatorContext::new(BudgetTier::Standard);
+        let mut ctx = dummy_ctx();
 
         let emitted = emit_relation(
             &mut conn,
@@ -342,7 +358,7 @@ mod tests {
             Some("unrelated"),
         )
         .unwrap();
-        let mut ctx = PopulatorContext::new(BudgetTier::Standard);
+        let mut ctx = dummy_ctx();
 
         let emitted = emit_relation(
             &mut conn,
