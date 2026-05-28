@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 5;
+pub const CURRENT_SCHEMA_VERSION: u32 = 6;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -300,12 +300,31 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (5, strftime('%s', 'now'));
 "#;
 
+pub const MIGRATION_006: &str = r#"
+CREATE TABLE IF NOT EXISTS ontology_populator_state (
+  populator_name TEXT PRIMARY KEY,
+  status TEXT NOT NULL CHECK (status IN ('idle', 'running', 'paused', 'completed', 'failed')),
+  cursor TEXT,
+  files_visited INTEGER NOT NULL DEFAULT 0,
+  assertions_emitted INTEGER NOT NULL DEFAULT 0,
+  discoveries_emitted INTEGER NOT NULL DEFAULT 0,
+  last_run_at INTEGER,
+  last_error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_populator_state_status ON ontology_populator_state(status);
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (6, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
     (3, MIGRATION_003),
     (4, MIGRATION_004),
     (5, MIGRATION_005),
+    (6, MIGRATION_006),
 ];
 
 #[cfg(test)]
@@ -314,8 +333,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 5);
-        assert_eq!(ALL_MIGRATIONS.len(), 5);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 6);
+        assert_eq!(ALL_MIGRATIONS.len(), 6);
     }
 
     #[test]
@@ -434,5 +453,41 @@ mod tests {
             )
             .expect("vocab version row");
         assert_eq!(v, 1);
+    }
+
+    #[test]
+    fn migration_006_present_and_contains_populator_state() {
+        assert!(CURRENT_SCHEMA_VERSION >= 6);
+        let mig = ALL_MIGRATIONS
+            .iter()
+            .find(|(v, _)| *v == 6)
+            .expect("migration 6 missing")
+            .1;
+        assert!(
+            mig.contains("CREATE TABLE IF NOT EXISTS ontology_populator_state"),
+            "migration 6 must create ontology_populator_state",
+        );
+        assert!(
+            mig.contains("idx_populator_state_status"),
+            "migration 6 must create the status index",
+        );
+    }
+
+    #[test]
+    fn migration_006_applies_cleanly_in_memory() {
+        use rusqlite::Connection;
+
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).expect("migration applies");
+        }
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ontology_populator_state'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query sqlite_master");
+        assert_eq!(count, 1, "ontology_populator_state must exist after migrations");
     }
 }
