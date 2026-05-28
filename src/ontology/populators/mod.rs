@@ -117,6 +117,23 @@ impl From<rusqlite::Error> for PopulatorError {
     }
 }
 
+impl From<serde_json::Error> for PopulatorError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Ontology(OntologyError::from(err))
+    }
+}
+
+impl std::fmt::Display for PopulatorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ontology(e) => write!(f, "ontology error: {e}"),
+            Self::Aborted(msg) => write!(f, "populator aborted: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for PopulatorError {}
+
 pub trait Populator: Send + Sync {
     fn name(&self) -> &'static str;
     fn cost_tier(&self) -> CostTier;
@@ -267,6 +284,45 @@ mod tests {
         assert!(!ctx.is_paused());
         pause.store(true, Ordering::Relaxed);
         assert!(ctx.is_paused());
+    }
+
+    #[test]
+    fn populator_error_is_full_error_type() {
+        fn assert_error<E: std::error::Error>() {}
+        assert_error::<PopulatorError>();
+
+        let err = PopulatorError::from(serde_json::from_str::<serde_json::Value>("{").unwrap_err());
+        assert!(format!("{err}").contains("ontology error: json error:"));
+
+        let aborted = PopulatorError::Aborted("pause requested".to_string());
+        assert_eq!(aborted.to_string(), "populator aborted: pause requested");
+    }
+
+    #[test]
+    fn ensure_file_and_folder_entities_link_expected_ids() {
+        let conn = migrated_conn();
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (7, NULL, '/root', 'root', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, indexed_at)
+             VALUES (9, 7, '/root/a.psd', 'a.psd', 100, 0)",
+            [],
+        )
+        .unwrap();
+
+        let folder = ensure_folder_entity(&conn, 7, "/root").unwrap();
+        assert_eq!(folder.canonical_id, "/root");
+        assert_eq!(folder.linked_file_id, None);
+        assert_eq!(folder.linked_folder_id, Some(7));
+
+        let file = ensure_file_entity(&conn, 9, "/root/a.psd").unwrap();
+        assert_eq!(file.canonical_id, "/root/a.psd");
+        assert_eq!(file.linked_file_id, Some(9));
+        assert_eq!(file.linked_folder_id, None);
     }
 
     #[test]
