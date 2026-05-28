@@ -6,11 +6,19 @@ pub enum OntologyError {
     InvalidVocabulary(String),
     EntityNotFound(i64),
     OntologyDisabled,
+    Populator(String),
+    Json(String),
 }
 
 impl From<rusqlite::Error> for OntologyError {
     fn from(err: rusqlite::Error) -> Self {
         OntologyError::Sqlite(err)
+    }
+}
+
+impl From<serde_json::Error> for OntologyError {
+    fn from(err: serde_json::Error) -> Self {
+        OntologyError::Json(err.to_string())
     }
 }
 
@@ -21,6 +29,8 @@ impl std::fmt::Display for OntologyError {
             Self::InvalidVocabulary(v) => write!(f, "invalid vocabulary value: {v}"),
             Self::EntityNotFound(id) => write!(f, "entity not found: {id}"),
             Self::OntologyDisabled => write!(f, "ontology layer is disabled for this index"),
+            Self::Populator(msg) => write!(f, "populator error: {msg}"),
+            Self::Json(msg) => write!(f, "json error: {msg}"),
         }
     }
 }

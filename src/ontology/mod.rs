@@ -4,11 +4,14 @@
 //! for the full design rationale.
 
 pub mod attrs;
+pub mod discoveries;
 pub mod enabled;
 pub mod entities;
 pub mod errors;
 pub mod negative;
+pub mod orchestrator;
 pub mod pinning;
+pub mod populators;
 pub mod relations;
 pub mod sensitivity;
 pub mod vocabulary;
