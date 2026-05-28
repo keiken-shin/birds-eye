@@ -101,7 +101,7 @@ pub fn get_discovery(conn: &Connection, id: i64) -> Result<Option<Discovery>, On
 pub fn list_pending_by_kind(
     conn: &Connection,
     kind: &str,
-    limit: u64,
+    limit: u32,
 ) -> Result<Vec<Discovery>, OntologyError> {
     let mut stmt = conn.prepare_cached(
         "SELECT id, kind, payload, status, confidence, potential_bytes_unlocked, created_at, resolved_at
@@ -247,7 +247,8 @@ mod tests {
         let ids: Vec<i64> = pending.iter().map(|d| d.id).collect();
         assert_eq!(ids, vec![high_bytes.id, high_confidence.id, low_bytes.id]);
 
-        let limited = list_pending_by_kind(&conn, "duplicate-pattern", 2).unwrap();
+        let limit: u32 = 2;
+        let limited = list_pending_by_kind(&conn, "duplicate-pattern", limit).unwrap();
         assert_eq!(limited.len(), 2);
         assert_eq!(limited[0].id, high_bytes.id);
         assert_eq!(limited[1].id, high_confidence.id);
