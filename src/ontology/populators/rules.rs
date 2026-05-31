@@ -35,7 +35,7 @@ pub struct Rule {
 impl Rule {
     pub fn matches(&self, path: &str, filename: &str, extension: Option<&str>) -> bool {
         match &self.matcher {
-            RuleMatcher::PathRegex(regex) => regex.is_match(path),
+            RuleMatcher::PathRegex(regex) => regex.is_match(&path.replace('\\', "/")),
             RuleMatcher::FilenameRegex(regex) => regex.is_match(filename),
             RuleMatcher::ExtensionIn(extensions) => extension
                 .map(|extension| {
@@ -76,7 +76,9 @@ pub fn starter_rules() -> Vec<Rule> {
         },
         Rule {
             id: "rule:sensitive-keyword",
-            matcher: RuleMatcher::PathRegex(ci("(passport|aadhar|pan|payslip|salary)")),
+            matcher: RuleMatcher::PathRegex(ci(
+                r"(^|[^A-Za-z0-9])(passport|aadhar|payslip|salary|pan([ _-]?card)?)([^A-Za-z0-9]|$)",
+            )),
             assertion: RuleAssertion {
                 key: keys::SENSITIVITY,
                 value: "restricted",
@@ -91,7 +93,7 @@ pub fn starter_rules() -> Vec<Rule> {
         },
         Rule {
             id: "rule:path-backup-folder",
-            matcher: RuleMatcher::PathRegex(ci("/Backup")),
+            matcher: RuleMatcher::PathRegex(ci(r"/Backup(/|$|[ _-])")),
             assertion: role("backup", 0.85),
         },
         Rule {
@@ -336,8 +338,60 @@ mod tests {
     }
 
     #[test]
-    fn starter_rules_has_at_least_30_rules() {
+    fn starter_rules_has_wave1_minimum_rule_count() {
         assert!(starter_rules().len() >= 18);
+    }
+
+    #[test]
+    fn starter_personal_details_rule_matches_windows_paths() {
+        let rules = starter_rules();
+        let rule = rules
+            .iter()
+            .find(|rule| rule.id == "rule:path-prefix-personal-details")
+            .unwrap();
+
+        assert!(rule.matches(
+            r"C:\Users\me\Personal Details\passport.pdf",
+            "passport.pdf",
+            Some("pdf")
+        ));
+    }
+
+    #[test]
+    fn starter_sensitive_keyword_rule_uses_token_boundaries() {
+        let rules = starter_rules();
+        let rule = rules
+            .iter()
+            .find(|rule| rule.id == "rule:sensitive-keyword")
+            .unwrap();
+
+        assert!(rule.matches("/root/PAN card.pdf", "PAN card.pdf", Some("pdf")));
+        assert!(rule.matches("/root/pan_card.pdf", "pan_card.pdf", Some("pdf")));
+        assert!(!rule.matches("/root/Japanese/panorama.jpg", "panorama.jpg", Some("jpg")));
+        assert!(!rule.matches("/root/company/panel.png", "panel.png", Some("png")));
+    }
+
+    #[test]
+    fn starter_backup_folder_rule_uses_component_boundary() {
+        let rules = starter_rules();
+        let rule = rules
+            .iter()
+            .find(|rule| rule.id == "rule:path-backup-folder")
+            .unwrap();
+
+        assert!(rule.matches("/root/Backup/notes.txt", "notes.txt", Some("txt")));
+        assert!(rule.matches("/root/Backup-old/notes.txt", "notes.txt", Some("txt")));
+        assert!(!rule.matches("/root/Backupify/notes.txt", "notes.txt", Some("txt")));
+    }
+
+    #[test]
+    fn starter_sensitivity_rules_are_hidden_from_global_views() {
+        for rule in starter_rules()
+            .iter()
+            .filter(|rule| rule.assertion.key == keys::SENSITIVITY)
+        {
+            assert!(!rule.assertion.display_in_global_views, "{}", rule.id);
+        }
     }
 
     #[test]
