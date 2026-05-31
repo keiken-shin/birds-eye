@@ -98,7 +98,7 @@ impl Populator for StructuralHeuristicPopulator {
                                 size_ratio,
                             };
                             let payload_json = serde_json::to_string(&payload)?;
-                            insert_discovery(
+                            let inserted = insert_discovery_if_absent(
                                 conn,
                                 &NewDiscovery {
                                     kind: "derivedFrom-pattern",
@@ -107,7 +107,9 @@ impl Populator for StructuralHeuristicPopulator {
                                     potential_bytes_unlocked: f2.size.max(0) as u64,
                                 },
                             )?;
-                            ctx.note_discovery();
+                            if inserted {
+                                ctx.note_discovery();
+                            }
                         }
                     }
                 }
@@ -115,8 +117,33 @@ impl Populator for StructuralHeuristicPopulator {
             }
         }
 
-        emit_cross_folder_backups(conn, ctx)?;
-        emit_replaceability_inferences(conn, ctx)?;
+        if ctx.is_paused() {
+            return Ok(PopulatorOutcome::Paused {
+                cursor: last_folder_id.to_string(),
+                partial: ctx.snapshot(),
+            });
+        }
+
+        if emit_cross_folder_backups(conn, ctx)? {
+            return Ok(PopulatorOutcome::Paused {
+                cursor: last_folder_id.to_string(),
+                partial: ctx.snapshot(),
+            });
+        }
+
+        if ctx.is_paused() {
+            return Ok(PopulatorOutcome::Paused {
+                cursor: last_folder_id.to_string(),
+                partial: ctx.snapshot(),
+            });
+        }
+
+        if emit_replaceability_inferences(conn, ctx)? {
+            return Ok(PopulatorOutcome::Paused {
+                cursor: last_folder_id.to_string(),
+                partial: ctx.snapshot(),
+            });
+        }
 
         Ok(PopulatorOutcome::Completed(ctx.snapshot()))
     }
@@ -157,7 +184,7 @@ fn load_siblings(conn: &Connection, folder_id: i64) -> Result<Vec<SiblingFile>, 
 fn sibling_derivedfrom_match(f1: &SiblingFile, f2: &SiblingFile) -> Option<(f64, String)> {
     let stem1 = normalize_stem(&f1.name);
     let stem2 = normalize_stem(&f2.name);
-    if stem1.is_empty() || !stem2.starts_with(&stem1) {
+    if stem1.is_empty() || !derived_stem_matches(&stem1, &stem2) {
         return None;
     }
     if f1.name.eq_ignore_ascii_case(&f2.name) {
@@ -179,6 +206,17 @@ fn sibling_derivedfrom_match(f1: &SiblingFile, f2: &SiblingFile) -> Option<(f64,
     }
 
     Some((ratio, stem1))
+}
+
+fn derived_stem_matches(source_stem: &str, derivative_stem: &str) -> bool {
+    if derivative_stem == source_stem {
+        return true;
+    }
+    derivative_stem
+        .strip_prefix(source_stem)
+        .and_then(|rest| rest.chars().next())
+        .map(|next| matches!(next, ' ' | '_' | '-' | '.' | '(' | '['))
+        .unwrap_or(false)
 }
 
 fn normalize_stem(name: &str) -> String {
@@ -254,10 +292,33 @@ fn entity_id_for_file(conn: &Connection, file_id: i64) -> Result<Option<i64>, Po
         .optional()?)
 }
 
+fn insert_discovery_if_absent(
+    conn: &Connection,
+    discovery: &NewDiscovery<'_>,
+) -> Result<bool, PopulatorError> {
+    let exists = conn
+        .query_row(
+            "SELECT 1
+             FROM ontology_discoveries
+             WHERE kind = ?1 AND payload = ?2
+             LIMIT 1",
+            (discovery.kind, discovery.payload_json),
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if exists {
+        return Ok(false);
+    }
+
+    insert_discovery(conn, discovery)?;
+    Ok(true)
+}
+
 fn emit_cross_folder_backups(
     conn: &mut Connection,
     ctx: &mut PopulatorContext,
-) -> Result<(), PopulatorError> {
+) -> Result<bool, PopulatorError> {
     let backups = {
         let mut stmt = conn.prepare(
             "SELECT DISTINCT f.id, f.path, f.name, f.extension, f.size, f.modified_at
@@ -281,6 +342,10 @@ fn emit_cross_folder_backups(
     };
 
     for backup in backups {
+        if ctx.is_paused() {
+            return Ok(true);
+        }
+
         let lookup_stem = backup_origin_lookup_stem(&backup.name);
         if lookup_stem.is_empty() || backup.size <= 0 {
             continue;
@@ -289,6 +354,10 @@ fn emit_cross_folder_backups(
         let origins = load_backup_origin_candidates(conn, &backup, &lookup_stem, &like_pattern)?;
 
         for origin in origins {
+            if ctx.is_paused() {
+                return Ok(true);
+            }
+
             if pair_already_rejected(conn, backup.id, "backupOf", origin.id, ctx)? {
                 continue;
             }
@@ -301,7 +370,7 @@ fn emit_cross_folder_backups(
                 size_ratio,
             };
             let payload_json = serde_json::to_string(&payload)?;
-            insert_discovery(
+            let inserted = insert_discovery_if_absent(
                 conn,
                 &NewDiscovery {
                     kind: "backupOf-pair",
@@ -310,11 +379,13 @@ fn emit_cross_folder_backups(
                     potential_bytes_unlocked: backup.size.max(0) as u64,
                 },
             )?;
-            ctx.note_discovery();
+            if inserted {
+                ctx.note_discovery();
+            }
         }
     }
 
-    Ok(())
+    Ok(false)
 }
 
 fn load_backup_origin_candidates(
@@ -345,25 +416,36 @@ fn load_backup_origin_candidates(
         })
     })?;
     let candidates = rows.collect::<Result<Vec<_>, _>>()?;
-    Ok(candidates
-        .into_iter()
-        .filter(|origin| {
-            let ratio = backup.size as f64 / origin.size as f64;
-            (0.5..=2.0).contains(&ratio)
-                && backup_origin_stem_matches(lookup_stem, &normalize_stem(&origin.name))
-        })
-        .collect())
+    let mut filtered = Vec::new();
+    for origin in candidates {
+        let origin_stem = normalize_stem(&origin.name);
+        let ratio = backup.size as f64 / origin.size as f64;
+        if (0.5..=2.0).contains(&ratio)
+            && backup_origin_stem_matches(lookup_stem, &origin_stem)
+            && !backup_like_stem(&origin_stem)
+            && !file_has_role(conn, origin.id, "backup")?
+        {
+            filtered.push(origin);
+        }
+    }
+    Ok(filtered)
 }
 
 fn backup_origin_lookup_stem(name: &str) -> String {
     let mut stem = normalize_stem(name);
-    for suffix in [" backup", "_backup", "-backup", " copy", "_copy", "-copy"] {
+    for suffix in BACKUP_SUFFIXES {
         if let Some(stripped) = stem.strip_suffix(suffix) {
             stem = stripped.trim().to_string();
             break;
         }
     }
     stem
+}
+
+const BACKUP_SUFFIXES: &[&str] = &[" backup", "_backup", "-backup", " copy", "_copy", "-copy"];
+
+fn backup_like_stem(stem: &str) -> bool {
+    BACKUP_SUFFIXES.iter().any(|suffix| stem.ends_with(suffix))
 }
 
 fn backup_origin_stem_matches(lookup_stem: &str, origin_stem: &str) -> bool {
@@ -374,10 +456,28 @@ fn backup_origin_stem_matches(lookup_stem: &str, origin_stem: &str) -> bool {
             || origin_stem.starts_with(&format!("{lookup_stem}-")))
 }
 
+fn file_has_role(conn: &Connection, file_id: i64, role: &str) -> Result<bool, PopulatorError> {
+    Ok(conn
+        .query_row(
+            "SELECT 1
+             FROM ontology_entities e
+             JOIN ontology_attrs a ON a.entity_id = e.id
+             WHERE e.kind = 'File'
+               AND e.linked_file_id = ?1
+               AND a.key = ?2
+               AND a.value = ?3
+             LIMIT 1",
+            (file_id, keys::ROLE, role),
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
 fn emit_replaceability_inferences(
     conn: &mut Connection,
     ctx: &mut PopulatorContext,
-) -> Result<(), PopulatorError> {
+) -> Result<bool, PopulatorError> {
     let regenerable_entities = {
         let mut stmt = conn.prepare(
             "SELECT DISTINCT e.id
@@ -396,6 +496,10 @@ fn emit_replaceability_inferences(
     };
 
     for entity_id in regenerable_entities {
+        if ctx.is_paused() {
+            return Ok(true);
+        }
+
         emit_property(
             conn,
             ctx,
@@ -428,6 +532,10 @@ fn emit_replaceability_inferences(
     let installer_name = Regex::new(r"(?i)(setup|installer|install[_ .-]?)")
         .map_err(|err| PopulatorError::Aborted(format!("bad installer regex: {err}")))?;
     for (entity_id, name) in redownloadable_entities {
+        if ctx.is_paused() {
+            return Ok(true);
+        }
+
         if installer_name.is_match(&name) {
             emit_property(
                 conn,
@@ -442,7 +550,7 @@ fn emit_replaceability_inferences(
         }
     }
 
-    Ok(())
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -542,6 +650,45 @@ mod tests {
     }
 
     #[test]
+    fn rerun_does_not_duplicate_derivedfrom_discovery() {
+        let mut conn = migrated_conn();
+        insert_folder(&conn, 1, "/root", "root");
+        insert_file(
+            &conn,
+            1,
+            1,
+            "/root/logo.psd",
+            "logo.psd",
+            Some("psd"),
+            1_000,
+            Some(100),
+        );
+        insert_file(
+            &conn,
+            2,
+            1,
+            "/root/logo export.png",
+            "logo export.png",
+            Some("png"),
+            200,
+            Some(200),
+        );
+
+        let mut first_ctx = ctx_no_pause();
+        StructuralHeuristicPopulator::new()
+            .run(&mut conn, &mut first_ctx, None)
+            .unwrap();
+        let mut second_ctx = ctx_no_pause();
+        StructuralHeuristicPopulator::new()
+            .run(&mut conn, &mut second_ctx, None)
+            .unwrap();
+
+        let discoveries = list_pending_by_kind(&conn, "derivedFrom-pattern", 10).unwrap();
+        assert_eq!(discoveries.len(), 1);
+        assert_eq!(second_ctx.snapshot().discoveries_emitted, 0);
+    }
+
+    #[test]
     fn sibling_derivedfrom_requires_later_mtime() {
         let source = sibling(1, "work.psd", Some("psd"), 100, Some(200));
         let derivative = sibling(2, "work.png", Some("png"), 10, Some(100));
@@ -557,6 +704,31 @@ mod tests {
 
         assert!(sibling_derivedfrom_match(&source, &too_small).is_none());
         assert!(sibling_derivedfrom_match(&source, &too_large).is_none());
+    }
+
+    #[test]
+    fn sibling_derivedfrom_requires_delimiter_after_source_stem() {
+        let source = sibling(1, "art.psd", Some("psd"), 100, Some(100));
+        let derivative = sibling(2, "artifact.png", Some("png"), 90, Some(200));
+
+        assert!(sibling_derivedfrom_match(&source, &derivative).is_none());
+    }
+
+    #[test]
+    fn paused_before_run_returns_cursor_zero() {
+        let mut conn = migrated_conn();
+        insert_folder(&conn, 1, "/root", "root");
+        let pause = Arc::new(AtomicBool::new(true));
+        let mut ctx = PopulatorContext::new(BudgetTier::Standard, pause);
+
+        let outcome = StructuralHeuristicPopulator::new()
+            .run(&mut conn, &mut ctx, None)
+            .unwrap();
+
+        assert!(matches!(
+            outcome,
+            PopulatorOutcome::Paused { ref cursor, .. } if cursor == "0"
+        ));
     }
 
     #[test]
@@ -656,6 +828,74 @@ mod tests {
         assert_eq!(discoveries.len(), 1);
         assert!(discoveries[0].payload.contains("\"origin_file_id\":1"));
         assert!(discoveries[0].payload.contains("\"backup_file_id\":2"));
+    }
+
+    #[test]
+    fn backup_discovery_never_points_to_backup_like_origin() {
+        let mut conn = migrated_conn();
+        insert_folder(&conn, 1, "/Active", "Active");
+        insert_folder(&conn, 2, "/BackupOne", "BackupOne");
+        insert_folder(&conn, 3, "/BackupTwo", "BackupTwo");
+        insert_file(
+            &conn,
+            1,
+            1,
+            "/Active/budget.xlsx",
+            "budget.xlsx",
+            Some("xlsx"),
+            1_000,
+            Some(100),
+        );
+        insert_file(
+            &conn,
+            2,
+            2,
+            "/BackupOne/budget backup.xlsx",
+            "budget backup.xlsx",
+            Some("xlsx"),
+            1_050,
+            Some(200),
+        );
+        insert_file(
+            &conn,
+            3,
+            3,
+            "/BackupTwo/budget copy.xlsx",
+            "budget copy.xlsx",
+            Some("xlsx"),
+            950,
+            Some(300),
+        );
+        for (id, path) in [
+            (2, "/BackupOne/budget backup.xlsx"),
+            (3, "/BackupTwo/budget copy.xlsx"),
+        ] {
+            let backup_entity = ensure_file_entity(&conn, id, path).unwrap();
+            assert_attr(
+                &conn,
+                backup_entity.id,
+                &NewAssertion {
+                    key: keys::ROLE,
+                    value: "backup",
+                    source: "test",
+                    confidence: 1.0,
+                    display_in_global_views: true,
+                },
+            )
+            .unwrap();
+        }
+
+        let mut ctx = ctx_no_pause();
+        StructuralHeuristicPopulator::new()
+            .run(&mut conn, &mut ctx, None)
+            .unwrap();
+
+        let discoveries = list_pending_by_kind(&conn, "backupOf-pair", 10).unwrap();
+        assert!(!discoveries.is_empty());
+        for discovery in discoveries {
+            assert!(!discovery.payload.contains("\"origin_file_id\":2"));
+            assert!(!discovery.payload.contains("\"origin_file_id\":3"));
+        }
     }
 
     #[test]
