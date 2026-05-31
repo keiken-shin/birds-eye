@@ -474,6 +474,29 @@ fn file_has_role(conn: &Connection, file_id: i64, role: &str) -> Result<bool, Po
         .is_some())
 }
 
+fn attr_already_asserted(
+    conn: &Connection,
+    entity_id: i64,
+    key: &str,
+    value: &str,
+    source: &str,
+) -> Result<bool, PopulatorError> {
+    Ok(conn
+        .query_row(
+            "SELECT 1
+             FROM ontology_attrs
+             WHERE entity_id = ?1
+               AND key = ?2
+               AND value = ?3
+               AND source = ?4
+             LIMIT 1",
+            (entity_id, key, value, source),
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
 fn emit_replaceability_inferences(
     conn: &mut Connection,
     ctx: &mut PopulatorContext,
@@ -500,16 +523,19 @@ fn emit_replaceability_inferences(
             return Ok(true);
         }
 
-        emit_property(
-            conn,
-            ctx,
-            entity_id,
-            keys::REPLACEABILITY,
-            "regenerable",
-            "heuristic:replaceability-from-derivedfrom",
-            0.95,
-            true,
-        )?;
+        let source = "heuristic:replaceability-from-derivedfrom";
+        if !attr_already_asserted(conn, entity_id, keys::REPLACEABILITY, "regenerable", source)? {
+            emit_property(
+                conn,
+                ctx,
+                entity_id,
+                keys::REPLACEABILITY,
+                "regenerable",
+                source,
+                0.95,
+                true,
+            )?;
+        }
     }
 
     let redownloadable_entities = {
@@ -537,16 +563,25 @@ fn emit_replaceability_inferences(
         }
 
         if installer_name.is_match(&name) {
-            emit_property(
+            let source = "heuristic:replaceability-from-installer-name";
+            if !attr_already_asserted(
                 conn,
-                ctx,
                 entity_id,
                 keys::REPLACEABILITY,
                 "redownloadable",
-                "heuristic:replaceability-from-installer-name",
-                0.6,
-                true,
-            )?;
+                source,
+            )? {
+                emit_property(
+                    conn,
+                    ctx,
+                    entity_id,
+                    keys::REPLACEABILITY,
+                    "redownloadable",
+                    source,
+                    0.6,
+                    true,
+                )?;
+            }
         }
     }
 
@@ -960,6 +995,76 @@ mod tests {
     }
 
     #[test]
+    fn rerun_does_not_duplicate_regenerable_replaceability_attr() {
+        let mut conn = migrated_conn();
+        insert_folder(&conn, 1, "/root", "root");
+        insert_file(
+            &conn,
+            1,
+            1,
+            "/root/work.psd",
+            "work.psd",
+            Some("psd"),
+            1_000,
+            Some(100),
+        );
+        insert_file(
+            &conn,
+            2,
+            1,
+            "/root/work.png",
+            "work.png",
+            Some("png"),
+            100,
+            Some(200),
+        );
+        let source = ensure_file_entity(&conn, 1, "/root/work.psd").unwrap();
+        let derivative = ensure_file_entity(&conn, 2, "/root/work.png").unwrap();
+        assert_attr(
+            &conn,
+            derivative.id,
+            &NewAssertion {
+                key: keys::ROLE,
+                value: "derivative",
+                source: "test",
+                confidence: 1.0,
+                display_in_global_views: true,
+            },
+        )
+        .unwrap();
+        assert_relation(
+            &conn,
+            &NewRelation {
+                subject_id: derivative.id,
+                predicate: predicates::DERIVED_FROM,
+                object_id: source.id,
+                source: "test",
+                confidence: 1.0,
+            },
+        )
+        .unwrap();
+
+        let mut first_ctx = ctx_no_pause();
+        StructuralHeuristicPopulator::new()
+            .run(&mut conn, &mut first_ctx, None)
+            .unwrap();
+        let mut second_ctx = ctx_no_pause();
+        StructuralHeuristicPopulator::new()
+            .run(&mut conn, &mut second_ctx, None)
+            .unwrap();
+
+        let attrs = get_attrs(&conn, derivative.id, keys::REPLACEABILITY).unwrap();
+        let matching = attrs
+            .iter()
+            .filter(|attr| {
+                attr.value == "regenerable"
+                    && attr.source == "heuristic:replaceability-from-derivedfrom"
+            })
+            .count();
+        assert_eq!(matching, 1);
+    }
+
+    #[test]
     fn replaceability_inference_for_tool_named_install_exe() {
         let mut conn = migrated_conn();
         insert_folder(&conn, 1, "/root", "root");
@@ -999,6 +1104,54 @@ mod tests {
             attrs[0].source,
             "heuristic:replaceability-from-installer-name"
         );
+    }
+
+    #[test]
+    fn rerun_does_not_duplicate_redownloadable_replaceability_attr() {
+        let mut conn = migrated_conn();
+        insert_folder(&conn, 1, "/root", "root");
+        insert_file(
+            &conn,
+            1,
+            1,
+            "/root/install.exe",
+            "install.exe",
+            Some("exe"),
+            1_000,
+            Some(100),
+        );
+        let tool = ensure_file_entity(&conn, 1, "/root/install.exe").unwrap();
+        assert_attr(
+            &conn,
+            tool.id,
+            &NewAssertion {
+                key: keys::ROLE,
+                value: "tool",
+                source: "test",
+                confidence: 1.0,
+                display_in_global_views: true,
+            },
+        )
+        .unwrap();
+
+        let mut first_ctx = ctx_no_pause();
+        StructuralHeuristicPopulator::new()
+            .run(&mut conn, &mut first_ctx, None)
+            .unwrap();
+        let mut second_ctx = ctx_no_pause();
+        StructuralHeuristicPopulator::new()
+            .run(&mut conn, &mut second_ctx, None)
+            .unwrap();
+
+        let attrs = get_attrs(&conn, tool.id, keys::REPLACEABILITY).unwrap();
+        let matching = attrs
+            .iter()
+            .filter(|attr| {
+                attr.value == "redownloadable"
+                    && attr.source == "heuristic:replaceability-from-installer-name"
+            })
+            .count();
+        assert_eq!(matching, 1);
     }
 
     fn sibling(
