@@ -96,27 +96,27 @@ pub fn starter_rules() -> Vec<Rule> {
         },
         Rule {
             id: "rule:path-node-modules",
-            matcher: RuleMatcher::PathRegex(ci("/node_modules/")),
+            matcher: RuleMatcher::PathRegex(Regex::new(r"/node_modules/").unwrap()),
             assertion: role("scratch", 0.95),
         },
         Rule {
             id: "rule:path-cache",
-            matcher: RuleMatcher::PathRegex(ci(r"/\.cache")),
+            matcher: RuleMatcher::PathRegex(Regex::new(r"/\.cache/").unwrap()),
             assertion: role("scratch", 0.95),
         },
         Rule {
             id: "rule:path-target-debug",
-            matcher: RuleMatcher::PathRegex(ci("/target/(debug|release)/")),
+            matcher: RuleMatcher::PathRegex(Regex::new(r"/target/(debug|release)/").unwrap()),
             assertion: role("scratch", 0.95),
         },
         Rule {
             id: "rule:path-pycache",
-            matcher: RuleMatcher::PathRegex(ci("/__pycache__/")),
+            matcher: RuleMatcher::PathRegex(Regex::new(r"/__pycache__/").unwrap()),
             assertion: role("scratch", 0.95),
         },
         Rule {
             id: "rule:path-dist-build",
-            matcher: RuleMatcher::PathRegex(ci("/(dist|build)/")),
+            matcher: RuleMatcher::PathRegex(Regex::new(r"/(dist|build)/").unwrap()),
             assertion: role("scratch", 0.9),
         },
         Rule {
@@ -359,6 +359,24 @@ mod tests {
             Some("pdf")
         ));
         assert!(!rule.matches("/root/Public/passport.pdf", "passport.pdf", Some("pdf")));
+    }
+
+    #[test]
+    fn starter_scratch_rules_are_case_sensitive_and_cache_requires_trailing_slash() {
+        let rules = starter_rules();
+        let node_modules = rules
+            .iter()
+            .find(|rule| rule.id == "rule:path-node-modules")
+            .unwrap();
+        let cache = rules
+            .iter()
+            .find(|rule| rule.id == "rule:path-cache")
+            .unwrap();
+
+        assert!(node_modules.matches("/root/node_modules/pkg/index.js", "index.js", Some("js")));
+        assert!(!node_modules.matches("/root/NODE_MODULES/pkg/index.js", "index.js", Some("js")));
+        assert!(cache.matches("/root/.cache/file.bin", "file.bin", Some("bin")));
+        assert!(!cache.matches("/root/.cachefile/file.bin", "file.bin", Some("bin")));
     }
 
     #[test]
