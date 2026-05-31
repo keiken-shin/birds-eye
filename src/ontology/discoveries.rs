@@ -64,6 +64,13 @@ pub fn insert_discovery(
     d: &NewDiscovery<'_>,
 ) -> Result<Discovery, OntologyError> {
     let now = unix_now();
+    let potential_bytes_unlocked =
+        i64::try_from(d.potential_bytes_unlocked).map_err(|_| {
+            OntologyError::Populator(
+                "potential_bytes_unlocked exceeds sqlite INTEGER range".to_owned(),
+            )
+        })?;
+
     conn.execute(
         "INSERT INTO ontology_discoveries
             (kind, payload, status, confidence, potential_bytes_unlocked, created_at, resolved_at)
@@ -73,7 +80,7 @@ pub fn insert_discovery(
             d.payload_json,
             DiscoveryStatus::Pending.as_str(),
             d.confidence,
-            d.potential_bytes_unlocked as i64,
+            potential_bytes_unlocked,
             now,
         ],
     )?;
@@ -131,6 +138,13 @@ fn row_to_discovery(row: &rusqlite::Row<'_>) -> rusqlite::Result<Discovery> {
         rusqlite::Error::InvalidColumnType(3, "status".into(), rusqlite::types::Type::Text)
     })?;
     let potential_bytes_unlocked: i64 = row.get(5)?;
+    if potential_bytes_unlocked < 0 {
+        return Err(rusqlite::Error::InvalidColumnType(
+            5,
+            "potential_bytes_unlocked".into(),
+            rusqlite::types::Type::Integer,
+        ));
+    }
 
     Ok(Discovery {
         id: row.get(0)?,
@@ -294,5 +308,58 @@ mod tests {
             get_discovery(&conn, pending.id).unwrap().unwrap().status,
             DiscoveryStatus::Pending
         );
+    }
+
+    #[test]
+    fn insert_rejects_potential_bytes_above_sqlite_integer_range() {
+        let conn = migrated_conn();
+
+        let err = insert_discovery(
+            &conn,
+            &NewDiscovery {
+                kind: "duplicate-pattern",
+                payload_json: r#"{"name":"too-large"}"#,
+                confidence: 0.9,
+                potential_bytes_unlocked: i64::MAX as u64 + 1,
+            },
+        )
+        .expect_err("overflow should be rejected");
+
+        match err {
+            OntologyError::Populator(msg) => {
+                assert!(msg.contains("potential_bytes_unlocked"));
+            }
+            other => panic!("expected populator error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_discovery_rejects_negative_potential_bytes() {
+        let conn = migrated_conn();
+
+        conn.execute(
+            "INSERT INTO ontology_discoveries
+                (id, kind, payload, status, confidence, potential_bytes_unlocked, created_at, resolved_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)",
+            params![
+                42_i64,
+                "duplicate-pattern",
+                r#"{"name":"corrupt"}"#,
+                DiscoveryStatus::Pending.as_str(),
+                0.5_f64,
+                -1_i64,
+                123_i64,
+            ],
+        )
+        .unwrap();
+
+        let err = get_discovery(&conn, 42).expect_err("negative bytes should be rejected");
+        match err {
+            OntologyError::Sqlite(rusqlite::Error::InvalidColumnType(index, name, _)) => {
+                assert_eq!(index, 5);
+                assert_eq!(name, "potential_bytes_unlocked");
+            }
+            other => panic!("expected invalid column type, got {other:?}"),
+        }
     }
 }
