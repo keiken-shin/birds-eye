@@ -6,6 +6,7 @@ use crate::ontology::populators::{
     emit_property, CostTier, Populator, PopulatorContext, PopulatorError, PopulatorOutcome,
 };
 use crate::ontology::vocabulary::keys;
+use regex::Regex;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
@@ -280,12 +281,12 @@ fn emit_cross_folder_backups(
     };
 
     for backup in backups {
-        let stem = normalize_stem(&backup.name);
-        if stem.is_empty() || backup.size <= 0 {
+        let lookup_stem = backup_origin_lookup_stem(&backup.name);
+        if lookup_stem.is_empty() || backup.size <= 0 {
             continue;
         }
-        let like_pattern = format!("{stem}%");
-        let origins = load_backup_origin_candidates(conn, &backup, &like_pattern)?;
+        let like_pattern = format!("{lookup_stem}%");
+        let origins = load_backup_origin_candidates(conn, &backup, &lookup_stem, &like_pattern)?;
 
         for origin in origins {
             if pair_already_rejected(conn, backup.id, "backupOf", origin.id, ctx)? {
@@ -319,6 +320,7 @@ fn emit_cross_folder_backups(
 fn load_backup_origin_candidates(
     conn: &Connection,
     backup: &SiblingFile,
+    lookup_stem: &str,
     like_pattern: &str,
 ) -> Result<Vec<SiblingFile>, PopulatorError> {
     let mut stmt = conn.prepare(
@@ -348,8 +350,28 @@ fn load_backup_origin_candidates(
         .filter(|origin| {
             let ratio = backup.size as f64 / origin.size as f64;
             (0.5..=2.0).contains(&ratio)
+                && backup_origin_stem_matches(lookup_stem, &normalize_stem(&origin.name))
         })
         .collect())
+}
+
+fn backup_origin_lookup_stem(name: &str) -> String {
+    let mut stem = normalize_stem(name);
+    for suffix in [" backup", "_backup", "-backup", " copy", "_copy", "-copy"] {
+        if let Some(stripped) = stem.strip_suffix(suffix) {
+            stem = stripped.trim().to_string();
+            break;
+        }
+    }
+    stem
+}
+
+fn backup_origin_stem_matches(lookup_stem: &str, origin_stem: &str) -> bool {
+    lookup_stem.len() >= 3
+        && (origin_stem == lookup_stem
+            || origin_stem.starts_with(&format!("{lookup_stem} "))
+            || origin_stem.starts_with(&format!("{lookup_stem}_"))
+            || origin_stem.starts_with(&format!("{lookup_stem}-")))
 }
 
 fn emit_replaceability_inferences(
@@ -403,12 +425,10 @@ fn emit_replaceability_inferences(
         rows.collect::<Result<Vec<_>, _>>()?
     };
 
+    let installer_name = Regex::new(r"(?i)(setup|installer|install[_ .-]?)")
+        .map_err(|err| PopulatorError::Aborted(format!("bad installer regex: {err}")))?;
     for (entity_id, name) in redownloadable_entities {
-        let lower_name = name.to_lowercase();
-        if lower_name.contains("setup")
-            || lower_name.contains("installer")
-            || lower_name.contains("install_")
-        {
+        if installer_name.is_match(&name) {
             emit_property(
                 conn,
                 ctx,
@@ -589,6 +609,56 @@ mod tests {
     }
 
     #[test]
+    fn cross_folder_backup_matches_backup_suffix_to_origin_stem() {
+        let mut conn = migrated_conn();
+        insert_folder(&conn, 1, "/Active", "Active");
+        insert_folder(&conn, 2, "/Backup", "Backup");
+        insert_file(
+            &conn,
+            1,
+            1,
+            "/Active/budget.xlsx",
+            "budget.xlsx",
+            Some("xlsx"),
+            1_000,
+            Some(100),
+        );
+        insert_file(
+            &conn,
+            2,
+            2,
+            "/Backup/budget backup.xlsx",
+            "budget backup.xlsx",
+            Some("xlsx"),
+            1_050,
+            Some(200),
+        );
+        let backup_entity = ensure_file_entity(&conn, 2, "/Backup/budget backup.xlsx").unwrap();
+        assert_attr(
+            &conn,
+            backup_entity.id,
+            &NewAssertion {
+                key: keys::ROLE,
+                value: "backup",
+                source: "test",
+                confidence: 1.0,
+                display_in_global_views: true,
+            },
+        )
+        .unwrap();
+
+        let mut ctx = ctx_no_pause();
+        StructuralHeuristicPopulator::new()
+            .run(&mut conn, &mut ctx, None)
+            .unwrap();
+
+        let discoveries = list_pending_by_kind(&conn, "backupOf-pair", 10).unwrap();
+        assert_eq!(discoveries.len(), 1);
+        assert!(discoveries[0].payload.contains("\"origin_file_id\":1"));
+        assert!(discoveries[0].payload.contains("\"backup_file_id\":2"));
+    }
+
+    #[test]
     fn replaceability_inference_for_derivative_with_derivedfrom() {
         let mut conn = migrated_conn();
         insert_folder(&conn, 1, "/root", "root");
@@ -647,6 +717,48 @@ mod tests {
         assert_eq!(attrs.len(), 1);
         assert_eq!(attrs[0].value, "regenerable");
         assert_eq!(attrs[0].source, "heuristic:replaceability-from-derivedfrom");
+    }
+
+    #[test]
+    fn replaceability_inference_for_tool_named_install_exe() {
+        let mut conn = migrated_conn();
+        insert_folder(&conn, 1, "/root", "root");
+        insert_file(
+            &conn,
+            1,
+            1,
+            "/root/install.exe",
+            "install.exe",
+            Some("exe"),
+            1_000,
+            Some(100),
+        );
+        let tool = ensure_file_entity(&conn, 1, "/root/install.exe").unwrap();
+        assert_attr(
+            &conn,
+            tool.id,
+            &NewAssertion {
+                key: keys::ROLE,
+                value: "tool",
+                source: "test",
+                confidence: 1.0,
+                display_in_global_views: true,
+            },
+        )
+        .unwrap();
+
+        let mut ctx = ctx_no_pause();
+        StructuralHeuristicPopulator::new()
+            .run(&mut conn, &mut ctx, None)
+            .unwrap();
+
+        let attrs = get_attrs(&conn, tool.id, keys::REPLACEABILITY).unwrap();
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].value, "redownloadable");
+        assert_eq!(
+            attrs[0].source,
+            "heuristic:replaceability-from-installer-name"
+        );
     }
 
     fn sibling(
