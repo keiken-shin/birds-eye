@@ -9,7 +9,7 @@ use crate::ontology::negative::{is_rejected_pair, is_rejected_property_value};
 use crate::ontology::relations::{assert_relation, NewRelation};
 use crate::ontology::vocabulary::EntityKind;
 use crate::ontology::OntologyError;
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -160,6 +160,22 @@ pub fn emit_property(
         return Ok(false);
     }
 
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1
+             FROM ontology_attrs
+             WHERE entity_id = ?1
+               AND key = ?2
+               AND value = ?3
+               AND source = ?4
+         )",
+        params![entity_id, key, value, source],
+        |row| row.get(0),
+    )?;
+    if exists {
+        return Ok(false);
+    }
+
     assert_attr(
         conn,
         entity_id,
@@ -186,6 +202,22 @@ pub fn emit_relation(
 ) -> Result<bool, PopulatorError> {
     if is_rejected_pair(conn, subject_id, predicate, object_id)? {
         ctx.note_skipped();
+        return Ok(false);
+    }
+
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1
+             FROM ontology_relations
+             WHERE subject_id = ?1
+               AND predicate = ?2
+               AND object_id = ?3
+               AND source = ?4
+         )",
+        params![subject_id, predicate, object_id, source],
+        |row| row.get(0),
+    )?;
+    if exists {
         return Ok(false);
     }
 
@@ -353,6 +385,45 @@ mod tests {
     }
 
     #[test]
+    fn emit_property_is_idempotent_for_same_source_value() {
+        let mut conn = migrated_conn();
+        let (entity_id, _) = seed_two_file_entities(&conn);
+        let mut ctx = dummy_ctx();
+
+        let first = emit_property(
+            &mut conn,
+            &mut ctx,
+            entity_id,
+            "role",
+            "source",
+            "rule:test",
+            0.8,
+            true,
+        )
+        .unwrap();
+        let second = emit_property(
+            &mut conn,
+            &mut ctx,
+            entity_id,
+            "role",
+            "source",
+            "rule:test",
+            0.8,
+            true,
+        )
+        .unwrap();
+
+        assert!(first);
+        assert!(!second);
+        assert_eq!(ctx.snapshot().assertions_emitted, 1);
+        assert_eq!(ctx.snapshot().assertions_skipped_by_negative, 0);
+        let attrs = get_attrs(&conn, entity_id, "role").unwrap();
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].value, "source");
+        assert_eq!(attrs[0].source, "rule:test");
+    }
+
+    #[test]
     fn emit_property_skips_when_rejected() {
         let mut conn = migrated_conn();
         let (entity_id, _) = seed_two_file_entities(&conn);
@@ -400,6 +471,43 @@ mod tests {
         let relations = outbound(&conn, derivative, predicates::DERIVED_FROM).unwrap();
         assert_eq!(relations.len(), 1);
         assert_eq!(relations[0].object_id, source);
+    }
+
+    #[test]
+    fn emit_relation_is_idempotent_for_same_source() {
+        let mut conn = migrated_conn();
+        let (source, derivative) = seed_two_file_entities(&conn);
+        let mut ctx = dummy_ctx();
+
+        let first = emit_relation(
+            &mut conn,
+            &mut ctx,
+            derivative,
+            predicates::DERIVED_FROM,
+            source,
+            "heuristic:test",
+            0.7,
+        )
+        .unwrap();
+        let second = emit_relation(
+            &mut conn,
+            &mut ctx,
+            derivative,
+            predicates::DERIVED_FROM,
+            source,
+            "heuristic:test",
+            0.7,
+        )
+        .unwrap();
+
+        assert!(first);
+        assert!(!second);
+        assert_eq!(ctx.snapshot().assertions_emitted, 1);
+        assert_eq!(ctx.snapshot().assertions_skipped_by_negative, 0);
+        let relations = outbound(&conn, derivative, predicates::DERIVED_FROM).unwrap();
+        assert_eq!(relations.len(), 1);
+        assert_eq!(relations[0].object_id, source);
+        assert_eq!(relations[0].source, "heuristic:test");
     }
 
     #[test]

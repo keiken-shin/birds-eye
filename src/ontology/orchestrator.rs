@@ -193,14 +193,13 @@ impl PopulatorOrchestrator {
             }
 
             let prior = read_state(conn, populator.name())?;
-            if matches!(
-                prior.as_ref().map(|state| &state.status),
-                Some(PopulatorStatus::Completed)
-            ) {
-                continue;
-            }
-
-            let resume_cursor = prior.as_ref().and_then(|state| state.cursor.as_deref());
+            let resume_cursor = prior.as_ref().and_then(|state| {
+                if state.status == PopulatorStatus::Completed {
+                    None
+                } else {
+                    state.cursor.as_deref()
+                }
+            });
             let mut ctx = PopulatorContext::new(budget, Arc::clone(&pause));
             upsert_state(
                 conn,
@@ -410,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn orchestrator_skips_completed_populators_on_rerun() {
+    fn orchestrator_reruns_completed_populators_safely() {
         let mut conn = migrated_conn();
         let orchestrator = PopulatorOrchestrator::new(vec![Box::new(DummyPopulator {
             name: "cheap",
@@ -426,10 +425,11 @@ mod tests {
                 .len(),
             1
         );
-        assert!(orchestrator
+        let outcomes = orchestrator
             .run(&mut conn, BudgetTier::CheapOnly, pause())
-            .unwrap()
-            .is_empty());
+            .unwrap();
+
+        assert_eq!(outcomes.len(), 1);
     }
 
     #[test]
@@ -576,19 +576,61 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    #[test]
+    fn default_orchestrator_rerun_enriches_new_files_without_duplicate_rule_attrs() {
+        let mut conn = migrated_conn();
+        seed_root_folder(&conn);
+        insert_file(&conn, 1, "/root/one.psd", "one.psd", Some("psd"));
+        let orchestrator = PopulatorOrchestrator::default();
+
+        orchestrator
+            .run(&mut conn, BudgetTier::CheapOnly, pause())
+            .unwrap();
+        assert_eq!(source_role_count(&conn), 1);
+
+        insert_file(&conn, 2, "/root/two.psd", "two.psd", Some("psd"));
+        let outcomes = orchestrator
+            .run(&mut conn, BudgetTier::CheapOnly, pause())
+            .unwrap();
+
+        assert!(!outcomes.is_empty());
+        assert_eq!(source_role_count(&conn), 2);
+    }
+
     fn seed_index(conn: &Connection) {
+        seed_root_folder(conn);
+        insert_file(conn, 1, "/root/node_modules/a.js", "a.js", Some("js"));
+    }
+
+    fn seed_root_folder(conn: &Connection) {
         conn.execute(
             "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
              VALUES (1, NULL, '/root', 'root', 0, 0)",
             [],
         )
         .unwrap();
+    }
+
+    fn insert_file(conn: &Connection, id: i64, path: &str, name: &str, extension: Option<&str>) {
         conn.execute(
             "INSERT INTO files (id, folder_id, path, name, extension, size, indexed_at)
-             VALUES (1, 1, '/root/node_modules/a.js', 'a.js', 'js', 10, 0)",
-            [],
+             VALUES (?1, 1, ?2, ?3, ?4, 10, 0)",
+            (id, path, name, extension),
         )
         .unwrap();
+    }
+
+    fn source_role_count(conn: &Connection) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*)
+             FROM ontology_attrs
+             WHERE key = 'role'
+               AND value = 'source'
+               AND source = 'rule:ext-design-source'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
     }
 
     fn temp_db_path(label: &str) -> std::path::PathBuf {
