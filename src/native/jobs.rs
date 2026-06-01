@@ -78,6 +78,7 @@ pub struct ScanJobManager {
 struct JobState {
     status: JobStatusDto,
     controller: ScanController,
+    enrichment_pause: Arc<AtomicBool>,
     events: Vec<JobEventDto>,
 }
 
@@ -105,8 +106,10 @@ impl ScanJobManager {
         let root_display = request.root.display().to_string();
         let scanner = Scanner::new(ScanOptions::new(request.root));
         let controller = scanner.controller();
+        let enrichment_pause = Arc::new(AtomicBool::new(false));
         let events = scanner.scan();
         let jobs = Arc::clone(&self.jobs);
+        let worker_enrichment_pause = Arc::clone(&enrichment_pause);
 
         {
             let mut jobs = self
@@ -118,6 +121,7 @@ impl ScanJobManager {
                 JobState {
                     status: JobStatusDto::Running,
                     controller: controller.clone(),
+                    enrichment_pause: Arc::clone(&enrichment_pause),
                     events: Vec::new(),
                 },
             );
@@ -420,11 +424,10 @@ impl ScanJobManager {
                                 "enrichment",
                                 "phase 2 starting".to_owned(),
                             );
-                            let enrichment_pause = Arc::new(AtomicBool::new(false));
                             match run_phase2(
                                 &request.index_path,
                                 BudgetTier::CheapOnly,
-                                enrichment_pause,
+                                Arc::clone(&worker_enrichment_pause),
                             ) {
                                 Ok(true) => emit_log(
                                     &jobs,
@@ -487,6 +490,7 @@ impl ScanJobManager {
             .get(&job_id)
             .ok_or_else(|| format!("unknown scan job {job_id}"))?;
         job.controller.cancel();
+        job.enrichment_pause.store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -942,6 +946,31 @@ mod tests {
             status,
             JobStatusDto::Cancelled | JobStatusDto::Completed
         ));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn cancel_job_sets_enrichment_pause_flag() {
+        let root = test_root("cancel-enrichment");
+        let scanner = Scanner::new(ScanOptions::new(root.clone()));
+        let controller = scanner.controller();
+        let enrichment_pause = Arc::new(AtomicBool::new(false));
+        let manager = ScanJobManager::new();
+        let job_id = 42;
+
+        manager.jobs.lock().unwrap().insert(
+            job_id,
+            JobState {
+                status: JobStatusDto::Running,
+                controller,
+                enrichment_pause: Arc::clone(&enrichment_pause),
+                events: Vec::new(),
+            },
+        );
+
+        manager.cancel_job(job_id).expect("cancel job");
+
+        assert!(enrichment_pause.load(Ordering::Relaxed));
         cleanup(&root);
     }
 
