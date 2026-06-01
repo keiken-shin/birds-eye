@@ -1,13 +1,15 @@
 use crate::index::writer::ScanMode;
 use crate::index::IndexWriter;
 use crate::native::phase_timer::{PhaseTimer, PhaseTimingEntry};
+use crate::ontology::orchestrator::run_phase2;
+use crate::ontology::populators::BudgetTier;
 use crate::scanner::{ScanController, ScanEvent, ScanOptions, Scanner};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -136,9 +138,8 @@ impl ScanJobManager {
             let log_path = request
                 .index_path
                 .with_file_name(format!("{log_stem}-{ts}-{job_id}.log"));
-            let log_file: RefCell<Option<BufWriter<std::fs::File>>> = RefCell::new(
-                std::fs::File::create(&log_path).ok().map(BufWriter::new),
-            );
+            let log_file: RefCell<Option<BufWriter<std::fs::File>>> =
+                RefCell::new(std::fs::File::create(&log_path).ok().map(BufWriter::new));
             let mut timer = PhaseTimer::new();
             let mut phase_watcher = PhaseWatcher::new();
 
@@ -171,7 +172,10 @@ impl ScanJobManager {
                 format!(
                     "job started id={job_id} root={} strategy={}",
                     root_display,
-                    request.scan_strategy.as_deref().unwrap_or(ScanMode::default().as_id())
+                    request
+                        .scan_strategy
+                        .as_deref()
+                        .unwrap_or(ScanMode::default().as_id())
                 ),
             );
 
@@ -184,7 +188,15 @@ impl ScanJobManager {
             for event in events {
                 // Route Verbose events from workers to the log only — skip all other processing.
                 if let ScanEvent::Verbose { phase, message } = &event {
-                    emit_log(&jobs, listener.as_ref(), &log_file, job_id, job_start, phase, message.clone());
+                    emit_log(
+                        &jobs,
+                        listener.as_ref(),
+                        &log_file,
+                        job_id,
+                        job_start,
+                        phase,
+                        message.clone(),
+                    );
                     continue;
                 }
 
@@ -202,7 +214,10 @@ impl ScanJobManager {
                             job_id,
                             job_start,
                             "index_write",
-                            format!("batch committed files_so_far={files_indexed} elapsed_ms={}", job_start.elapsed().as_millis()),
+                            format!(
+                                "batch committed files_so_far={files_indexed} elapsed_ms={}",
+                                job_start.elapsed().as_millis()
+                            ),
                         );
                     }
                 }
@@ -250,7 +265,12 @@ impl ScanJobManager {
                 let mut progress_listener =
                     |progress: crate::index::writer::FinalizationProgress| {
                         if let Some(stats) = &final_stats {
-                            phase_watcher.on_progress(&progress.message, progress.progress_current, progress.progress_total, &mut timer);
+                            phase_watcher.on_progress(
+                                &progress.message,
+                                progress.progress_current,
+                                progress.progress_total,
+                                &mut timer,
+                            );
                             emit_log(
                                 &jobs,
                                 listener.as_ref(),
@@ -260,7 +280,9 @@ impl ScanJobManager {
                                 "finalize",
                                 format!(
                                     "{} ({}/{})",
-                                    progress.message, progress.progress_current, progress.progress_total
+                                    progress.message,
+                                    progress.progress_current,
+                                    progress.progress_total
                                 ),
                             );
                             push_event(
@@ -319,7 +341,12 @@ impl ScanJobManager {
                     // refinement is done.
                     let mut progress_listener =
                         |progress: crate::index::writer::FinalizationProgress| {
-                            phase_watcher.on_progress(&progress.message, progress.progress_current, progress.progress_total, &mut timer);
+                            phase_watcher.on_progress(
+                                &progress.message,
+                                progress.progress_current,
+                                progress.progress_total,
+                                &mut timer,
+                            );
                             emit_log(
                                 &jobs,
                                 listener.as_ref(),
@@ -329,7 +356,9 @@ impl ScanJobManager {
                                 "finalize",
                                 format!(
                                     "{} ({}/{})",
-                                    progress.message, progress.progress_current, progress.progress_total
+                                    progress.message,
+                                    progress.progress_current,
+                                    progress.progress_total
                                 ),
                             );
                             push_event(
@@ -380,12 +409,52 @@ impl ScanJobManager {
                                 stats.files_scanned,
                             );
                             completed.phase_timings = Some(phase_timings);
-                            push_event(
+
+                            // ---- Phase 2: ontology enrichment (best-effort, never fails the job). ----
+                            emit_log(
                                 &jobs,
-                                job_id,
-                                completed,
                                 listener.as_ref(),
+                                &log_file,
+                                job_id,
+                                job_start,
+                                "enrichment",
+                                "phase 2 starting".to_owned(),
                             );
+                            let enrichment_pause = Arc::new(AtomicBool::new(false));
+                            match run_phase2(
+                                &request.index_path,
+                                BudgetTier::CheapOnly,
+                                enrichment_pause,
+                            ) {
+                                Ok(true) => emit_log(
+                                    &jobs,
+                                    listener.as_ref(),
+                                    &log_file,
+                                    job_id,
+                                    job_start,
+                                    "enrichment",
+                                    "phase 2 completed".to_owned(),
+                                ),
+                                Ok(false) => emit_log(
+                                    &jobs,
+                                    listener.as_ref(),
+                                    &log_file,
+                                    job_id,
+                                    job_start,
+                                    "enrichment",
+                                    "phase 2 skipped (ontology disabled for this index)".to_owned(),
+                                ),
+                                Err(e) => emit_log(
+                                    &jobs,
+                                    listener.as_ref(),
+                                    &log_file,
+                                    job_id,
+                                    job_start,
+                                    "enrichment",
+                                    format!("phase 2 failed (non-fatal): {e}"),
+                                ),
+                            }
+                            push_event(&jobs, job_id, completed, listener.as_ref());
                         }
                         Err(error) => {
                             push_event(
@@ -607,7 +676,9 @@ impl JobEventDto {
                 log_line: None,
                 phase_timings: None,
             }),
-            ScanEvent::FileIndexed(_) | ScanEvent::FolderIndexed(_) | ScanEvent::Verbose { .. } => None,
+            ScanEvent::FileIndexed(_) | ScanEvent::FolderIndexed(_) | ScanEvent::Verbose { .. } => {
+                None
+            }
         }
     }
 
@@ -724,15 +795,11 @@ fn write_timing_summary(
 struct PhaseWatcher;
 
 impl PhaseWatcher {
-    fn new() -> Self { Self }
+    fn new() -> Self {
+        Self
+    }
 
-    fn on_progress(
-        &mut self,
-        message: &str,
-        current: u64,
-        total: u64,
-        timer: &mut PhaseTimer,
-    ) {
+    fn on_progress(&mut self, message: &str, current: u64, total: u64, timer: &mut PhaseTimer) {
         let phase: Option<&'static str> = match message {
             "Marking missing files" => Some("mark_deleted"),
             "Computing folder totals" => Some("folder_rollups"),
@@ -755,6 +822,7 @@ impl PhaseWatcher {
 mod tests {
     use super::*;
     use crate::native::api::{index_metadata, query_index_overview, IndexQueryRequest};
+    use rusqlite::Connection;
     use std::fs::{self, File};
     use std::io::Write;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -822,10 +890,13 @@ mod tests {
         assert_eq!(metadata.scan_strategy, "metadata");
 
         {
-            let verify_writer = IndexWriter::open(&index_path).expect("open writer for verification");
+            let verify_writer =
+                IndexWriter::open(&index_path).expect("open writer for verification");
             let candidate_count: i64 = verify_writer
                 .connection()
-                .query_row("SELECT COUNT(*) FROM duplicate_candidates", [], |r| r.get(0))
+                .query_row("SELECT COUNT(*) FROM duplicate_candidates", [], |r| {
+                    r.get(0)
+                })
                 .expect("count candidates");
             let group_count: i64 = verify_writer
                 .connection()
@@ -959,6 +1030,109 @@ mod tests {
         cleanup(&root);
     }
 
+    #[test]
+    fn phase2_runs_after_scan_when_ontology_enabled() {
+        let root = test_root("phase2-enabled");
+        let data_root = root.join("data");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(&data_root).expect("failed to create folder");
+        write_file(&data_root.join("logo.psd"), b"photoshop source");
+
+        let manager = ScanJobManager::new();
+        let initial = manager
+            .start_scan_job(StartScanJobRequest {
+                root: data_root.clone(),
+                index_path: index_path.clone(),
+                scan_strategy: None,
+            })
+            .expect("failed to start initial job");
+        wait_for_terminal(&manager, initial.job_id);
+
+        {
+            let conn = Connection::open(&index_path).expect("open index");
+            crate::ontology::enabled::enable(&conn).expect("enable ontology");
+        }
+
+        let rerun = manager
+            .start_scan_job(StartScanJobRequest {
+                root: data_root,
+                index_path: index_path.clone(),
+                scan_strategy: None,
+            })
+            .expect("failed to start rerun job");
+        wait_for_terminal(&manager, rerun.job_id);
+
+        let conn = Connection::open(&index_path).expect("open index for verification");
+        let role_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ontology_attrs WHERE key = 'role' AND value = 'source'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count ontology role attrs");
+        assert!(role_count > 0, "expected PSD source role attr");
+
+        let events = manager
+            .job_events_since(rerun.job_id, 0)
+            .expect("failed to fetch events");
+        assert!(
+            events.iter().any(|event| {
+                event
+                    .log_line
+                    .as_ref()
+                    .map(|line| line.phase == "enrichment")
+                    .unwrap_or(false)
+            }),
+            "expected enrichment log line"
+        );
+
+        drop(conn);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn phase2_is_noop_when_ontology_disabled() {
+        let root = test_root("phase2-disabled");
+        let data_root = root.join("data");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(&data_root).expect("failed to create folder");
+        write_file(&data_root.join("logo.psd"), b"photoshop source");
+
+        let manager = ScanJobManager::new();
+        let response = manager
+            .start_scan_job(StartScanJobRequest {
+                root: data_root,
+                index_path: index_path.clone(),
+                scan_strategy: None,
+            })
+            .expect("failed to start job");
+        wait_for_terminal(&manager, response.job_id);
+
+        let conn = Connection::open(&index_path).expect("open index for verification");
+        let role_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ontology_attrs WHERE key = 'role' AND value = 'source'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count ontology role attrs");
+        assert_eq!(role_count, 0, "ontology should remain disabled");
+
+        let events = manager
+            .job_events_since(response.job_id, 0)
+            .expect("failed to fetch events");
+        assert!(
+            events
+                .iter()
+                .filter_map(|event| event.log_line.as_ref())
+                .any(|line| line.message.contains("phase 2 skipped")),
+            "expected phase 2 skipped log line"
+        );
+
+        drop(conn);
+        cleanup(&root);
+    }
+
     fn wait_for_terminal(manager: &ScanJobManager, job_id: u64) {
         for _ in 0..80 {
             let status = manager.job_status(job_id).expect("missing status");
@@ -1051,7 +1225,12 @@ mod tests {
         let completed = events.iter().find(|e| e.status == JobStatusDto::Completed);
         assert!(completed.is_some(), "no Completed event");
         assert!(
-            completed.unwrap().phase_timings.as_ref().map(|v| !v.is_empty()).unwrap_or(false),
+            completed
+                .unwrap()
+                .phase_timings
+                .as_ref()
+                .map(|v| !v.is_empty())
+                .unwrap_or(false),
             "Completed event missing phase_timings"
         );
 
