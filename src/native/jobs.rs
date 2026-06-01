@@ -457,6 +457,8 @@ impl ScanJobManager {
                                     format!("phase 2 failed (non-fatal): {e}"),
                                 ),
                             }
+                            let completed =
+                                terminal_after_enrichment(completed, &worker_enrichment_pause);
                             push_event(&jobs, job_id, completed, listener.as_ref());
                         }
                         Err(error) => {
@@ -745,6 +747,17 @@ fn push_event(
     }
 }
 
+fn terminal_after_enrichment(
+    mut completed: JobEventDto,
+    enrichment_pause: &Arc<AtomicBool>,
+) -> JobEventDto {
+    if enrichment_pause.load(Ordering::Relaxed) {
+        completed.status = JobStatusDto::Cancelled;
+        completed.message = "cancelled during enrichment".to_owned();
+    }
+    completed
+}
+
 fn emit_log(
     jobs: &Arc<Mutex<HashMap<u64, JobState>>>,
     listener: Option<&JobEventListener>,
@@ -950,27 +963,87 @@ mod tests {
     }
 
     #[test]
-    fn cancel_job_sets_enrichment_pause_flag() {
-        let root = test_root("cancel-enrichment");
-        let scanner = Scanner::new(ScanOptions::new(root.clone()));
-        let controller = scanner.controller();
-        let enrichment_pause = Arc::new(AtomicBool::new(false));
+    fn cancelled_enrichment_replaces_completed_terminal_event() {
+        let pause = Arc::new(AtomicBool::new(true));
+        let stats = crate::scanner::ScanStats {
+            files_scanned: 7,
+            folders_scanned: 2,
+            bytes_scanned: 99,
+            inaccessible_entries: 0,
+            queue_depth: 0,
+            active_workers: 0,
+            elapsed: Duration::ZERO,
+            files_per_sec: 0.0,
+            bytes_per_sec: 0.0,
+            current_path: None,
+        };
+        let completed = JobEventDto::completed_with_progress(42, "done".to_owned(), &stats, 7, 7);
+
+        let terminal = terminal_after_enrichment(completed, &pause);
+
+        assert_eq!(terminal.status, JobStatusDto::Cancelled);
+        assert_eq!(terminal.message, "cancelled during enrichment");
+        assert_eq!(terminal.files_scanned, 7);
+    }
+
+    #[test]
+    fn cancel_during_phase2_reports_cancelled() {
+        let root = test_root("cancel-during-phase2");
+        let data_root = root.join("data");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(&data_root).expect("failed to create folder");
+        write_file(&data_root.join("logo.psd"), b"photoshop source");
+
         let manager = ScanJobManager::new();
-        let job_id = 42;
+        let initial = manager
+            .start_scan_job(StartScanJobRequest {
+                root: data_root.clone(),
+                index_path: index_path.clone(),
+                scan_strategy: None,
+            })
+            .expect("failed to start initial job");
+        wait_for_terminal(&manager, initial.job_id);
 
-        manager.jobs.lock().unwrap().insert(
-            job_id,
-            JobState {
-                status: JobStatusDto::Running,
-                controller,
-                enrichment_pause: Arc::clone(&enrichment_pause),
-                events: Vec::new(),
-            },
-        );
+        {
+            let conn = Connection::open(&index_path).expect("open index");
+            crate::ontology::enabled::enable(&conn).expect("enable ontology");
+        }
 
-        manager.cancel_job(job_id).expect("cancel job");
+        let manager_for_listener = manager.clone();
+        let rerun = manager
+            .start_scan_job_with_listener(
+                StartScanJobRequest {
+                    root: data_root,
+                    index_path,
+                    scan_strategy: None,
+                },
+                Some(Arc::new(move |event| {
+                    if event
+                        .log_line
+                        .as_ref()
+                        .map(|line| {
+                            line.phase == "enrichment" && line.message == "phase 2 starting"
+                        })
+                        .unwrap_or(false)
+                    {
+                        manager_for_listener
+                            .cancel_job(event.job_id)
+                            .expect("cancel job during phase 2");
+                    }
+                })),
+            )
+            .expect("failed to start rerun job");
+        wait_for_terminal(&manager, rerun.job_id);
 
-        assert!(enrichment_pause.load(Ordering::Relaxed));
+        let status = manager.job_status(rerun.job_id).expect("missing status");
+        assert_eq!(status, JobStatusDto::Cancelled);
+
+        let events = manager
+            .job_events_since(rerun.job_id, 0)
+            .expect("failed to fetch events");
+        assert!(events
+            .iter()
+            .any(|event| event.message == "cancelled during enrichment"));
         cleanup(&root);
     }
 
