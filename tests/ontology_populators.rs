@@ -132,6 +132,7 @@ fn phase2_populates_sensitivity_and_role_on_real_dataset() {
                      WHERE e.linked_file_id = f.id
                        AND a.key = 'sensitivity'
                        AND a.value = 'restricted'
+                       AND ABS(a.confidence - 1.0) < 1e-6
                        AND a.display_in_global_views = 0
                    )",
                 [],
@@ -144,26 +145,41 @@ fn phase2_populates_sensitivity_and_role_on_real_dataset() {
         );
     }
 
-    let list_psd_sources: i64 = conn
+    let list_psd_files: i64 = conn
         .query_row(
             "SELECT COUNT(*)
              FROM files f
-             JOIN ontology_entities e ON e.linked_file_id = f.id
-             JOIN ontology_attrs a ON a.entity_id = e.id
              WHERE f.deleted_at IS NULL
                AND REPLACE(f.path, '\\', '/') LIKE '%/Toonie_world/%'
-               AND lower(f.name) = 'list.psd'
-               AND a.key = 'role'
-               AND a.value = 'source'
-               AND a.confidence >= 0.85",
+               AND lower(f.name) = 'list.psd'",
             [],
             |row| row.get(0),
         )
-        .expect("failed to count Toonie_world/List.psd source-role assertions");
-    if list_psd_sources == 0 {
-        eprintln!(
-            "note: Toonie_world/List.psd not indexed with role=source; checking any active PSD"
+        .expect("failed to count active indexed Toonie_world/List.psd rows");
+
+    if list_psd_files > 0 {
+        let list_psd_sources: i64 = conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM files f
+                 JOIN ontology_entities e ON e.linked_file_id = f.id
+                 JOIN ontology_attrs a ON a.entity_id = e.id
+                 WHERE f.deleted_at IS NULL
+                   AND REPLACE(f.path, '\\', '/') LIKE '%/Toonie_world/%'
+                   AND lower(f.name) = 'list.psd'
+                   AND a.key = 'role'
+                   AND a.value = 'source'
+                   AND a.confidence >= 0.85",
+                [],
+                |row| row.get(0),
+            )
+            .expect("failed to count Toonie_world/List.psd source-role assertions");
+        assert!(
+            list_psd_sources >= 1,
+            "active indexed Toonie_world/List.psd did not receive role=source at confidence >= 0.85"
         );
+    } else {
+        eprintln!("note: Toonie_world/List.psd was not indexed; checking any active PSD");
         let psd_sources: i64 = conn
             .query_row(
                 "SELECT COUNT(*)
