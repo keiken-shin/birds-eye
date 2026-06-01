@@ -1,7 +1,7 @@
 use birds_eye::native::{JobStatusDto, ScanJobManager, StartScanJobRequest};
 use birds_eye::ontology::enabled::enable;
 use rusqlite::Connection;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -30,6 +30,17 @@ fn test_index_path(name: &str) -> PathBuf {
         .join(format!("{name}-{nanos}"));
     std::fs::create_dir_all(&dir).expect("failed to create test index folder");
     dir.join("index.sqlite")
+}
+
+fn contains_file_under(path: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return false;
+    };
+
+    entries.filter_map(Result::ok).any(|entry| {
+        let path = entry.path();
+        path.is_file() || (path.is_dir() && contains_file_under(&path))
+    })
 }
 
 fn wait_for_terminal(manager: &ScanJobManager, job_id: u64) {
@@ -80,7 +91,9 @@ fn phase2_populates_sensitivity_and_role_on_real_dataset() {
         return;
     };
 
+    let fixture_has_personal_details_files = contains_file_under(&dataset.join("Personal Details"));
     let index_path = test_index_path("phase2-real-dataset");
+    let test_dir = index_path.parent().map(Path::to_path_buf);
     let manager = ScanJobManager::new();
 
     scan_dataset(&manager, dataset.clone(), index_path.clone());
@@ -106,19 +119,22 @@ fn phase2_populates_sensitivity_and_role_on_real_dataset() {
 
     let conn = Connection::open(index_path).expect("failed to reopen index database");
 
-    let personal_details_files: i64 = conn
-        .query_row(
-            "SELECT COUNT(*)
-             FROM files f
-             WHERE f.deleted_at IS NULL
-               AND REPLACE(f.path, '\\', '/') LIKE '%Personal Details/%'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("failed to count Personal Details files");
-    if personal_details_files == 0 {
-        eprintln!("note: fixture has no active Personal Details files; skipping Personal Details sensitivity sub-assertion");
-    } else {
+    if fixture_has_personal_details_files {
+        let personal_details_files: i64 = conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM files f
+                 WHERE f.deleted_at IS NULL
+                   AND REPLACE(f.path, '\\', '/') LIKE '%Personal Details/%'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("failed to count active indexed Personal Details files");
+        assert!(
+            personal_details_files >= 1,
+            "fixture contains Personal Details files, but none were actively indexed"
+        );
+
         let bad_personal_details_rows: i64 = conn
             .query_row(
                 "SELECT COUNT(*)
@@ -143,6 +159,8 @@ fn phase2_populates_sensitivity_and_role_on_real_dataset() {
             bad_personal_details_rows, 0,
             "some active Personal Details files lack restricted sensitivity hidden from global views"
         );
+    } else {
+        eprintln!("note: fixture has no active Personal Details files; skipping Personal Details sensitivity sub-assertion");
     }
 
     let list_psd_files: i64 = conn
@@ -208,13 +226,19 @@ fn phase2_populates_sensitivity_and_role_on_real_dataset() {
         .query_row(
             "SELECT COUNT(*)
              FROM ontology_populator_state
-             WHERE status = 'completed'",
+             WHERE status = 'completed'
+               AND populator_name IN ('RulePopulator', 'StructuralHeuristicPopulator')",
             [],
             |row| row.get(0),
         )
-        .expect("failed to count completed ontology populator states");
-    assert!(
-        completed_populators >= 2,
-        "expected at least two completed ontology populator state rows"
+        .expect("failed to count completed required ontology populator states");
+    assert_eq!(
+        completed_populators, 2,
+        "expected completed ontology populator state rows for RulePopulator and StructuralHeuristicPopulator"
     );
+
+    drop(conn);
+    if let Some(test_dir) = test_dir {
+        std::fs::remove_dir_all(&test_dir).expect("failed to remove test index folder");
+    }
 }
