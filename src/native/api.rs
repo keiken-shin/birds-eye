@@ -1,6 +1,13 @@
 use crate::index::writer::ScanMode;
 use crate::index::IndexWriter;
+use crate::ontology::cleanup::executor::{execute_plan_with, CleanupResult, SystemTrasher, DEFAULT_RETENTION_DAYS};
+use crate::ontology::cleanup::plans::{candidates_for_plan, create_plan, CleanupScope};
+use crate::ontology::cleanup::predicate::list_all_candidates;
+use crate::ontology::cleanup::restore::{recently_cleaned, restore_with, CleanupLogEntry, SystemRestorer};
+use crate::ontology::cleanup::CleanupCandidate;
+use crate::ontology::pinning::{pin_file as pin_file_db, unpin_file as unpin_file_db};
 use crate::scanner::{ScanEvent, ScanOptions, Scanner};
+use rusqlite::Connection;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -116,6 +123,59 @@ pub struct TrashFilesResponse {
     pub failed: Vec<TrashFailure>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct CleanupPlanRequest {
+    pub index_path: PathBuf,
+    #[serde(default)]
+    pub reasons: Vec<String>,
+    #[serde(default)]
+    pub max_size: Option<i64>,
+    #[serde(default)]
+    pub path_prefix: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CleanupPlanResponse {
+    pub plan_id: i64,
+    pub total_files: u64,
+    pub total_bytes: u64,
+    pub candidates: Vec<CleanupCandidate>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExecuteCleanupPlanRequest {
+    pub index_path: PathBuf,
+    pub plan_id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RecentlyCleanedRequest {
+    pub index_path: PathBuf,
+    pub limit: u32,
+    #[serde(default)]
+    pub offset: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RestoreCleanupRequest {
+    pub index_path: PathBuf,
+    pub entry_id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PinFileRequest {
+    pub index_path: PathBuf,
+    pub file_id: i64,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UnpinFileRequest {
+    pub index_path: PathBuf,
+    pub file_id: i64,
+}
+
 pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
     let mut failed = Vec::new();
     // We call delete() per path (not delete_all) so one failure does not abort the rest.
@@ -128,6 +188,65 @@ pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
         }
     }
     TrashFilesResponse { failed }
+}
+
+/// Build a draft cleanup plan from a scope and return its live candidate preview.
+pub fn cleanup_plan(request: CleanupPlanRequest) -> Result<CleanupPlanResponse, String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let scope = CleanupScope {
+        reasons: request.reasons,
+        max_size: request.max_size,
+        path_prefix: request.path_prefix,
+    };
+    let plan_id = create_plan(&conn, &scope).map_err(|e| e.to_string())?;
+    let candidates = candidates_for_plan(&conn, plan_id).map_err(|e| e.to_string())?;
+    let total_files = candidates.len() as u64;
+    let total_bytes = candidates.iter().map(|c| c.size.max(0) as u64).sum();
+    Ok(CleanupPlanResponse {
+        plan_id,
+        total_files,
+        total_bytes,
+        candidates,
+    })
+}
+
+/// Execute a previously created draft plan: recycle-bin-first, with restore log.
+pub fn execute_cleanup_plan(request: ExecuteCleanupPlanRequest) -> Result<CleanupResult, String> {
+    let mut conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    execute_plan_with(&mut conn, request.plan_id, &SystemTrasher, DEFAULT_RETENTION_DAYS)
+        .map_err(|e| e.to_string())
+}
+
+/// List the persistent "Recently Cleaned" log, newest first.
+pub fn recently_cleaned_log(
+    request: RecentlyCleanedRequest,
+) -> Result<Vec<CleanupLogEntry>, String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    recently_cleaned(&conn, request.limit, request.offset).map_err(|e| e.to_string())
+}
+
+/// Restore a cleaned file from the recycle bin to its original path.
+pub fn restore_from_cleanup_log(request: RestoreCleanupRequest) -> Result<(), String> {
+    let mut conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    restore_with(&mut conn, request.entry_id, &SystemRestorer).map_err(|e| e.to_string())
+}
+
+/// Pin a file so it is permanently excluded from cleanup queues.
+pub fn pin_file(request: PinFileRequest) -> Result<(), String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    pin_file_db(&conn, request.file_id, request.note.as_deref()).map_err(|e| e.to_string())
+}
+
+/// Remove a pin.
+pub fn unpin_file(request: UnpinFileRequest) -> Result<(), String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    unpin_file_db(&conn, request.file_id).map_err(|e| e.to_string())
+}
+
+/// List the live cleanup candidates without creating a plan (preview/treemap feed).
+pub fn list_cleanup_candidates(index_path: PathBuf) -> Result<Vec<CleanupCandidate>, String> {
+    let conn = Connection::open(&index_path).map_err(|e| e.to_string())?;
+    list_all_candidates(&conn).map_err(|e| e.to_string())
 }
 
 pub fn reveal_in_explorer(path: String) -> Result<(), String> {
@@ -825,5 +944,77 @@ mod tests {
         if root.exists() {
             fs::remove_dir_all(root).expect("failed to remove test folder");
         }
+    }
+
+    #[test]
+    fn cleanup_plan_api_returns_seeded_candidate() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use crate::ontology::attrs::{assert_attr, NewAssertion};
+        use crate::ontology::entities::upsert_entity;
+        use crate::ontology::vocabulary::{keys, EntityKind};
+        use rusqlite::Connection;
+
+        // Create a temp dir with an index.
+        let root = std::env::temp_dir()
+            .join(format!("be-cleanup-api-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let index_path = root.join("index.sqlite");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, '/root', 'root', 0, 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, indexed_at)
+                 VALUES (1, 1, '/root/dist/a.js', 'a.js', 100, 0)",
+                [],
+            )
+            .unwrap();
+            let eid = upsert_entity(&conn, EntityKind::File, "/root/dist/a.js", Some(1), None, None)
+                .unwrap()
+                .id;
+            assert_attr(
+                &conn,
+                eid,
+                &NewAssertion {
+                    key: keys::ROLE,
+                    value: "scratch",
+                    source: "rule:test",
+                    confidence: 0.95,
+                    display_in_global_views: true,
+                },
+            )
+            .unwrap();
+        }
+
+        let resp = cleanup_plan(CleanupPlanRequest {
+            index_path: index_path.clone(),
+            reasons: vec!["scratch".to_string()],
+            max_size: None,
+            path_prefix: None,
+        })
+        .expect("cleanup_plan");
+        assert_eq!(resp.total_files, 1);
+        assert_eq!(resp.total_bytes, 100);
+        assert_eq!(resp.candidates[0].reason, "scratch");
+
+        // recently_cleaned is empty until execution.
+        let log = recently_cleaned_log(RecentlyCleanedRequest {
+            index_path,
+            limit: 10,
+            offset: 0,
+        })
+        .expect("recently_cleaned");
+        assert!(log.is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
