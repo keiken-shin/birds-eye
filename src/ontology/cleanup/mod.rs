@@ -47,6 +47,7 @@ pub struct GatingFacts {
     pub sensitivity: Option<String>,
 }
 
+#[allow(dead_code)] // used by executor and restore
 pub(crate) fn unix_now() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
