@@ -15,6 +15,7 @@ pub mod orchestrator;
 pub mod pinning;
 pub mod populators;
 pub mod relations;
+pub mod saved_views;
 pub mod sensitivity;
 pub mod vocabulary;
 
