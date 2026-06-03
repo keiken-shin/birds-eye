@@ -198,6 +198,7 @@ fn invariant_2_and_v4_recycle_bin_first_round_trip() {
     let result = execute_cleanup_plan(ExecuteCleanupPlanRequest {
         index_path: index_path.clone(),
         plan_id: plan.plan_id,
+        retention_days: None,
     })
     .expect("execute_cleanup_plan");
 

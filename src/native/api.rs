@@ -15,7 +15,7 @@ use crate::ontology::entities::{find_entity_for_file, upsert_entity};
 use crate::ontology::pinning::{pin_file as pin_file_db, unpin_file as unpin_file_db};
 use crate::ontology::relations::outbound;
 use crate::ontology::saved_views::{list_saved_views, run_saved_view, SavedView, SavedViewRow, ViewParams};
-use crate::ontology::vocabulary::EntityKind;
+use crate::ontology::vocabulary::{keys, predicates, EntityKind};
 use crate::scanner::{ScanEvent, ScanOptions, Scanner};
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
@@ -672,8 +672,8 @@ pub struct FileProvenanceDto {
     pub relations: Vec<RelationFactDto>,
 }
 
-const PROVENANCE_KEYS: &[&str] = &["role", "replaceability", "sensitivity", "origin", "mediaType", "language"];
-const PROVENANCE_PREDS: &[&str] = &["derivedFrom", "backupOf", "partOf", "inFolder"];
+const PROVENANCE_KEYS: &[&str] = &[keys::ROLE, keys::REPLACEABILITY, keys::SENSITIVITY, keys::ORIGIN, keys::MEDIA_TYPE, keys::LANGUAGE];
+const PROVENANCE_PREDS: &[&str] = &[predicates::DERIVED_FROM, predicates::BACKUP_OF, predicates::PART_OF, predicates::IN_FOLDER];
 
 pub fn file_provenance(request: FileProvenanceRequest) -> Result<FileProvenanceDto, String> {
     let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
@@ -709,9 +709,11 @@ pub fn file_provenance(request: FileProvenanceRequest) -> Result<FileProvenanceD
                          LEFT JOIN files f ON f.id = oe.linked_file_id
                          WHERE oe.id = ?1",
                         [r.object_id],
-                        |row| row.get(0),
+                        |row| row.get::<_, Option<String>>(0),
                     )
-                    .ok();
+                    .optional()
+                    .map_err(|e| e.to_string())?
+                    .flatten();
                 relations.push(RelationFactDto {
                     predicate: r.predicate,
                     object_path,
@@ -1300,6 +1302,7 @@ mod tests {
         let prov = file_provenance(FileProvenanceRequest { index_path: index_path.clone(), file_id: 1 }).unwrap();
         assert_eq!(prov.path, "/a/x.png");
         assert!(prov.attrs.iter().any(|a| a.key == "role" && a.value == "scratch" && a.source == "user"));
-        let _ = std::fs::remove_file(&index_path);
+        assert!(!prov.is_pinned);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
