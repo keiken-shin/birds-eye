@@ -212,7 +212,7 @@ export type NativeCleanupLogEntry = {
   size: number;
   cleaned_at: number;
   reason: string;
-  restore_status: string;
+  restore_status: "in_recycle_bin" | "restored" | "expired";
   expires_at: number | null;
 };
 
