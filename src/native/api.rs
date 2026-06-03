@@ -1,11 +1,21 @@
 use crate::index::writer::ScanMode;
 use crate::index::IndexWriter;
+use crate::ontology::attrs::{assert_attr, get_attrs, NewAssertion};
 use crate::ontology::cleanup::executor::{execute_plan_with, CleanupResult, SystemTrasher, DEFAULT_RETENTION_DAYS};
 use crate::ontology::cleanup::plans::{candidates_for_plan, create_plan, CleanupScope};
 use crate::ontology::cleanup::predicate::list_all_candidates;
 use crate::ontology::cleanup::restore::{recently_cleaned, restore_with, CleanupLogEntry, SystemRestorer};
 use crate::ontology::cleanup::CleanupCandidate;
+use crate::ontology::discoveries::{list_pending_by_kind, Discovery};
+use crate::ontology::discoveries_resolve::{
+    confirm_discoveries_by_kind, confirm_discovery, reject_discoveries_by_kind, reject_discovery,
+};
+use crate::ontology::enabled;
+use crate::ontology::entities::{find_entity_for_file, upsert_entity};
 use crate::ontology::pinning::{pin_file as pin_file_db, unpin_file as unpin_file_db};
+use crate::ontology::relations::outbound;
+use crate::ontology::saved_views::{list_saved_views, run_saved_view, SavedView, SavedViewRow, ViewParams};
+use crate::ontology::vocabulary::EntityKind;
 use crate::scanner::{ScanEvent, ScanOptions, Scanner};
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
@@ -146,6 +156,8 @@ pub struct CleanupPlanResponse {
 pub struct ExecuteCleanupPlanRequest {
     pub index_path: PathBuf,
     pub plan_id: i64,
+    #[serde(default)]
+    pub retention_days: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -213,7 +225,8 @@ pub fn cleanup_plan(request: CleanupPlanRequest) -> Result<CleanupPlanResponse, 
 /// Execute a previously created draft plan: recycle-bin-first, with restore log.
 pub fn execute_cleanup_plan(request: ExecuteCleanupPlanRequest) -> Result<CleanupResult, String> {
     let mut conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
-    execute_plan_with(&mut conn, request.plan_id, &SystemTrasher, DEFAULT_RETENTION_DAYS)
+    let retention = request.retention_days.unwrap_or(DEFAULT_RETENTION_DAYS);
+    execute_plan_with(&mut conn, request.plan_id, &SystemTrasher, retention)
         .map_err(|e| e.to_string())
 }
 
@@ -551,6 +564,236 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
         bytes_scanned: 0,
         scan_strategy: ScanMode::default().as_id().to_owned(),
     }))
+}
+
+// ---- Discoveries ----
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DiscoveriesRequest {
+    pub index_path: PathBuf,
+    pub kind: String,
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ResolveDiscoveryRequest {
+    pub index_path: PathBuf,
+    pub id: i64,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ResolveDiscoveryKindRequest {
+    pub index_path: PathBuf,
+    pub kind: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+pub fn discoveries(request: DiscoveriesRequest) -> Result<Vec<Discovery>, String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    list_pending_by_kind(&conn, &request.kind, request.limit).map_err(|e| e.to_string())
+}
+
+pub fn confirm_discovery_cmd(request: ResolveDiscoveryRequest) -> Result<(), String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    confirm_discovery(&conn, request.id).map_err(|e| e.to_string())
+}
+
+pub fn reject_discovery_cmd(request: ResolveDiscoveryRequest) -> Result<(), String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    reject_discovery(&conn, request.id, request.reason.as_deref()).map_err(|e| e.to_string())
+}
+
+pub fn confirm_discovery_pattern(request: ResolveDiscoveryKindRequest) -> Result<u32, String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    confirm_discoveries_by_kind(&conn, &request.kind).map_err(|e| e.to_string())
+}
+
+pub fn reject_discovery_pattern(request: ResolveDiscoveryKindRequest) -> Result<u32, String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    reject_discoveries_by_kind(&conn, &request.kind, request.reason.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+// ---- Saved views ----
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RunSavedViewRequest {
+    pub index_path: PathBuf,
+    pub view_id: String,
+    #[serde(default)]
+    pub days: Option<i64>,
+    #[serde(default)]
+    pub min_bytes: Option<i64>,
+}
+
+pub fn saved_views() -> Vec<SavedView> {
+    list_saved_views()
+}
+
+pub fn run_saved_view_cmd(request: RunSavedViewRequest) -> Result<Vec<SavedViewRow>, String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let params = ViewParams { days: request.days, min_bytes: request.min_bytes };
+    run_saved_view(&conn, &request.view_id, &params).map_err(|e| e.to_string())
+}
+
+// ---- Provenance + override ----
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FileProvenanceRequest {
+    pub index_path: PathBuf,
+    pub file_id: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct AttrFactDto {
+    pub key: String,
+    pub value: String,
+    pub source: String,
+    pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct RelationFactDto {
+    pub predicate: String,
+    pub object_path: Option<String>,
+    pub source: String,
+    pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FileProvenanceDto {
+    pub file_id: i64,
+    pub path: String,
+    pub is_pinned: bool,
+    pub attrs: Vec<AttrFactDto>,
+    pub relations: Vec<RelationFactDto>,
+}
+
+const PROVENANCE_KEYS: &[&str] = &["role", "replaceability", "sensitivity", "origin", "mediaType", "language"];
+const PROVENANCE_PREDS: &[&str] = &["derivedFrom", "backupOf", "partOf", "inFolder"];
+
+pub fn file_provenance(request: FileProvenanceRequest) -> Result<FileProvenanceDto, String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let path: String = conn
+        .query_row("SELECT path FROM files WHERE id = ?1", [request.file_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let is_pinned: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM ontology_pinned_files WHERE file_id = ?1)",
+            [request.file_id],
+            |r| r.get::<_, i64>(0).map(|n| n != 0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let mut attrs = Vec::new();
+    let mut relations = Vec::new();
+    if let Some(entity) = find_entity_for_file(&conn, request.file_id).map_err(|e| e.to_string())? {
+        for key in PROVENANCE_KEYS {
+            for a in get_attrs(&conn, entity.id, key).map_err(|e| e.to_string())? {
+                attrs.push(AttrFactDto {
+                    key: a.key,
+                    value: a.value,
+                    source: a.source,
+                    confidence: a.confidence as f64,
+                });
+            }
+        }
+        for pred in PROVENANCE_PREDS {
+            for r in outbound(&conn, entity.id, pred).map_err(|e| e.to_string())? {
+                let object_path: Option<String> = conn
+                    .query_row(
+                        "SELECT f.path FROM ontology_entities oe
+                         LEFT JOIN files f ON f.id = oe.linked_file_id
+                         WHERE oe.id = ?1",
+                        [r.object_id],
+                        |row| row.get(0),
+                    )
+                    .ok();
+                relations.push(RelationFactDto {
+                    predicate: r.predicate,
+                    object_path,
+                    source: r.source,
+                    confidence: r.confidence as f64,
+                });
+            }
+        }
+    }
+
+    Ok(FileProvenanceDto { file_id: request.file_id, path, is_pinned, attrs, relations })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OverrideClassificationRequest {
+    pub index_path: PathBuf,
+    pub file_id: i64,
+    pub key: String,
+    pub value: String,
+}
+
+pub fn override_classification(request: OverrideClassificationRequest) -> Result<(), String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let entity = match find_entity_for_file(&conn, request.file_id).map_err(|e| e.to_string())? {
+        Some(e) => e,
+        None => {
+            let path: String = conn
+                .query_row("SELECT path FROM files WHERE id = ?1", [request.file_id], |r| r.get(0))
+                .map_err(|e| e.to_string())?;
+            upsert_entity(&conn, EntityKind::File, &path, Some(request.file_id), None, None)
+                .map_err(|e| e.to_string())?
+        }
+    };
+    assert_attr(
+        &conn,
+        entity.id,
+        &NewAssertion {
+            key: &request.key,
+            value: &request.value,
+            source: "user",
+            confidence: 1.0,
+            display_in_global_views: true,
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ---- Ontology enabled toggle (per-index, §14) ----
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OntologyStatusRequest {
+    pub index_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct OntologyStatusDto {
+    pub enabled: bool,
+    pub pending_discoveries: u64,
+}
+
+pub fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusDto, String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let enabled = enabled::is_enabled(&conn).map_err(|e| e.to_string())?;
+    let pending_discoveries =
+        crate::ontology::discoveries::count_pending(&conn).map_err(|e| e.to_string())?;
+    Ok(OntologyStatusDto { enabled, pending_discoveries })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SetOntologyEnabledRequest {
+    pub index_path: PathBuf,
+    pub enabled: bool,
+}
+
+pub fn set_ontology_enabled(request: SetOntologyEnabledRequest) -> Result<(), String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    if request.enabled {
+        enabled::enable(&conn).map_err(|e| e.to_string())
+    } else {
+        enabled::disable(&conn).map_err(|e| e.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -1016,5 +1259,47 @@ mod tests {
         assert!(log.is_empty());
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn file_provenance_and_override_round_trip() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+        // Build a temp index file so the api functions (which open by path) work.
+        let dir = std::env::temp_dir().join(format!("be_prov_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let index_path = dir.join("idx.sqlite");
+        let _ = std::fs::remove_file(&index_path);
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, '/a', 'a', 0, 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, indexed_at, hash_state)
+                 VALUES (1, 1, '/a/x.png', 'x.png', 10, 0, 4)",
+                [],
+            )
+            .unwrap();
+        }
+
+        override_classification(OverrideClassificationRequest {
+            index_path: index_path.clone(),
+            file_id: 1,
+            key: "role".into(),
+            value: "scratch".into(),
+        })
+        .unwrap();
+
+        let prov = file_provenance(FileProvenanceRequest { index_path: index_path.clone(), file_id: 1 }).unwrap();
+        assert_eq!(prov.path, "/a/x.png");
+        assert!(prov.attrs.iter().any(|a| a.key == "role" && a.value == "scratch" && a.source == "user"));
+        let _ = std::fs::remove_file(&index_path);
     }
 }
