@@ -13,10 +13,10 @@ use birds_eye::native::api::{
     RecentlyCleanedRequest, RestoreCleanupRequest, PinFileRequest, UnpinFileRequest,
     // Plan 4 discoveries / saved views / provenance / toggle
     discoveries as do_discoveries,
-    confirm_discovery_cmd, reject_discovery_cmd,
+    confirm_discovery_cmd as do_confirm_discovery, reject_discovery_cmd as do_reject_discovery,
     confirm_discovery_pattern as do_confirm_discovery_pattern,
     reject_discovery_pattern as do_reject_discovery_pattern,
-    saved_views as do_saved_views, run_saved_view_cmd,
+    saved_views as do_saved_views, run_saved_view_cmd as do_run_saved_view,
     file_provenance as do_file_provenance, override_classification as do_override_classification,
     ontology_status as do_ontology_status, set_ontology_enabled as do_set_ontology_enabled,
     DiscoveriesRequest, ResolveDiscoveryRequest, ResolveDiscoveryKindRequest,
@@ -229,7 +229,7 @@ fn unpin_file(request: UnpinFileRequest) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn list_cleanup_candidates(index_path: std::path::PathBuf) -> Result<Vec<CleanupCandidate>, String> {
+fn list_cleanup_candidates(index_path: PathBuf) -> Result<Vec<CleanupCandidate>, String> {
     do_list_cleanup_candidates(index_path)
 }
 
@@ -240,12 +240,12 @@ fn discoveries(request: DiscoveriesRequest) -> Result<Vec<Discovery>, String> {
 
 #[tauri::command]
 fn confirm_discovery(request: ResolveDiscoveryRequest) -> Result<(), String> {
-    confirm_discovery_cmd(request)
+    do_confirm_discovery(request)
 }
 
 #[tauri::command]
 fn reject_discovery(request: ResolveDiscoveryRequest) -> Result<(), String> {
-    reject_discovery_cmd(request)
+    do_reject_discovery(request)
 }
 
 #[tauri::command]
@@ -258,6 +258,7 @@ fn reject_discovery_pattern(request: ResolveDiscoveryKindRequest) -> Result<u32,
     do_reject_discovery_pattern(request)
 }
 
+// infallible — the catalog is static
 #[tauri::command]
 fn saved_views() -> Vec<SavedView> {
     do_saved_views()
@@ -265,7 +266,7 @@ fn saved_views() -> Vec<SavedView> {
 
 #[tauri::command]
 fn run_saved_view(request: RunSavedViewRequest) -> Result<Vec<SavedViewRow>, String> {
-    run_saved_view_cmd(request)
+    do_run_saved_view(request)
 }
 
 #[tauri::command]
