@@ -179,3 +179,182 @@ export async function deleteNativeIndex(indexPath: string) {
 export async function revealInExplorer(path: string): Promise<void> {
   await invoke("reveal_in_explorer", { path });
 }
+
+// ---- Ontology: cleanup ----
+
+export type NativeCleanupCandidate = {
+  file_id: number;
+  entity_id: number;
+  path: string;
+  size: number;
+  reason: string;
+};
+
+export type NativeCleanupPlan = {
+  plan_id: number;
+  total_files: number;
+  total_bytes: number;
+  candidates: NativeCleanupCandidate[];
+};
+
+export type NativeCleanupResult = {
+  plan_id: number;
+  cleaned: number;
+  bytes_cleaned: number;
+  failed: Array<{ file_id: number; path: string; reason: string }>;
+};
+
+export type NativeCleanupLogEntry = {
+  id: number;
+  cleanup_plan_id: number;
+  file_id: number;
+  original_path: string;
+  size: number;
+  cleaned_at: number;
+  reason: string;
+  restore_status: string;
+  expires_at: number | null;
+};
+
+export async function buildCleanupPlan(
+  indexPath: string,
+  scope: { reasons?: string[]; maxSize?: number | null; pathPrefix?: string | null }
+) {
+  return invoke<NativeCleanupPlan>("cleanup_plan", {
+    request: {
+      index_path: indexPath,
+      reasons: scope.reasons ?? [],
+      max_size: scope.maxSize ?? null,
+      path_prefix: scope.pathPrefix ?? null,
+    },
+  });
+}
+
+export async function executeCleanupPlan(
+  indexPath: string,
+  planId: number,
+  retentionDays?: number
+) {
+  return invoke<NativeCleanupResult>("execute_cleanup_plan", {
+    request: { index_path: indexPath, plan_id: planId, retention_days: retentionDays ?? null },
+  });
+}
+
+export async function recentlyCleaned(indexPath: string, limit: number, offset = 0) {
+  return invoke<NativeCleanupLogEntry[]>("recently_cleaned", {
+    request: { index_path: indexPath, limit, offset },
+  });
+}
+
+export async function restoreCleanupEntry(indexPath: string, entryId: number) {
+  await invoke("restore_from_cleanup_log", { request: { index_path: indexPath, entry_id: entryId } });
+}
+
+export async function pinFile(indexPath: string, fileId: number, note?: string) {
+  await invoke("pin_file", { request: { index_path: indexPath, file_id: fileId, note: note ?? null } });
+}
+
+export async function unpinFile(indexPath: string, fileId: number) {
+  await invoke("unpin_file", { request: { index_path: indexPath, file_id: fileId } });
+}
+
+// ---- Ontology: discoveries ----
+
+export type NativeDiscovery = {
+  id: number;
+  kind: string;
+  payload: string;
+  status: "Pending" | "Confirmed" | "Rejected" | "Expired";
+  confidence: number;
+  potential_bytes_unlocked: number;
+  created_at: number;
+  resolved_at: number | null;
+};
+
+export async function listDiscoveries(indexPath: string, kind: string, limit: number) {
+  return invoke<NativeDiscovery[]>("discoveries", { request: { index_path: indexPath, kind, limit } });
+}
+
+export async function confirmDiscovery(indexPath: string, id: number) {
+  await invoke("confirm_discovery", { request: { index_path: indexPath, id, reason: null } });
+}
+
+export async function rejectDiscovery(indexPath: string, id: number, reason?: string) {
+  await invoke("reject_discovery", { request: { index_path: indexPath, id, reason: reason ?? null } });
+}
+
+export async function confirmDiscoveryPattern(indexPath: string, kind: string) {
+  return invoke<number>("confirm_discovery_pattern", { request: { index_path: indexPath, kind, reason: null } });
+}
+
+export async function rejectDiscoveryPattern(indexPath: string, kind: string, reason?: string) {
+  return invoke<number>("reject_discovery_pattern", {
+    request: { index_path: indexPath, kind, reason: reason ?? null },
+  });
+}
+
+// ---- Ontology: saved views ----
+
+export type NativeSavedView = { id: string; name: string; description: string; protective: boolean };
+export type NativeSavedViewRow = { file_id: number; path: string; size: number };
+
+export async function listSavedViews() {
+  return invoke<NativeSavedView[]>("saved_views");
+}
+
+export async function runSavedView(
+  indexPath: string,
+  viewId: string,
+  params?: { days?: number; minBytes?: number }
+) {
+  return invoke<NativeSavedViewRow[]>("run_saved_view", {
+    request: {
+      index_path: indexPath,
+      view_id: viewId,
+      days: params?.days ?? null,
+      min_bytes: params?.minBytes ?? null,
+    },
+  });
+}
+
+// ---- Ontology: provenance + override + toggle ----
+
+export type NativeFileProvenance = {
+  file_id: number;
+  path: string;
+  is_pinned: boolean;
+  attrs: Array<{ key: string; value: string; source: string; confidence: number }>;
+  relations: Array<{ predicate: string; object_path: string | null; source: string; confidence: number }>;
+};
+
+export async function fileProvenance(indexPath: string, fileId: number) {
+  return invoke<NativeFileProvenance>("file_provenance", { request: { index_path: indexPath, file_id: fileId } });
+}
+
+export async function overrideClassification(indexPath: string, fileId: number, key: string, value: string) {
+  await invoke("override_classification", { request: { index_path: indexPath, file_id: fileId, key, value } });
+}
+
+export type NativeOntologyStatus = { enabled: boolean; pending_discoveries: number };
+
+export async function ontologyStatus(indexPath: string) {
+  return invoke<NativeOntologyStatus>("ontology_status", { request: { index_path: indexPath } });
+}
+
+export async function setOntologyEnabled(indexPath: string, enabled: boolean) {
+  await invoke("set_ontology_enabled", { request: { index_path: indexPath, enabled } });
+}
+
+// ---- Shared display constants ----
+
+export const REASON_LABELS: Record<string, string> = {
+  "safe-derivative": "Safe derivative",
+  "redundant-backup": "Redundant backup",
+  scratch: "Scratch / cache",
+  "finished-project-cruft": "Finished-project cruft",
+};
+
+export const DISCOVERY_KIND_LABELS: Record<string, string> = {
+  "derivedFrom-pattern": "Derived-from suggestions",
+  "backupOf-pair": "Backup-of suggestions",
+};
