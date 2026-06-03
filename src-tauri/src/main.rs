@@ -3,11 +3,36 @@ use birds_eye::native::api::{
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
     search_files as search_index_files, trash_files as do_trash_files,
     reveal_in_explorer as do_reveal_in_explorer,
+    // Plan 3 cleanup
+    cleanup_plan as do_cleanup_plan, execute_cleanup_plan as do_execute_cleanup_plan,
+    recently_cleaned_log as do_recently_cleaned_log,
+    restore_from_cleanup_log as do_restore_from_cleanup_log,
+    pin_file as do_pin_file, unpin_file as do_unpin_file,
+    list_cleanup_candidates as do_list_cleanup_candidates,
+    CleanupPlanRequest, CleanupPlanResponse, ExecuteCleanupPlanRequest,
+    RecentlyCleanedRequest, RestoreCleanupRequest, PinFileRequest, UnpinFileRequest,
+    // Plan 4 discoveries / saved views / provenance / toggle
+    discoveries as do_discoveries,
+    confirm_discovery_cmd, reject_discovery_cmd,
+    confirm_discovery_pattern as do_confirm_discovery_pattern,
+    reject_discovery_pattern as do_reject_discovery_pattern,
+    saved_views as do_saved_views, run_saved_view_cmd,
+    file_provenance as do_file_provenance, override_classification as do_override_classification,
+    ontology_status as do_ontology_status, set_ontology_enabled as do_set_ontology_enabled,
+    DiscoveriesRequest, ResolveDiscoveryRequest, ResolveDiscoveryKindRequest,
+    RunSavedViewRequest, FileProvenanceRequest, FileProvenanceDto,
+    OverrideClassificationRequest, OntologyStatusRequest, OntologyStatusDto,
+    SetOntologyEnabledRequest,
     DuplicateFileSummaryDto, DuplicateGroupFilesRequest,
     FileSearchResultDto, IndexMetadataDto, IndexOverviewDto, IndexQueryRequest,
     ScanToIndexRequest, ScanToIndexResponse, SearchFilesRequest,
     TrashFilesRequest, TrashFilesResponse,
 };
+use birds_eye::ontology::cleanup::executor::CleanupResult;
+use birds_eye::ontology::cleanup::restore::CleanupLogEntry;
+use birds_eye::ontology::cleanup::CleanupCandidate;
+use birds_eye::ontology::discoveries::Discovery;
+use birds_eye::ontology::saved_views::{SavedView, SavedViewRow};
 use birds_eye::native::{
     JobEventDto, JobStatusDto, ScanJobManager, StartScanJobRequest, StartScanJobResponse,
 };
@@ -173,6 +198,96 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
     do_reveal_in_explorer(path)
 }
 
+#[tauri::command]
+fn cleanup_plan(request: CleanupPlanRequest) -> Result<CleanupPlanResponse, String> {
+    do_cleanup_plan(request)
+}
+
+#[tauri::command]
+fn execute_cleanup_plan(request: ExecuteCleanupPlanRequest) -> Result<CleanupResult, String> {
+    do_execute_cleanup_plan(request)
+}
+
+#[tauri::command]
+fn recently_cleaned(request: RecentlyCleanedRequest) -> Result<Vec<CleanupLogEntry>, String> {
+    do_recently_cleaned_log(request)
+}
+
+#[tauri::command]
+fn restore_from_cleanup_log(request: RestoreCleanupRequest) -> Result<(), String> {
+    do_restore_from_cleanup_log(request)
+}
+
+#[tauri::command]
+fn pin_file(request: PinFileRequest) -> Result<(), String> {
+    do_pin_file(request)
+}
+
+#[tauri::command]
+fn unpin_file(request: UnpinFileRequest) -> Result<(), String> {
+    do_unpin_file(request)
+}
+
+#[tauri::command]
+fn list_cleanup_candidates(index_path: std::path::PathBuf) -> Result<Vec<CleanupCandidate>, String> {
+    do_list_cleanup_candidates(index_path)
+}
+
+#[tauri::command]
+fn discoveries(request: DiscoveriesRequest) -> Result<Vec<Discovery>, String> {
+    do_discoveries(request)
+}
+
+#[tauri::command]
+fn confirm_discovery(request: ResolveDiscoveryRequest) -> Result<(), String> {
+    confirm_discovery_cmd(request)
+}
+
+#[tauri::command]
+fn reject_discovery(request: ResolveDiscoveryRequest) -> Result<(), String> {
+    reject_discovery_cmd(request)
+}
+
+#[tauri::command]
+fn confirm_discovery_pattern(request: ResolveDiscoveryKindRequest) -> Result<u32, String> {
+    do_confirm_discovery_pattern(request)
+}
+
+#[tauri::command]
+fn reject_discovery_pattern(request: ResolveDiscoveryKindRequest) -> Result<u32, String> {
+    do_reject_discovery_pattern(request)
+}
+
+#[tauri::command]
+fn saved_views() -> Vec<SavedView> {
+    do_saved_views()
+}
+
+#[tauri::command]
+fn run_saved_view(request: RunSavedViewRequest) -> Result<Vec<SavedViewRow>, String> {
+    run_saved_view_cmd(request)
+}
+
+#[tauri::command]
+fn file_provenance(request: FileProvenanceRequest) -> Result<FileProvenanceDto, String> {
+    do_file_provenance(request)
+}
+
+#[tauri::command]
+fn override_classification(request: OverrideClassificationRequest) -> Result<(), String> {
+    do_override_classification(request)
+}
+
+#[tauri::command]
+fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusDto, String> {
+    do_ontology_status(request)
+}
+
+#[tauri::command]
+fn set_ontology_enabled(request: SetOntologyEnabledRequest) -> Result<(), String> {
+    do_set_ontology_enabled(request)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -193,6 +308,24 @@ fn main() {
             scan_job_status,
             trash_files,
             reveal_in_explorer,
+            cleanup_plan,
+            execute_cleanup_plan,
+            recently_cleaned,
+            restore_from_cleanup_log,
+            pin_file,
+            unpin_file,
+            list_cleanup_candidates,
+            discoveries,
+            confirm_discovery,
+            reject_discovery,
+            confirm_discovery_pattern,
+            reject_discovery_pattern,
+            saved_views,
+            run_saved_view,
+            file_provenance,
+            override_classification,
+            ontology_status,
+            set_ontology_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Birds Eye desktop shell");
