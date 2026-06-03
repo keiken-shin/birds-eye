@@ -152,7 +152,11 @@ pub fn reject_discovery(
         return Ok(());
     }
     let (subject, predicate, object, _role) = graduation_plan(conn, &d)?;
-    reject_pair(conn, subject, predicate, object, reason)?;
+    // Guard: skip the insert if this pair is already negatively asserted (e.g.
+    // rejected via a different discovery) to prevent duplicate rows.
+    if !crate::ontology::negative::is_rejected_pair(conn, subject, predicate, object)? {
+        reject_pair(conn, subject, predicate, object, reason)?;
+    }
     set_status(conn, id, DiscoveryStatus::Rejected)
 }
 
@@ -173,6 +177,8 @@ fn median_confidence(discoveries: &[Discovery]) -> f32 {
 /// Confirm every pending discovery of a kind. Refuses unless median confidence
 /// meets the floor (invariant #7). Returns the number confirmed.
 pub fn confirm_discoveries_by_kind(conn: &Connection, kind: &str) -> Result<u32, OntologyError> {
+    // u32::MAX is an intentional "no limit / fetch all" sentinel — we need the
+    // full population to compute the pattern-level median before graduating.
     let pending = list_pending_by_kind(conn, kind, u32::MAX)?;
     if pending.is_empty() {
         return Ok(0);
@@ -196,6 +202,8 @@ pub fn reject_discoveries_by_kind(
     kind: &str,
     reason: Option<&str>,
 ) -> Result<u32, OntologyError> {
+    // u32::MAX is an intentional "no limit / fetch all" sentinel — the full
+    // population must be rejected atomically for a pattern-level operation.
     let pending = list_pending_by_kind(conn, kind, u32::MAX)?;
     let mut n = 0;
     for d in pending {
@@ -402,6 +410,47 @@ mod tests {
         assert_eq!(
             crate::ontology::discoveries::count_pending(&conn).unwrap(),
             1
+        );
+    }
+
+    /// Invariant #7 states the floor is **≥ 0.7** (i.e. `< PATTERN_CONFIDENCE_FLOOR`
+    /// is the rejection condition). This test pins the boundary: a pattern whose
+    /// median confidence is exactly 0.7 must pass and have all discoveries confirmed.
+    #[test]
+    fn confirm_by_kind_confirms_at_exactly_floor() {
+        let conn = migrated_conn();
+        // Two discoveries: confidences 0.6 and 0.8 → median = (0.6 + 0.8) / 2 = 0.7 exactly.
+        seed_file(&conn, 1, "/floor/src.psd");
+        seed_file(&conn, 2, "/floor/src_export.png");
+        seed_file(&conn, 3, "/floor/src2.psd");
+        seed_file(&conn, 4, "/floor/src2_export.png");
+        insert_discovery(
+            &conn,
+            &NewDiscovery {
+                kind: "derivedFrom-pattern",
+                payload_json: r#"{"derivative_file_id":2,"source_file_id":1,"derivative_path":"/floor/src_export.png","source_path":"/floor/src.psd","size_ratio":0.3}"#,
+                confidence: 0.6,
+                potential_bytes_unlocked: 100,
+            },
+        )
+        .unwrap();
+        insert_discovery(
+            &conn,
+            &NewDiscovery {
+                kind: "derivedFrom-pattern",
+                payload_json: r#"{"derivative_file_id":4,"source_file_id":3,"derivative_path":"/floor/src2_export.png","source_path":"/floor/src2.psd","size_ratio":0.3}"#,
+                confidence: 0.8,
+                potential_bytes_unlocked: 100,
+            },
+        )
+        .unwrap();
+
+        let n = confirm_discoveries_by_kind(&conn, "derivedFrom-pattern")
+            .expect("median == floor (0.7) must pass the ≥ 0.7 guard");
+        assert_eq!(n, 2);
+        assert_eq!(
+            crate::ontology::discoveries::count_pending(&conn).unwrap(),
+            0
         );
     }
 }
