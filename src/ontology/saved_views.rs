@@ -43,12 +43,18 @@ pub fn list_saved_views() -> Vec<SavedView> {
     ]
 }
 
+// Excludes files whose *resolved* (highest-confidence, then most-recent) sensitivity
+// assertion has display_in_global_views = 0.  A file with no sensitivity assertion at
+// all is treated as visible (COALESCE default = 1).
 const NOT_SENSITIVE: &str = "
-  AND NOT EXISTS (
-    SELECT 1 FROM ontology_entities se
+  AND COALESCE((
+    SELECT sa.display_in_global_views
+    FROM ontology_entities se
     JOIN ontology_attrs sa ON sa.entity_id = se.id AND sa.key = 'sensitivity'
-    WHERE se.kind = 'File' AND se.linked_file_id = f.id AND sa.display_in_global_views = 0
-  )";
+    WHERE se.kind = 'File' AND se.linked_file_id = f.id
+    ORDER BY sa.confidence DESC, sa.asserted_at DESC
+    LIMIT 1
+  ), 1) = 1";
 
 fn unix_now() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -59,7 +65,7 @@ fn unix_now() -> i64 {
 }
 
 fn query_rows(conn: &Connection, sql: &str, p: &[&dyn rusqlite::ToSql]) -> Result<Vec<SavedViewRow>, OntologyError> {
-    let mut stmt = conn.prepare(sql)?;
+    let mut stmt = conn.prepare_cached(sql)?;
     let rows = stmt
         .query_map(p, |r| {
             Ok(SavedViewRow { file_id: r.get(0)?, path: r.get(1)?, size: r.get(2)? })
@@ -111,12 +117,15 @@ pub fn run_saved_view(
             &[&min_bytes],
         ),
         // 3. Files whose folder is not part of any Project.
+        // Wave 1: checks the *file* entity's `partOf` relation directly.
+        // Folder-level project assignment is a later refinement (Wave 2+).
         "unprojected-files" => query_rows(
             conn,
             &format!(
                 "SELECT f.id, f.path, f.size FROM files f
                  JOIN ontology_entities e ON e.kind = 'File' AND e.linked_file_id = f.id
                  WHERE f.deleted_at IS NULL
+                   -- Wave 1: file-level partOf; folder-level project assignment is a later refinement
                    AND NOT EXISTS (SELECT 1 FROM ontology_relations r WHERE r.subject_id = e.id AND r.predicate = 'partOf')
                    {NOT_SENSITIVE}
                  ORDER BY f.size DESC"
@@ -265,6 +274,22 @@ mod tests {
         assert_attr(&conn, e, &NewAssertion { key: keys::SENSITIVITY, value: "restricted", source: "rule:x", confidence: 1.0, display_in_global_views: false }).unwrap();
         let rows = run_saved_view(&conn, "unclassified", &ViewParams::default()).unwrap();
         assert!(rows.is_empty(), "sensitive file must not appear in cross-cutting view");
+    }
+
+    #[test]
+    fn upgraded_sensitivity_is_not_excluded() {
+        // A later, higher-confidence sensitivity assertion (display=true) must win over
+        // the earlier lower-confidence one (display=false). The file should appear in the view.
+        let conn = migrated_conn();
+        let e = seed_file(&conn, 1, "/Work/report.pdf", 30);
+        // Low-confidence restricted assertion (display=false) — asserted first.
+        assert_attr(&conn, e, &NewAssertion { key: keys::SENSITIVITY, value: "restricted", source: "rule:x", confidence: 0.5, display_in_global_views: false }).unwrap();
+        // Higher-confidence public assertion (display=true) — wins on confidence DESC.
+        assert_attr(&conn, e, &NewAssertion { key: keys::SENSITIVITY, value: "public", source: "user", confidence: 1.0, display_in_global_views: true }).unwrap();
+
+        let rows = run_saved_view(&conn, "unclassified", &ViewParams::default()).unwrap();
+        let ids: Vec<i64> = rows.iter().map(|r| r.file_id).collect();
+        assert!(ids.contains(&1), "file with upgraded sensitivity must appear in view; got: {ids:?}");
     }
 
     #[test]
