@@ -6,6 +6,7 @@
 pub mod attrs;
 pub mod cleanup;
 pub mod discoveries;
+pub mod discoveries_resolve;
 pub mod enabled;
 pub mod entities;
 pub mod errors;
