@@ -43,6 +43,8 @@ export function FileProvenance({
       else await pinFile(indexPath, fileId);
       await reload();
       onChanged?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -55,6 +57,8 @@ export function FileProvenance({
         await overrideClassification(indexPath, fileId, "role", value);
         await reload();
         onChanged?.();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
       } finally {
         setBusy(false);
       }

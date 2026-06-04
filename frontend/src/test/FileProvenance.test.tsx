@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { FileProvenance } from "../components/FileProvenance";
 import * as nativeClient from "../nativeClient";
 
@@ -37,5 +37,14 @@ describe("FileProvenance", () => {
     render(<FileProvenance indexPath="/idx.sqlite" fileId={2} />);
     await waitFor(() => expect(screen.getByText(/Provenance error/i)).toBeInTheDocument());
     expect(screen.getByText(/boom/i)).toBeInTheDocument();
+  });
+
+  it("surfaces a pinFile failure into the error state", async () => {
+    vi.mocked(nativeClient.pinFile).mockRejectedValueOnce(new Error("pin failed"));
+    render(<FileProvenance indexPath="/idx.sqlite" fileId={2} />);
+    await waitFor(() => screen.getByRole("button", { name: /pin to keep/i }));
+    fireEvent.click(screen.getByRole("button", { name: /pin to keep/i }));
+    await waitFor(() => expect(screen.getByText(/Provenance error/i)).toBeInTheDocument());
+    expect(screen.getByText(/pin failed/i)).toBeInTheDocument();
   });
 });
