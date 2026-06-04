@@ -7,6 +7,7 @@ import {
   Blocks,
   Trash2,
   Sparkles,
+  Bookmark,
 } from "lucide-react";
 import { QueuePopover } from "./QueuePopover";
 import { SettingsPopover } from "./SettingsPopover";
@@ -61,6 +62,13 @@ export function BottomRail() {
             {pending > 99 ? "99+" : pending}
           </span>
         )}
+      </NavLink>
+      <NavLink
+        to="/saved-views"
+        className={({ isActive }) => `${itemBase}${isActive ? ` ${activeClass}` : ""}`}
+        title="Saved Views"
+      >
+        <Bookmark size={20} />
       </NavLink>
       <NavLink
         to="/library"
