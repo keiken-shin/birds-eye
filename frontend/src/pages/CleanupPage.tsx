@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useScanContext } from "../context/ScanContext";
 import { FileProvenance } from "../components/FileProvenance";
+import { formatBytes } from "../domain";
 import {
   buildCleanupPlan,
   executeCleanupPlan,
@@ -12,18 +13,6 @@ import {
 } from "../nativeClient";
 
 const ALL_REASONS = ["safe-derivative", "redundant-backup", "scratch", "finished-project-cruft"];
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = n / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i += 1;
-  }
-  return `${v.toFixed(1)} ${units[i]}`;
-}
 
 export function CleanupPage() {
   const { workspaceIndexPath, setRuntimeMessage } = useScanContext();
@@ -51,7 +40,7 @@ export function CleanupPage() {
     try {
       setPlan(await buildCleanupPlan(workspaceIndexPath, { reasons: selectedReasons }));
     } catch (e) {
-      setRuntimeMessage(`Cleanup plan failed: ${e}`);
+      setRuntimeMessage(`Cleanup plan failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -66,7 +55,8 @@ export function CleanupPage() {
       setPlan(null);
       setConfirming(false);
     } catch (e) {
-      setRuntimeMessage(`Cleanup execution failed: ${e}`);
+      setConfirming(false);
+      setRuntimeMessage(`Cleanup execution failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -103,7 +93,9 @@ export function CleanupPage() {
               key={r}
               type="button"
               onClick={() =>
-                setSelectedReasons((prev) => (on ? prev.filter((x) => x !== r) : [...prev, r]))
+                setSelectedReasons((prev) =>
+                  prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r]
+                )
               }
               className={`border px-3 py-1 font-mono text-11 uppercase ${
                 on ? "border-accent text-accent" : "border-white/20 text-white/40"
