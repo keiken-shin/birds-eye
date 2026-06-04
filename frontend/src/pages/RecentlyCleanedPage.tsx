@@ -72,7 +72,7 @@ export function RecentlyCleanedPage() {
               <li key={e.id} className="flex items-center justify-between gap-3 border border-white/10 px-3 py-2">
                 <span className="truncate text-12 text-white/80">{e.original_path}</span>
                 <span className="shrink-0 text-11 text-white/40">
-                  {REASON_LABELS[e.reason] ?? e.reason} · {formatBytes(e.size)}
+                  {REASON_LABELS[e.reason] ?? e.reason} · {formatBytes(e.size)} · {new Date(e.cleaned_at * 1000).toLocaleDateString()}
                 </span>
                 {restorable ? (
                   <button
