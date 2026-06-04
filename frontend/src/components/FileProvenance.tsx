@@ -24,6 +24,7 @@ export function FileProvenance({
 
   const reload = useCallback(async () => {
     try {
+      setError(null);
       setData(await fileProvenance(indexPath, fileId));
     } catch (e) {
       setError(String(e));
