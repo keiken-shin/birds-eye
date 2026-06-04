@@ -5,18 +5,23 @@ import {
   ListOrdered,
   Settings,
   Blocks,
+  Trash2,
+  Sparkles,
 } from "lucide-react";
 import { QueuePopover } from "./QueuePopover";
 import { SettingsPopover } from "./SettingsPopover";
 import { useScanContext } from "../context/ScanContext";
+import { useOntologyStatus } from "../hooks/useOntology";
 
 const itemBase =
   "inline-flex min-h-[52px] min-w-[106px] items-center justify-center gap-1.5 border-r border-white/15 px-3 font-mono text-11 font-black uppercase text-muted no-underline last:border-r";
 const activeClass = "!text-accent border-b border-b-accent";
 
 export function BottomRail() {
-  const { queueItems } = useScanContext();
+  const { queueItems, workspaceIndexPath } = useScanContext();
   const hasActiveScans = queueItems.some((item) => item.status === "scanning");
+  const { status } = useOntologyStatus(workspaceIndexPath ?? null);
+  const pending = status?.pending_discoveries ?? 0;
 
   return (
     <nav
@@ -37,6 +42,25 @@ export function BottomRail() {
         title="Workspace"
       >
         <Blocks size={20} />
+      </NavLink>
+      <NavLink
+        to="/cleanup"
+        className={({ isActive }) => `${itemBase}${isActive ? ` ${activeClass}` : ""}`}
+        title="Cleanup"
+      >
+        <Trash2 size={20} />
+      </NavLink>
+      <NavLink
+        to="/discoveries"
+        className={({ isActive }) => `${itemBase} relative${isActive ? ` ${activeClass}` : ""}`}
+        title="Discoveries"
+      >
+        <Sparkles size={20} />
+        {pending > 0 && (
+          <span className="absolute right-2 top-2 min-w-[16px] rounded-full bg-accent px-1 text-center text-9 font-black text-black">
+            {pending > 99 ? "99+" : pending}
+          </span>
+        )}
       </NavLink>
       <NavLink
         to="/library"
@@ -61,6 +85,3 @@ export function BottomRail() {
     </nav>
   );
 }
-
-
-
