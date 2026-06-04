@@ -23,6 +23,7 @@ export function BottomRail() {
   const hasActiveScans = queueItems.some((item) => item.status === "scanning");
   const { status } = useOntologyStatus(workspaceIndexPath ?? null);
   const pending = status?.pending_discoveries ?? 0;
+  const quiet = localStorage.getItem("be.ontology.quiet") === "1";
 
   return (
     <nav
@@ -57,7 +58,7 @@ export function BottomRail() {
         title="Discoveries"
       >
         <Sparkles size={20} />
-        {pending > 0 && (
+        {pending > 0 && !quiet && (
           <span className="absolute right-2 top-2 min-w-[16px] rounded-full bg-accent px-1 text-center text-9 font-black text-black">
             {pending > 99 ? "99+" : pending}
           </span>
