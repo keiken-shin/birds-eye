@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type React from "react";
 import { ChevronRight, ArrowLeft } from "lucide-react";
 import { useScanContext } from "../context/ScanContext";
+import { useOntologyStatus } from "../hooks/useOntology";
+import { setOntologyEnabled } from "../nativeClient";
 
 type Theme = "dark" | "light" | "system";
 type Layer = "main" | "shortcuts";
@@ -17,7 +19,39 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
   const [layer, setLayer] = useState<Layer>("main");
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
-  const { theme, setTheme } = useScanContext();
+  const { theme, setTheme, workspaceIndexPath, setRuntimeMessage } = useScanContext();
+  const { status: ontologyStatusValue, refresh: refreshOntologyStatus } = useOntologyStatus(workspaceIndexPath);
+  const [ontologyBusy, setOntologyBusy] = useState(false);
+  const [quiet, setQuiet] = useState(() => localStorage.getItem("be.ontology.quiet") === "1");
+  const [retentionDays, setRetentionDays] = useState(
+    () => localStorage.getItem("be.ontology.retentionDays") ?? "90"
+  );
+
+  const toggleQuiet = useCallback((checked: boolean) => {
+    setQuiet(checked);
+    localStorage.setItem("be.ontology.quiet", checked ? "1" : "0");
+  }, []);
+
+  const changeRetention = useCallback((value: string) => {
+    setRetentionDays(value);
+    localStorage.setItem("be.ontology.retentionDays", value);
+  }, []);
+
+  const toggleOntology = useCallback(
+    async (enabled: boolean) => {
+      if (!workspaceIndexPath) return;
+      setOntologyBusy(true);
+      try {
+        await setOntologyEnabled(workspaceIndexPath, enabled);
+        await refreshOntologyStatus();
+      } catch (e) {
+        setRuntimeMessage(`Ontology toggle failed: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        setOntologyBusy(false);
+      }
+    },
+    [workspaceIndexPath, refreshOntologyStatus, setRuntimeMessage]
+  );
 
   useEffect(() => {
     function handleClick(event: MouseEvent) {
@@ -83,6 +117,41 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* --- Ontology (Cleanup Intelligence) --- */}
+                <div className="grid gap-2 border-t border-white/10 pt-3">
+                  <span className="font-mono text-10 uppercase tracking-[1.5px] text-white/30">Cleanup Intelligence</span>
+
+                  <label className="flex items-center justify-between gap-3 text-12 text-white/70">
+                    Enabled
+                    <input
+                      type="checkbox"
+                      disabled={!workspaceIndexPath || ontologyBusy}
+                      checked={ontologyStatusValue?.enabled ?? false}
+                      onChange={(e) => void toggleOntology(e.target.checked)}
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between gap-3 text-12 text-white/70">
+                    Quiet mode (hide discoveries)
+                    <input
+                      type="checkbox"
+                      checked={quiet}
+                      onChange={(e) => toggleQuiet(e.target.checked)}
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between gap-3 text-12 text-white/70">
+                    Recycle-bin retention (days)
+                    <input
+                      type="number"
+                      min={1}
+                      value={retentionDays}
+                      onChange={(e) => changeRetention(e.target.value)}
+                      className="w-20 border border-white/20 bg-transparent px-2 py-0.5 text-right text-white/80"
+                    />
+                  </label>
                 </div>
               </div>
 

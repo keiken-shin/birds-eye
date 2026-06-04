@@ -50,7 +50,8 @@ export function CleanupPage() {
     if (!workspaceIndexPath || !plan) return;
     setBusy(true);
     try {
-      const r = await executeCleanupPlan(workspaceIndexPath, plan.plan_id, undefined);
+      const retention = Number(localStorage.getItem("be.ontology.retentionDays")) || undefined;
+      const r = await executeCleanupPlan(workspaceIndexPath, plan.plan_id, retention);
       setResult(r);
       setPlan(null);
       setConfirming(false);
