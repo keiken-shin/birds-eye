@@ -1,5 +1,5 @@
 import { ChevronLeft } from "lucide-react";
-import { TreemapCanvas } from "./TreemapCanvas";
+import { TreemapCanvas, type TreemapLens, type TreemapLensMap } from "./TreemapCanvas";
 import {
   ResizablePanel,
   ResizablePanelGroup,
@@ -13,7 +13,10 @@ import type { FolderStats, ScanState } from "../domain";
 interface AnalysisSectionProps {
   filteredFolders: Array<FolderStats & { displayBytes: number }>;
   focusedFolder: string | null;
+  lens: TreemapLens;
+  lensData: TreemapLensMap;
   setFocusedFolder: (folder: string | null) => void;
+  setLens: (lens: TreemapLens) => void;
   onOpenDuplicateCandidate: (candidate: ScanState["duplicateCandidates"][number]) => void;
   scan: ScanState;
 }
@@ -34,7 +37,10 @@ function Recommendation({ text, onClick }: { text: string; onClick?: () => void 
 export function AnalysisSection({
   filteredFolders,
   focusedFolder,
+  lens,
+  lensData,
   setFocusedFolder,
+  setLens,
   onOpenDuplicateCandidate,
   scan,
 }: AnalysisSectionProps) {
@@ -74,7 +80,13 @@ export function AnalysisSection({
         {filteredFolders.length === 0 ? (
           <div className={emptyClass}>No indexed folders yet</div>
         ) : (
-          <TreemapCanvas folders={filteredFolders} onSelect={(folder) => setFocusedFolder(folder.path)} />
+          <TreemapCanvas
+            folders={filteredFolders}
+            lens={lens}
+            lensData={lensData}
+            onLensChange={setLens}
+            onSelect={(folder) => setFocusedFolder(folder.path)}
+          />
         )}
         </div>
       </ResizablePanel>

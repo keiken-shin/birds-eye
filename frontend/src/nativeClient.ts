@@ -345,6 +345,23 @@ export async function setOntologyEnabled(indexPath: string, enabled: boolean) {
   await invoke("set_ontology_enabled", { request: { index_path: indexPath, enabled } });
 }
 
+// ---- Ontology: treemap lenses ----
+
+export type NativeTreemapLensFolder = {
+  folder_path: string;
+  role: string | null;
+  replaceability: string | null;
+  lifecycle: string | null;
+  cleanup_reason: string | null;
+  reclaimable_bytes: number;
+};
+
+export async function treemapLensData(indexPath: string) {
+  return invoke<NativeTreemapLensFolder[]>("treemap_lens_data", {
+    request: { index_path: indexPath },
+  });
+}
+
 // ---- Shared display constants ----
 
 export const REASON_LABELS: Record<string, string> = {

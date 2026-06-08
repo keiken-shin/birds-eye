@@ -9,6 +9,7 @@ use birds_eye::native::api::{
     restore_from_cleanup_log as do_restore_from_cleanup_log,
     pin_file as do_pin_file, unpin_file as do_unpin_file,
     list_cleanup_candidates as do_list_cleanup_candidates,
+    treemap_lens_data as do_treemap_lens_data,
     CleanupPlanRequest, CleanupPlanResponse, ExecuteCleanupPlanRequest,
     RecentlyCleanedRequest, RestoreCleanupRequest, PinFileRequest, UnpinFileRequest,
     // Plan 4 discoveries / saved views / provenance / toggle
@@ -22,7 +23,7 @@ use birds_eye::native::api::{
     DiscoveriesRequest, ResolveDiscoveryRequest, ResolveDiscoveryKindRequest,
     RunSavedViewRequest, FileProvenanceRequest, FileProvenanceDto,
     OverrideClassificationRequest, OntologyStatusRequest, OntologyStatusDto,
-    SetOntologyEnabledRequest,
+    SetOntologyEnabledRequest, TreemapLensFolderDto, TreemapLensRequest,
     DuplicateFileSummaryDto, DuplicateGroupFilesRequest,
     FileSearchResultDto, IndexMetadataDto, IndexOverviewDto, IndexQueryRequest,
     ScanToIndexRequest, ScanToIndexResponse, SearchFilesRequest,
@@ -234,6 +235,11 @@ fn list_cleanup_candidates(index_path: PathBuf) -> Result<Vec<CleanupCandidate>,
 }
 
 #[tauri::command]
+fn treemap_lens_data(request: TreemapLensRequest) -> Result<Vec<TreemapLensFolderDto>, String> {
+    do_treemap_lens_data(request)
+}
+
+#[tauri::command]
 fn discoveries(request: DiscoveriesRequest) -> Result<Vec<Discovery>, String> {
     do_discoveries(request)
 }
@@ -316,6 +322,7 @@ fn main() {
             pin_file,
             unpin_file,
             list_cleanup_candidates,
+            treemap_lens_data,
             discoveries,
             confirm_discovery,
             reject_discovery,

@@ -20,6 +20,7 @@ use crate::scanner::{ScanEvent, ScanOptions, Scanner};
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -188,6 +189,21 @@ pub struct UnpinFileRequest {
     pub file_id: i64,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct TreemapLensRequest {
+    pub index_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct TreemapLensFolderDto {
+    pub folder_path: String,
+    pub role: Option<String>,
+    pub replaceability: Option<String>,
+    pub lifecycle: Option<String>,
+    pub cleanup_reason: Option<String>,
+    pub reclaimable_bytes: i64,
+}
+
 pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
     let mut failed = Vec::new();
     // We call delete() per path (not delete_all) so one failure does not abort the rest.
@@ -260,6 +276,126 @@ pub fn unpin_file(request: UnpinFileRequest) -> Result<(), String> {
 pub fn list_cleanup_candidates(index_path: PathBuf) -> Result<Vec<CleanupCandidate>, String> {
     let conn = Connection::open(&index_path).map_err(|e| e.to_string())?;
     list_all_candidates(&conn).map_err(|e| e.to_string())
+}
+
+/// Folder-level ontology aggregates for the treemap lenses.
+pub fn treemap_lens_data(request: TreemapLensRequest) -> Result<Vec<TreemapLensFolderDto>, String> {
+    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    treemap_lens_data_for_conn(&conn).map_err(|e| e.to_string())
+}
+
+fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<TreemapLensFolderDto>> {
+    let mut role = DominantByFolder::default();
+    let mut replaceability = DominantByFolder::default();
+    let mut lifecycle = DominantByFolder::default();
+    let mut cleanup_reason = DominantByFolder::default();
+    let mut reclaimable: HashMap<String, i64> = HashMap::new();
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT fo.path AS folder_path,
+                COALESCE(f.size, 0) AS size,
+                (SELECT a.value FROM ontology_attrs a
+                 WHERE a.entity_id = e.id AND a.key = 'role' AND a.display_in_global_views = 1
+                 ORDER BY a.confidence DESC, a.asserted_at DESC LIMIT 1) AS role,
+                (SELECT a.value FROM ontology_attrs a
+                 WHERE a.entity_id = e.id AND a.key = 'replaceability' AND a.display_in_global_views = 1
+                 ORDER BY a.confidence DESC, a.asserted_at DESC LIMIT 1) AS replaceability,
+                (SELECT pa.value FROM ontology_relations r
+                 JOIN ontology_entities pe ON pe.id = r.object_id AND pe.kind = 'Project'
+                 JOIN ontology_attrs pa ON pa.entity_id = pe.id AND pa.key = 'lifecycle' AND pa.display_in_global_views = 1
+                 WHERE r.subject_id = e.id AND r.predicate = 'partOf'
+                 ORDER BY pa.confidence DESC, pa.asserted_at DESC LIMIT 1) AS lifecycle
+         FROM folders fo
+         JOIN files f ON f.deleted_at IS NULL
+              AND (f.path = fo.path OR f.path LIKE fo.path || '/%' OR f.path LIKE fo.path || '\\%')
+         JOIN ontology_entities e ON e.kind = 'File' AND e.linked_file_id = f.id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<String>>(4)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (folder_path, size, row_role, row_replaceability, row_lifecycle) = row?;
+        role.add(&folder_path, row_role.as_deref(), size);
+        replaceability.add(&folder_path, row_replaceability.as_deref(), size);
+        lifecycle.add(&folder_path, row_lifecycle.as_deref(), size);
+    }
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT fo.path AS folder_path, c.reason, SUM(c.size) AS reclaimable_bytes
+         FROM folders fo
+         JOIN v_cleanup_candidates c
+              ON c.path = fo.path OR c.path LIKE fo.path || '/%' OR c.path LIKE fo.path || '\\%'
+         GROUP BY fo.path, c.reason",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (folder_path, reason, bytes) = row?;
+        cleanup_reason.add(&folder_path, Some(&reason), bytes);
+        *reclaimable.entry(folder_path).or_insert(0) += bytes;
+    }
+
+    let mut folder_paths = conn
+        .prepare_cached("SELECT path FROM folders ORDER BY total_bytes DESC, path ASC")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    folder_paths.sort();
+    folder_paths.dedup();
+
+    Ok(folder_paths
+        .into_iter()
+        .map(|folder_path| TreemapLensFolderDto {
+            role: role.get(&folder_path),
+            replaceability: replaceability.get(&folder_path),
+            lifecycle: lifecycle.get(&folder_path),
+            cleanup_reason: cleanup_reason.get(&folder_path),
+            reclaimable_bytes: reclaimable.get(&folder_path).copied().unwrap_or(0),
+            folder_path,
+        })
+        .collect())
+}
+
+#[derive(Default)]
+struct DominantByFolder {
+    bytes: HashMap<(String, String), i64>,
+}
+
+impl DominantByFolder {
+    fn add(&mut self, folder_path: &str, value: Option<&str>, bytes: i64) {
+        let Some(value) = value else {
+            return;
+        };
+        *self
+            .bytes
+            .entry((folder_path.to_owned(), value.to_owned()))
+            .or_insert(0) += bytes.max(0);
+    }
+
+    fn get(&self, folder_path: &str) -> Option<String> {
+        self.bytes
+            .iter()
+            .filter(|((path, _), _)| path == folder_path)
+            .max_by(|((_, left_value), left_bytes), ((_, right_value), right_bytes)| {
+                left_bytes
+                    .cmp(right_bytes)
+                    .then_with(|| right_value.cmp(left_value))
+            })
+            .map(|((_, value), _)| value.clone())
+    }
 }
 
 pub fn reveal_in_explorer(path: String) -> Result<(), String> {
@@ -1304,5 +1440,93 @@ mod tests {
         assert!(prov.attrs.iter().any(|a| a.key == "role" && a.value == "scratch" && a.source == "user"));
         assert!(!prov.is_pinned);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn treemap_lens_data_rolls_up_ontology_and_cleanup_reason() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use crate::ontology::attrs::{assert_attr, NewAssertion};
+        use crate::ontology::entities::upsert_entity;
+        use crate::ontology::relations::{assert_relation, NewRelation};
+        use crate::ontology::vocabulary::{keys, predicates, EntityKind};
+        use rusqlite::Connection;
+
+        let conn = Connection::open_in_memory().unwrap();
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at, total_bytes)
+             VALUES (1, NULL, '/root', 'root', 0, 0, 300),
+                    (2, 1, '/root/work', 'work', 1, 0, 300)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, indexed_at)
+             VALUES (1, 2, '/root/work/source.psd', 'source.psd', 200, 0),
+                    (2, 2, '/root/work/export.png', 'export.png', 100, 0)",
+            [],
+        )
+        .unwrap();
+
+        let source = upsert_entity(&conn, EntityKind::File, "/root/work/source.psd", Some(1), None, None).unwrap();
+        let derivative =
+            upsert_entity(&conn, EntityKind::File, "/root/work/export.png", Some(2), None, None).unwrap();
+        let project = upsert_entity(&conn, EntityKind::Project, "project:done", None, None, Some("Done")).unwrap();
+
+        for (entity_id, key, value, confidence) in [
+            (source.id, keys::ROLE, "source", 0.9),
+            (derivative.id, keys::ROLE, "derivative", 0.95),
+            (derivative.id, keys::REPLACEABILITY, "regenerable", 0.95),
+            (project.id, keys::LIFECYCLE, "finished", 1.0),
+        ] {
+            assert_attr(
+                &conn,
+                entity_id,
+                &NewAssertion {
+                    key,
+                    value,
+                    source: "rule:test",
+                    confidence,
+                    display_in_global_views: true,
+                },
+            )
+            .unwrap();
+        }
+        assert_relation(
+            &conn,
+            &NewRelation {
+                subject_id: derivative.id,
+                predicate: predicates::DERIVED_FROM,
+                object_id: source.id,
+                source: "user",
+                confidence: 1.0,
+            },
+        )
+        .unwrap();
+        assert_relation(
+            &conn,
+            &NewRelation {
+                subject_id: derivative.id,
+                predicate: predicates::PART_OF,
+                object_id: project.id,
+                source: "user",
+                confidence: 1.0,
+            },
+        )
+        .unwrap();
+
+        let data = treemap_lens_data_for_conn(&conn).unwrap();
+        let work = data
+            .iter()
+            .find(|entry| entry.folder_path == "/root/work")
+            .expect("work folder lens data");
+
+        assert_eq!(work.role.as_deref(), Some("source"));
+        assert_eq!(work.replaceability.as_deref(), Some("regenerable"));
+        assert_eq!(work.lifecycle.as_deref(), Some("finished"));
+        assert_eq!(work.cleanup_reason.as_deref(), Some("safe-derivative"));
+        assert_eq!(work.reclaimable_bytes, 100);
     }
 }

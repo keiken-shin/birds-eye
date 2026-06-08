@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useCallback } from "react";
+import { useMemo, useEffect, useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { useScanContext } from "../context/ScanContext";
 import { MetricGrid } from "../components/MetricGrid";
@@ -11,6 +11,8 @@ import { CommandPalette } from "../components/CommandPalette";
 import { useDuplicates } from "../hooks/useDuplicates";
 import { useAuditQueue } from "../hooks/useAuditQueue";
 import { parentPath, isDescendantPath } from "../utils/pathUtils";
+import { treemapLensData } from "../nativeClient";
+import type { TreemapLens, TreemapLensMap } from "../components/TreemapCanvas";
 
 export function WorkspacePage() {
   const {
@@ -36,13 +38,42 @@ export function WorkspacePage() {
 
   const { staged, stagedBytes, stage, unstage, trashStaged, clearQueue, trashProgress, dismissProgress } =
     useAuditQueue(setRuntimeMessage);
+  const [treemapLens, setTreemapLens] = useState<TreemapLens>("size");
+  const [treemapLensMap, setTreemapLensMap] = useState<TreemapLensMap>({});
 
   useEffect(() => {
     if (workspaceIndexPath === null) {
       clearDuplicates();
       clearQueue();
+      setTreemapLensMap({});
     }
   }, [workspaceIndexPath, clearDuplicates, clearQueue]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!workspaceIndexPath || !nativeRuntime) {
+      setTreemapLensMap({});
+      return;
+    }
+
+    void treemapLensData(workspaceIndexPath)
+      .then((rows) => {
+        if (cancelled) return;
+        setTreemapLensMap(
+          rows.reduce((acc, row) => {
+            acc[row.folder_path] = row;
+            return acc;
+          }, {} as TreemapLensMap)
+        );
+      })
+      .catch((error) => {
+        if (!cancelled) setRuntimeMessage(`Treemap ontology lenses unavailable: ${String(error)}`);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [nativeRuntime, setRuntimeMessage, workspaceIndexPath]);
 
   useEffect(() => {
     if (selectedDuplicateGroup !== null && duplicateFiles.length > 0 && duplicateFiles.length < 2) {
@@ -146,7 +177,10 @@ export function WorkspacePage() {
         <AnalysisSection
           filteredFolders={workspaceFilteredFolders}
           focusedFolder={focusedFolder}
+          lens={treemapLens}
+          lensData={treemapLensMap}
           setFocusedFolder={setFocusedFolder}
+          setLens={setTreemapLens}
           onOpenDuplicateCandidate={(candidate) => void handleOpenDuplicateCandidate(candidate)}
           scan={workspaceScan}
         />
