@@ -30,6 +30,16 @@ struct BackupOfPayload {
     origin_file_id: i64,
 }
 
+#[derive(Debug, Deserialize)]
+struct NearDuplicatePayload {
+    files: Vec<NearDuplicateFilePayload>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NearDuplicateFilePayload {
+    file_id: i64,
+}
+
 fn unix_now() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -101,25 +111,38 @@ fn assert_user_relation(
     Ok(())
 }
 
-/// (subject_entity, predicate, object_entity, role_to_assert) for a discovery.
+/// (subject_entity, predicate, object_entity, optional role_to_assert) for a discovery.
 fn graduation_plan(
     conn: &Connection,
     d: &Discovery,
-) -> Result<(i64, &'static str, i64, &'static str), OntologyError> {
+) -> Result<(i64, &'static str, i64, Option<&'static str>), OntologyError> {
     match d.kind.as_str() {
         "derivedFrom-pattern" => {
             let p: DerivedFromPayload = serde_json::from_str(&d.payload)
                 .map_err(|e| OntologyError::Populator(format!("bad derivedFrom payload: {e}")))?;
             let subject = entity_id_for_file(conn, p.derivative_file_id)?;
             let object = entity_id_for_file(conn, p.source_file_id)?;
-            Ok((subject, predicates::DERIVED_FROM, object, "derivative"))
+            Ok((subject, predicates::DERIVED_FROM, object, Some("derivative")))
         }
         "backupOf-pair" => {
             let p: BackupOfPayload = serde_json::from_str(&d.payload)
                 .map_err(|e| OntologyError::Populator(format!("bad backupOf payload: {e}")))?;
             let subject = entity_id_for_file(conn, p.backup_file_id)?;
             let object = entity_id_for_file(conn, p.origin_file_id)?;
-            Ok((subject, predicates::BACKUP_OF, object, "backup"))
+            Ok((subject, predicates::BACKUP_OF, object, Some("backup")))
+        }
+        "near-duplicate-cluster" => {
+            let p: NearDuplicatePayload = serde_json::from_str(&d.payload).map_err(|e| {
+                OntologyError::Populator(format!("bad near-duplicate payload: {e}"))
+            })?;
+            if p.files.len() < 2 {
+                return Err(OntologyError::Populator(
+                    "near-duplicate payload requires at least two files".to_owned(),
+                ));
+            }
+            let subject = entity_id_for_file(conn, p.files[0].file_id)?;
+            let object = entity_id_for_file(conn, p.files[1].file_id)?;
+            Ok((subject, predicates::NEAR_DUPLICATE_OF, object, None))
         }
         other => Err(OntologyError::Populator(format!(
             "discovery kind {other} is not user-confirmable in Wave 1"
@@ -135,8 +158,13 @@ pub fn confirm_discovery(conn: &Connection, id: i64) -> Result<(), OntologyError
         return Ok(());
     }
     let (subject, predicate, object, role) = graduation_plan(conn, &d)?;
-    assert_user_role(conn, subject, role)?;
+    if let Some(role) = role {
+        assert_user_role(conn, subject, role)?;
+    }
     assert_user_relation(conn, subject, predicate, object)?;
+    if predicate == predicates::NEAR_DUPLICATE_OF {
+        assert_user_relation(conn, object, predicate, subject)?;
+    }
     set_status(conn, id, DiscoveryStatus::Confirmed)
 }
 
@@ -326,6 +354,38 @@ mod tests {
     }
 
     #[test]
+    fn confirm_near_duplicate_cluster_graduates_bidirectional_relation() {
+        let conn = migrated_conn();
+        seed_file(&conn, 1, "/photos/a.jpg");
+        seed_file(&conn, 2, "/photos/a-copy.jpg");
+        let d = insert_discovery(
+            &conn,
+            &NewDiscovery {
+                kind: "near-duplicate-cluster",
+                payload_json: r#"{"files":[{"file_id":1,"path":"/photos/a.jpg","size":100},{"file_id":2,"path":"/photos/a-copy.jpg","size":90}],"hamming_distance":4}"#,
+                confidence: 0.82,
+                potential_bytes_unlocked: 90,
+            },
+        )
+        .unwrap();
+
+        confirm_discovery(&conn, d.id).unwrap();
+
+        let first = find_entity_for_file(&conn, 1).unwrap().unwrap();
+        let second = find_entity_for_file(&conn, 2).unwrap().unwrap();
+        let out = outbound(&conn, first.id, predicates::NEAR_DUPLICATE_OF).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].object_id, second.id);
+        let back = outbound(&conn, second.id, predicates::NEAR_DUPLICATE_OF).unwrap();
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].object_id, first.id);
+        assert_eq!(
+            get_discovery(&conn, d.id).unwrap().unwrap().status,
+            DiscoveryStatus::Confirmed
+        );
+    }
+
+    #[test]
     fn reject_writes_negative_assertion_and_marks_rejected() {
         let conn = migrated_conn();
         seed_file(&conn, 1, "/a/List.psd");
@@ -347,6 +407,39 @@ mod tests {
         let src = find_entity_for_file(&conn, 1).unwrap().unwrap();
         assert!(crate::ontology::negative::is_rejected_pair(
             &conn, deriv.id, predicates::DERIVED_FROM, src.id
+        )
+        .unwrap());
+        assert_eq!(
+            get_discovery(&conn, d.id).unwrap().unwrap().status,
+            DiscoveryStatus::Rejected
+        );
+    }
+
+    #[test]
+    fn reject_near_duplicate_cluster_blocks_pair() {
+        let conn = migrated_conn();
+        seed_file(&conn, 1, "/photos/a.jpg");
+        seed_file(&conn, 2, "/photos/a-copy.jpg");
+        let d = insert_discovery(
+            &conn,
+            &NewDiscovery {
+                kind: "near-duplicate-cluster",
+                payload_json: r#"{"files":[{"file_id":1,"path":"/photos/a.jpg","size":100},{"file_id":2,"path":"/photos/a-copy.jpg","size":90}],"hamming_distance":4}"#,
+                confidence: 0.82,
+                potential_bytes_unlocked: 90,
+            },
+        )
+        .unwrap();
+
+        reject_discovery(&conn, d.id, Some("different edits")).unwrap();
+
+        let first = find_entity_for_file(&conn, 1).unwrap().unwrap();
+        let second = find_entity_for_file(&conn, 2).unwrap().unwrap();
+        assert!(crate::ontology::negative::is_rejected_pair(
+            &conn,
+            first.id,
+            predicates::NEAR_DUPLICATE_OF,
+            second.id
         )
         .unwrap());
         assert_eq!(

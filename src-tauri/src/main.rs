@@ -20,10 +20,12 @@ use birds_eye::native::api::{
     saved_views as do_saved_views, run_saved_view_cmd as do_run_saved_view,
     file_provenance as do_file_provenance, override_classification as do_override_classification,
     ontology_status as do_ontology_status, set_ontology_enabled as do_set_ontology_enabled,
+    run_ontology_enrichment as do_run_ontology_enrichment,
     DiscoveriesRequest, ResolveDiscoveryRequest, ResolveDiscoveryKindRequest,
     RunSavedViewRequest, FileProvenanceRequest, FileProvenanceDto,
     OverrideClassificationRequest, OntologyStatusRequest, OntologyStatusDto,
-    SetOntologyEnabledRequest, TreemapLensFolderDto, TreemapLensRequest,
+    RunOntologyEnrichmentRequest, RunOntologyEnrichmentResponse, SetOntologyEnabledRequest,
+    TreemapLensFolderDto, TreemapLensRequest,
     DuplicateFileSummaryDto, DuplicateGroupFilesRequest,
     FileSearchResultDto, IndexMetadataDto, IndexOverviewDto, IndexQueryRequest,
     ScanToIndexRequest, ScanToIndexResponse, SearchFilesRequest,
@@ -295,6 +297,13 @@ fn set_ontology_enabled(request: SetOntologyEnabledRequest) -> Result<(), String
     do_set_ontology_enabled(request)
 }
 
+#[tauri::command]
+fn run_ontology_enrichment(
+    request: RunOntologyEnrichmentRequest,
+) -> Result<RunOntologyEnrichmentResponse, String> {
+    do_run_ontology_enrichment(request)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -334,6 +343,7 @@ fn main() {
             override_classification,
             ontology_status,
             set_ontology_enabled,
+            run_ontology_enrichment,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Birds Eye desktop shell");

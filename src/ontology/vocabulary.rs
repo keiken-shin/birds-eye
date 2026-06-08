@@ -236,6 +236,7 @@ pub mod predicates {
     pub const PART_OF: &str = "partOf";
     pub const DERIVED_FROM: &str = "derivedFrom";
     pub const BACKUP_OF: &str = "backupOf";
+    pub const NEAR_DUPLICATE_OF: &str = "nearDuplicateOf";
     pub const MANIFESTATION_OF: &str = "manifestationOf";
     pub const DEPICTS: &str = "depicts";
 }

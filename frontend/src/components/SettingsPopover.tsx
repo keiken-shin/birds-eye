@@ -3,7 +3,7 @@ import type React from "react";
 import { ChevronRight, ArrowLeft } from "lucide-react";
 import { useScanContext } from "../context/ScanContext";
 import { useOntologyStatus } from "../hooks/useOntology";
-import { setOntologyEnabled } from "../nativeClient";
+import { runOntologyEnrichment, setOntologyEnabled, type NativeEnrichmentBudget } from "../nativeClient";
 
 type Theme = "dark" | "light" | "system";
 type Layer = "main" | "shortcuts";
@@ -26,6 +26,9 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
   const [retentionDays, setRetentionDays] = useState(
     () => localStorage.getItem("be.ontology.retentionDays") ?? "90"
   );
+  const [enrichmentBudget, setEnrichmentBudget] = useState<NativeEnrichmentBudget>(
+    () => (localStorage.getItem("be.ontology.budget") as NativeEnrichmentBudget | null) ?? "standard"
+  );
 
   const toggleQuiet = useCallback((checked: boolean) => {
     setQuiet(checked);
@@ -35,6 +38,11 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
   const changeRetention = useCallback((value: string) => {
     setRetentionDays(value);
     localStorage.setItem("be.ontology.retentionDays", value);
+  }, []);
+
+  const changeBudget = useCallback((value: NativeEnrichmentBudget) => {
+    setEnrichmentBudget(value);
+    localStorage.setItem("be.ontology.budget", value);
   }, []);
 
   const toggleOntology = useCallback(
@@ -52,6 +60,20 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
     },
     [workspaceIndexPath, refreshOntologyStatus, setRuntimeMessage]
   );
+
+  const runEnrichment = useCallback(async () => {
+    if (!workspaceIndexPath) return;
+    setOntologyBusy(true);
+    try {
+      const result = await runOntologyEnrichment(workspaceIndexPath, enrichmentBudget);
+      await refreshOntologyStatus();
+      setRuntimeMessage(result.ran ? "Ontology enrichment complete" : "Ontology enrichment skipped: disabled");
+    } catch (e) {
+      setRuntimeMessage(`Ontology enrichment failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setOntologyBusy(false);
+    }
+  }, [enrichmentBudget, refreshOntologyStatus, setRuntimeMessage, workspaceIndexPath]);
 
   useEffect(() => {
     function handleClick(event: MouseEvent) {
@@ -152,6 +174,28 @@ export function SettingsPopover({ children }: { children: React.ReactNode }) {
                       className="w-20 border border-white/20 bg-transparent px-2 py-0.5 text-right text-white/80"
                     />
                   </label>
+
+                  <label className="grid gap-1 text-12 text-white/70">
+                    Enrichment budget
+                    <select
+                      value={enrichmentBudget}
+                      onChange={(e) => changeBudget(e.target.value as NativeEnrichmentBudget)}
+                      className="border border-white/20 bg-surface px-2 py-1 text-white/80"
+                    >
+                      <option value="cheap-only">Cheap only</option>
+                      <option value="standard">Standard extractors</option>
+                      <option value="all-opt-in">All opt-in</option>
+                    </select>
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={!workspaceIndexPath || ontologyBusy || !(ontologyStatusValue?.enabled ?? false)}
+                    onClick={() => void runEnrichment()}
+                    className="border border-primary/40 px-3 py-1.5 font-mono text-10 font-black uppercase text-primary disabled:opacity-40"
+                  >
+                    Run enrichment
+                  </button>
                 </div>
               </div>
 

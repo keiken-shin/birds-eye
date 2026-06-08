@@ -345,6 +345,14 @@ export async function setOntologyEnabled(indexPath: string, enabled: boolean) {
   await invoke("set_ontology_enabled", { request: { index_path: indexPath, enabled } });
 }
 
+export type NativeEnrichmentBudget = "cheap-only" | "standard" | "all-opt-in";
+
+export async function runOntologyEnrichment(indexPath: string, budget: NativeEnrichmentBudget) {
+  return invoke<{ ran: boolean }>("run_ontology_enrichment", {
+    request: { index_path: indexPath, budget },
+  });
+}
+
 // ---- Ontology: treemap lenses ----
 
 export type NativeTreemapLensFolder = {

@@ -12,7 +12,9 @@ use crate::ontology::discoveries_resolve::{
 };
 use crate::ontology::enabled;
 use crate::ontology::entities::{find_entity_for_file, upsert_entity};
+use crate::ontology::orchestrator::run_phase2;
 use crate::ontology::pinning::{pin_file as pin_file_db, unpin_file as unpin_file_db};
+use crate::ontology::populators::BudgetTier;
 use crate::ontology::relations::outbound;
 use crate::ontology::saved_views::{list_saved_views, run_saved_view, SavedView, SavedViewRow, ViewParams};
 use crate::ontology::vocabulary::{keys, predicates, EntityKind};
@@ -22,6 +24,8 @@ use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScanToIndexRequest {
@@ -1528,5 +1532,94 @@ mod tests {
         assert_eq!(work.lifecycle.as_deref(), Some("finished"));
         assert_eq!(work.cleanup_reason.as_deref(), Some("safe-derivative"));
         assert_eq!(work.reclaimable_bytes, 100);
+    }
+
+    #[test]
+    fn run_ontology_enrichment_respects_budget_tiers() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use crate::ontology::enabled::enable;
+        use crate::ontology::orchestrator::read_state;
+        use rusqlite::Connection;
+
+        let dir = std::env::temp_dir().join(format!("be_enrichment_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let image_path = dir.join("one.jpg");
+        std::fs::write(&image_path, (0_u8..=127).collect::<Vec<_>>()).unwrap();
+        let index_path = dir.join("idx.sqlite");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            enable(&conn).unwrap();
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, '/root', 'root', 0, 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, extension, size, indexed_at)
+                 VALUES (1, 1, ?1, 'one.jpg', 'jpg', 128, 0)",
+                [image_path.to_string_lossy().as_ref()],
+            )
+            .unwrap();
+        }
+
+        let standard = run_ontology_enrichment(RunOntologyEnrichmentRequest {
+            index_path: index_path.clone(),
+            budget: "standard".to_owned(),
+        })
+        .unwrap();
+        assert!(standard.ran);
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            assert!(read_state(&conn, "MetadataExtractorPopulator").unwrap().is_some());
+            assert!(read_state(&conn, "PerceptualHashPopulator").unwrap().is_none());
+        }
+
+        let all = run_ontology_enrichment(RunOntologyEnrichmentRequest {
+            index_path: index_path.clone(),
+            budget: "all-opt-in".to_owned(),
+        })
+        .unwrap();
+        assert!(all.ran);
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            assert!(read_state(&conn, "PerceptualHashPopulator").unwrap().is_some());
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RunOntologyEnrichmentRequest {
+    pub index_path: PathBuf,
+    pub budget: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct RunOntologyEnrichmentResponse {
+    pub ran: bool,
+}
+
+pub fn run_ontology_enrichment(
+    request: RunOntologyEnrichmentRequest,
+) -> Result<RunOntologyEnrichmentResponse, String> {
+    let budget = parse_budget_tier(&request.budget)?;
+    let ran = run_phase2(&request.index_path, budget, Arc::new(AtomicBool::new(false)))
+        .map_err(|e| e.to_string())?;
+    Ok(RunOntologyEnrichmentResponse { ran })
+}
+
+fn parse_budget_tier(value: &str) -> Result<BudgetTier, String> {
+    match value {
+        "cheap-only" => Ok(BudgetTier::CheapOnly),
+        "standard" => Ok(BudgetTier::Standard),
+        "all-opt-in" => Ok(BudgetTier::AllOptIn),
+        other => Err(format!("unknown enrichment budget: {other}")),
     }
 }
