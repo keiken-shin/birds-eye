@@ -2,6 +2,7 @@
 
 pub mod extractors;
 pub mod heuristics;
+pub mod phash;
 pub mod rules;
 
 use crate::ontology::attrs::{assert_attr, NewAssertion};

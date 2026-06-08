@@ -7,6 +7,7 @@
 use crate::ontology::enabled::is_enabled;
 use crate::ontology::populators::extractors::MetadataExtractorPopulator;
 use crate::ontology::populators::heuristics::StructuralHeuristicPopulator;
+use crate::ontology::populators::phash::PerceptualHashPopulator;
 use crate::ontology::populators::rules::RulePopulator;
 use crate::ontology::populators::{
     BudgetTier, CostTier, Populator, PopulatorContext, PopulatorError, PopulatorOutcome,
@@ -165,6 +166,7 @@ impl Default for PopulatorOrchestrator {
             Box::new(RulePopulator::with_starter_bundle()),
             Box::new(StructuralHeuristicPopulator::new()),
             Box::new(MetadataExtractorPopulator::new()),
+            Box::new(PerceptualHashPopulator::new()),
         ])
     }
 }
@@ -593,6 +595,25 @@ mod tests {
             .unwrap();
 
         assert!(read_state(&conn, "MetadataExtractorPopulator")
+            .unwrap()
+            .is_some());
+        assert!(read_state(&conn, "PerceptualHashPopulator")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn default_orchestrator_runs_phash_populator_at_all_opt_in_budget() {
+        let mut conn = migrated_conn();
+        seed_root_folder(&conn);
+        insert_file(&conn, 1, "/root/one.psd", "one.psd", Some("psd"));
+        let orchestrator = PopulatorOrchestrator::default();
+
+        orchestrator
+            .run(&mut conn, BudgetTier::AllOptIn, pause())
+            .unwrap();
+
+        assert!(read_state(&conn, "PerceptualHashPopulator")
             .unwrap()
             .is_some());
     }
