@@ -5,6 +5,7 @@
 //! can resume across process runs.
 
 use crate::ontology::enabled::is_enabled;
+use crate::ontology::populators::extractors::MetadataExtractorPopulator;
 use crate::ontology::populators::heuristics::StructuralHeuristicPopulator;
 use crate::ontology::populators::rules::RulePopulator;
 use crate::ontology::populators::{
@@ -163,6 +164,7 @@ impl Default for PopulatorOrchestrator {
         Self::new(vec![
             Box::new(RulePopulator::with_starter_bundle()),
             Box::new(StructuralHeuristicPopulator::new()),
+            Box::new(MetadataExtractorPopulator::new()),
         ])
     }
 }
@@ -573,7 +575,26 @@ mod tests {
         assert!(read_state(&conn, "StructuralHeuristicPopulator")
             .unwrap()
             .is_some());
+        assert!(read_state(&conn, "MetadataExtractorPopulator")
+            .unwrap()
+            .is_none());
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn default_orchestrator_runs_metadata_extractors_at_standard_budget() {
+        let mut conn = migrated_conn();
+        seed_root_folder(&conn);
+        insert_file(&conn, 1, "/root/one.psd", "one.psd", Some("psd"));
+        let orchestrator = PopulatorOrchestrator::default();
+
+        orchestrator
+            .run(&mut conn, BudgetTier::Standard, pause())
+            .unwrap();
+
+        assert!(read_state(&conn, "MetadataExtractorPopulator")
+            .unwrap()
+            .is_some());
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! Populator runtime contract and gated emit helpers.
 
+pub mod extractors;
 pub mod heuristics;
 pub mod rules;
 
