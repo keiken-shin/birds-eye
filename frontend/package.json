@@ -29,7 +29,7 @@
     "tailwindcss": "^4.0.0",
     "three": "^0.184.0",
     "typescript": "^5.8.0",
-    "vite": "^7.0.0"
+    "vite": "^8.0.16"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.1",
