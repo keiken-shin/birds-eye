@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+/* Dark theme tokens lifted from docs/goal/Birds Eye Workspace.dc.html (the hi-fi target). */
+@theme {
+  /* Surfaces */
+  --color-base: #0a0b0d; /* app backdrop */
+  --color-window: #0e1014; /* center stage */
+  --color-panel: #0c0d10; /* rails / inspector */
+  --color-bar: #121419; /* title / spine / tray */
+  --color-inset: #111317; /* cards, inputs-on-panel */
+  --color-field: #0b0c0f; /* command input bg */
+  --color-overlay: #13151a; /* modals / toasts */
+
+  /* Lines */
+  --color-line: #1e2128;
+  --color-line-soft: #1a1d23;
+  --color-line-input: #23262d;
+  --color-line-modal: #2a2e36;
+
+  /* Text */
+  --color-ink: #e6e8ea;
+  --color-ink-soft: #c4c9d2;
+  --color-muted: #9aa0a8;
+  --color-faint: #7a818b;
+  --color-dim: #6b7178;
+  --color-label: #5b616a;
+
+  /* Accents */
+  --color-primary: #3ddc84;
+  --color-on-primary: #06140c;
+  --color-primary-ink: #7fe0a6;
+  --color-primary-bright: #aef0c8;
+  --color-history: #5b8cff;
+  --color-warn: #e0a44a;
+  --color-danger: #e06a5a;
+
+  /* Numeric scale used across the mock */
+  --text-9: 0.5625rem;
+  --text-10: 0.625rem;
+  --text-105: 0.656rem;
+  --text-11: 0.6875rem;
+  --text-115: 0.719rem;
+  --text-12: 0.75rem;
+  --text-125: 0.781rem;
+  --text-13: 0.8125rem;
+  --text-135: 0.844rem;
+
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+body {
+  background: var(--color-base);
+  color: var(--color-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+::selection {
+  background: rgba(61, 220, 132, 0.3);
+}
+.mono {
+  font-family: var(--font-mono);
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: #2b303a;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes bePulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes beIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.be-in {
+  animation: beIn 0.18s ease;
+}

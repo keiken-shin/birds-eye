@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeDevCommand": { "script": "npm run dev", "cwd": "../workspace" },
+    "beforeBuildCommand": { "script": "npm run build", "cwd": "../workspace" },
+    "devUrl": "http://127.0.0.1:5174",
+    "frontendDist": "../workspace/dist"
+  }
+}
