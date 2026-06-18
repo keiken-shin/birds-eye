@@ -26,7 +26,7 @@ import type { PinnedCard } from "../state/types";
  */
 export function BoardLens() {
   const { ontologyEnabled, indexPath, pinned, unpinCard, select, selected } = useWorkspace();
-  const { lensByPath } = useIndexData();
+  const { lensByPath, dataVersion } = useIndexData();
   const [findings, setFindings] = useState<Finding[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -60,7 +60,9 @@ export function BoardLens() {
     } finally {
       if (id === reqId.current) setLoading(false);
     }
-  }, [indexPath, ontologyEnabled]);
+    // dataVersion: refetch after refreshData (e.g. enabling intelligence from the Board, which
+    // enriches then refreshes) so findings populate instead of sticking on the pre-enrich empty.
+  }, [indexPath, ontologyEnabled, dataVersion]);
 
   useEffect(() => {
     void load();

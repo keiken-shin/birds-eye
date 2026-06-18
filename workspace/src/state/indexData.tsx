@@ -31,6 +31,8 @@ type IndexDataValue = {
   tree: FolderTree | null;
   lensByPath: Map<string, NativeTreemapLensFolder>;
   reclaimableTotal: number;
+  /** Bumps on every successful refreshData — lets lenses (e.g. Board) refetch after enrichment. */
+  dataVersion: number;
   refreshIndexes: () => Promise<void>;
   refreshData: () => Promise<void>;
 };
@@ -46,6 +48,7 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
   const [lensByPath, setLensByPath] = useState<Map<string, NativeTreemapLensFolder>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [dataVersion, setDataVersion] = useState(0);
   const reqId = useRef(0);
 
   const activeEntry = useMemo(
@@ -85,6 +88,7 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
       setTree(buildFolderTree(ov.folders, rootPath));
       setLensByPath(new Map(lens.map((r) => [r.folder_path, r])));
       setOntologyEnabled(ont.enabled);
+      setDataVersion((v) => v + 1); // signal lenses that fresh data (incl. enrichment) landed
     } catch (e) {
       if (id === reqId.current) setError(String(e));
     } finally {
@@ -128,10 +132,11 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
       tree,
       lensByPath,
       reclaimableTotal,
+      dataVersion,
       refreshIndexes,
       refreshData,
     }),
-    [status, error, indexes, activeEntry, overview, tree, lensByPath, reclaimableTotal, refreshIndexes, refreshData]
+    [status, error, indexes, activeEntry, overview, tree, lensByPath, reclaimableTotal, dataVersion, refreshIndexes, refreshData]
   );
 
   return <IndexDataContext.Provider value={value}>{children}</IndexDataContext.Provider>;
