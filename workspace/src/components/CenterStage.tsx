@@ -3,6 +3,7 @@ import { useIndexData } from "../state/indexData";
 import { useWorkspace } from "../state/workspaceStore";
 import { nodeName, scopeChildren, scopeTotalBytes } from "../lib/folderTree";
 import { TreemapLens } from "./TreemapLens";
+import { BoardLens } from "./BoardLens";
 
 function LensPlaceholder({ title, note }: { title: string; note: string }) {
   return (
@@ -48,12 +49,7 @@ export function CenterStage() {
       </div>
 
       {lens === "treemap" && <TreemapLens />}
-      {lens === "board" && (
-        <LensPlaceholder
-          title="⬡ Board lens"
-          note="Spatial canvas of findings and relationships — coming in the next milestone."
-        />
-      )}
+      {lens === "board" && <BoardLens />}
       {lens === "results" && (
         <LensPlaceholder
           title="▸ Results lens"

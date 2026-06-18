@@ -2,8 +2,8 @@ import { formatBytes, formatCount } from "@bridge/domain";
 import { REASON_LABELS, type NativeTreemapLensFolder } from "@bridge/nativeClient";
 import { useIndexData } from "../state/indexData";
 import { useWorkspace } from "../state/workspaceStore";
-import { useEnableIntelligence } from "../hooks/useEnableIntelligence";
 import { VERDICT_STYLES, canStage, explainFolder, verdictForFolder } from "../lib/verdict";
+import { EnableIntelligenceCard } from "./EnableIntelligenceCard";
 
 function Label({ children }: { children: React.ReactNode }) {
   return <div className="mb-1.5 text-10 tracking-[0.12em] text-label">{children}</div>;
@@ -20,10 +20,11 @@ function Stat({ label, children }: { label: string; children: React.ReactNode })
 
 export function Inspector() {
   const { tree, lensByPath } = useIndexData();
-  const { selected, ontologyEnabled, isStaged, toggleStaged } = useWorkspace();
-  const { enable, busy } = useEnableIntelligence();
+  const { selected, ontologyEnabled, isStaged, toggleStaged, pinToBoard, unpinCard, isPinned } =
+    useWorkspace();
 
   const node = selected ? tree?.byPath.get(selected.path) : undefined;
+  const pinned = selected ? isPinned(selected.path) : false;
   const lensRow: NativeTreemapLensFolder | null = selected ? lensByPath.get(selected.path) ?? null : null;
   const verdict = selected && ontologyEnabled && lensRow ? verdictForFolder(lensRow) : null;
   const vs = verdict ? VERDICT_STYLES[verdict] : null;
@@ -69,21 +70,7 @@ export function Inspector() {
             </div>
 
             {!ontologyEnabled ? (
-              <div className="rounded-[9px] border border-primary/30 bg-primary/[0.06] p-3">
-                <div className="mb-1 text-12 font-semibold text-primary">Enable intelligence</div>
-                <div className="mb-3 text-[11.5px] leading-relaxed text-muted">
-                  Classify this index to reveal why each folder exists, what's reclaimable, and a
-                  safety verdict. Non-destructive and reversible.
-                </div>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void enable()}
-                  className="w-full rounded-[8px] bg-primary py-2 text-12 font-semibold text-on-primary disabled:opacity-50"
-                >
-                  {busy ? "Enriching…" : "Enable & enrich"}
-                </button>
-              </div>
+              <EnableIntelligenceCard />
             ) : (
               <>
                 <Label>WHY IT EXISTS</Label>
@@ -94,9 +81,27 @@ export function Inspector() {
                 </div>
 
                 <Label>RELATED</Label>
-                <div className="mb-4 text-[11.5px] italic text-label">
-                  Folder-level relationships surface on the Board lens (next milestone).
+                <div className="mb-2 text-[11.5px] leading-relaxed text-label">
+                  Suggested relationships (derived-from / backup-of) for this index live on the
+                  Board lens. Pin this folder to collect it there.
                 </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    selected &&
+                    (pinned
+                      ? unpinCard(selected.path)
+                      : pinToBoard({ path: selected.path, name: selected.name, bytes: selected.bytes }))
+                  }
+                  className="mb-4 inline-flex items-center gap-1.5 rounded-[7px] border px-2.5 py-1.5 text-11"
+                  style={
+                    pinned
+                      ? { borderColor: "rgba(61,220,132,.4)", color: "#7fe0a6" }
+                      : { borderColor: "var(--color-line)", color: "var(--color-ink-soft)" }
+                  }
+                >
+                  {pinned ? "✓ On board" : "⬡ Pin to board"}
+                </button>
 
                 <Label>SAFETY VERDICT</Label>
                 {vs ? (

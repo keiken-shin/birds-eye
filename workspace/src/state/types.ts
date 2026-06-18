@@ -24,3 +24,6 @@ export type StagedItem = {
 };
 
 export type UndoState = { entryIds: number[]; freed: number } | null;
+
+/** A folder collected onto the Board lens (the selection→board glue). Folders are Inspector-able. */
+export type PinnedCard = { path: string; name: string; bytes: number };

@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Lens, Overlay, SelectedRef, StagedItem, UndoState } from "./types";
+import type { Lens, Overlay, PinnedCard, SelectedRef, StagedItem, UndoState } from "./types";
 
 /**
  * The two "glue" globals the architecture study calls out: selection (drives the one
@@ -20,6 +20,7 @@ type WorkspaceState = {
   scopePath: string[]; // folder paths from root → current scope
   selected: SelectedRef | null;
   staged: StagedItem[];
+  pinned: PinnedCard[];
   overlay: Overlay;
   review: boolean;
   undo: UndoState;
@@ -36,6 +37,9 @@ type WorkspaceActions = {
   toggleStaged: (item: StagedItem) => void;
   isStaged: (path: string) => boolean;
   clearStaged: () => void;
+  pinToBoard: (card: PinnedCard) => void;
+  unpinCard: (path: string) => void;
+  isPinned: (path: string) => boolean;
   setOverlay: (overlay: Overlay) => void;
   openReview: () => void;
   closeReview: () => void;
@@ -53,6 +57,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [scopePath, setScopePath] = useState<string[]>([]);
   const [selected, setSelected] = useState<SelectedRef | null>(null);
   const [staged, setStaged] = useState<StagedItem[]>([]);
+  const [pinned, setPinned] = useState<PinnedCard[]>([]);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [review, setReview] = useState(false);
   const [undo, setUndo] = useState<UndoState>(null);
@@ -76,6 +81,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
   const isStaged = useCallback((path: string) => staged.some((s) => s.path === path), [staged]);
   const clearStaged = useCallback(() => setStaged([]), []);
+
+  const pinToBoard = useCallback((card: PinnedCard) => {
+    setPinned((prev) => (prev.some((p) => p.path === card.path) ? prev : [...prev, card]));
+    setLens("board"); // follow the wireframe: pinning takes you to the board it landed on
+  }, []);
+  const unpinCard = useCallback((path: string) => {
+    setPinned((prev) => prev.filter((p) => p.path !== path));
+  }, []);
+  const isPinned = useCallback((path: string) => pinned.some((p) => p.path === path), [pinned]);
   const openReview = useCallback(() => {
     if (staged.length) setReview(true);
   }, [staged.length]);
@@ -88,6 +102,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       scopePath,
       selected,
       staged,
+      pinned,
       overlay,
       review,
       undo,
@@ -101,6 +116,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       toggleStaged,
       isStaged,
       clearStaged,
+      pinToBoard,
+      unpinCard,
+      isPinned,
       setOverlay,
       openReview,
       closeReview,
@@ -113,6 +131,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       scopePath,
       selected,
       staged,
+      pinned,
       overlay,
       review,
       undo,
@@ -122,6 +141,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       toggleStaged,
       isStaged,
       clearStaged,
+      pinToBoard,
+      unpinCard,
+      isPinned,
       openReview,
       closeReview,
     ]
