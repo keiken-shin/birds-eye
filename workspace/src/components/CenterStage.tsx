@@ -4,15 +4,7 @@ import { useWorkspace } from "../state/workspaceStore";
 import { nodeName, scopeChildren, scopeTotalBytes } from "../lib/folderTree";
 import { TreemapLens } from "./TreemapLens";
 import { BoardLens } from "./BoardLens";
-
-function LensPlaceholder({ title, note }: { title: string; note: string }) {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
-      <div className="text-[15px] text-muted">{title}</div>
-      <div className="max-w-[360px] text-12 text-label">{note}</div>
-    </div>
-  );
-}
+import { ResultsLens } from "./ResultsLens";
 
 export function CenterStage() {
   const { tree, activeEntry, reclaimableTotal } = useIndexData();
@@ -50,12 +42,7 @@ export function CenterStage() {
 
       {lens === "treemap" && <TreemapLens />}
       {lens === "board" && <BoardLens />}
-      {lens === "results" && (
-        <LensPlaceholder
-          title="▸ Results lens"
-          note="Ranked results & icicle view — coming in the next milestone."
-        />
-      )}
+      {lens === "results" && <ResultsLens />}
     </div>
   );
 }

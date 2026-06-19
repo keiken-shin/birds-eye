@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { listSavedViews, type NativeSavedView } from "@bridge/nativeClient";
 import { useWorkspace } from "../state/workspaceStore";
+import { parseIntent } from "../lib/intent";
 import type { Lens } from "../state/types";
 
 const LENSES: Array<{ id: Lens; label: string }> = [
@@ -9,12 +11,38 @@ const LENSES: Array<{ id: Lens; label: string }> = [
 ];
 
 /**
- * The command spine. Lens switcher is fully wired; the query input is intentionally inert
- * in v1 (routing deferred per plan) — it's a focusable placeholder so the spine reads true.
+ * The command spine. The lens switcher and the query input are both live: typing a line and
+ * pressing Enter routes through `parseIntent` — keyword lines ("old files", "unclassified")
+ * open the matching curated view, anything else runs a literal file search — then drops you on
+ * the Results lens. The lens's own search box stays literal, so nothing is unreachable.
  */
 export function CommandSpine() {
-  const { lens, setLens } = useWorkspace();
+  const { lens, setLens, runQuery } = useWorkspace();
   const [focused, setFocused] = useState(false);
+  const [text, setText] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const views = useRef<NativeSavedView[]>([]);
+
+  useEffect(() => {
+    void listSavedViews().then((v) => (views.current = v)).catch(() => {});
+  }, []);
+
+  // ⌥⌘K / Ctrl-K focuses the command line from anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const submit = () => {
+    const intent = parseIntent(text, views.current);
+    if (intent) runQuery(intent);
+  };
 
   return (
     <div className="flex h-[58px] flex-none items-center gap-3 border-b border-line bg-bar px-3.5">
@@ -24,9 +52,13 @@ export function CommandSpine() {
       >
         <span className="text-[14px] text-primary">▸</span>
         <input
+          ref={inputRef}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          placeholder="Ask your storage — coming soon (Treemap · Board · Results below)"
+          placeholder="Search files, or try “old files” · “unclassified” · “regenerable” →"
           spellCheck={false}
           className="flex-1 bg-transparent text-[13.5px] text-ink outline-none placeholder:text-dim"
         />

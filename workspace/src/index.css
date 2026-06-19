@@ -26,6 +26,9 @@
   --color-label: #5b616a;
 
   /* Accents */
+  /* ponytail: accent is fixed green; ~24 components hardcode the literal (#3ddc84 / rgba(61,220,132))
+     instead of this var, so a runtime accent picker would only half-apply. Route those literals
+     through --color-primary before exposing an accent setting. */
   --color-primary: #3ddc84;
   --color-on-primary: #06140c;
   --color-primary-ink: #7fe0a6;
@@ -71,6 +74,14 @@ body {
   font-family: var(--font-mono);
 }
 
+/* Every interactive button reads as clickable; disabled reads as blocked. One rule, all buttons. */
+button:not(:disabled) {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
 ::-webkit-scrollbar {
   width: 9px;
   height: 9px;
@@ -104,4 +115,14 @@ body {
 }
 .be-in {
   animation: beIn 0.18s ease;
+}
+
+/* Honor the OS "reduce motion" preference natively — no toggle, no state. */
+@media (prefers-reduced-motion: reduce) {
+  .be-in {
+    animation: none;
+  }
+  * {
+    transition: none !important;
+  }
 }

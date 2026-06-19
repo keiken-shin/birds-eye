@@ -32,6 +32,7 @@ export function Inspector() {
   const reasonLabel = lensRow?.cleanup_reason
     ? REASON_LABELS[lensRow.cleanup_reason] ?? lensRow.cleanup_reason
     : null;
+  const isFile = selected?.kind === "file";
   const staged = selected ? isStaged(selected.path) : false;
   const stageable = verdict ? canStage(verdict, reclaimable) : false;
 
@@ -45,6 +46,11 @@ export function Inspector() {
       verdict,
       kind: "folder",
     });
+  };
+
+  const onStageFile = () => {
+    if (!selected) return;
+    toggleStaged({ path: selected.path, name: selected.name, bytes: selected.bytes, reason: null, verdict: "review", kind: "file" });
   };
 
   return (
@@ -66,10 +72,35 @@ export function Inspector() {
 
             <div className="mb-4 flex gap-2">
               <Stat label="SIZE">{formatBytes(selected.bytes)}</Stat>
-              <Stat label="FILES">{node ? formatCount(node.files) : "—"}</Stat>
+              {!isFile && <Stat label="FILES">{node ? formatCount(node.files) : "—"}</Stat>}
             </div>
 
-            {!ontologyEnabled ? (
+            {isFile ? (
+              <>
+                <div className="mb-3 text-[11.5px] leading-relaxed text-label">
+                  A single file from the results. Folder-level verdicts and "why it exists" live on
+                  the map — select its folder there for the full picture. Stage it below to add it
+                  to the cleanup tray (it's re-verified before anything is removed).
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    selected &&
+                    (pinned
+                      ? unpinCard(selected.path)
+                      : pinToBoard({ path: selected.path, name: selected.name, bytes: selected.bytes }))
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-[7px] border px-2.5 py-1.5 text-11"
+                  style={
+                    pinned
+                      ? { borderColor: "rgba(61,220,132,.4)", color: "#7fe0a6" }
+                      : { borderColor: "var(--color-line)", color: "var(--color-ink-soft)" }
+                  }
+                >
+                  {pinned ? "✓ On board" : "⬡ Pin to board"}
+                </button>
+              </>
+            ) : !ontologyEnabled ? (
               <EnableIntelligenceCard />
             ) : (
               <>
@@ -129,7 +160,24 @@ export function Inspector() {
         )}
       </div>
 
-      {selected && ontologyEnabled && (
+      {selected && isFile && (
+        <div className="flex-none border-t border-line p-3.5">
+          <button
+            type="button"
+            onClick={onStageFile}
+            className="w-full rounded-[9px] py-2.5 text-13 font-semibold"
+            style={
+              staged
+                ? { background: "rgba(61,220,132,.13)", color: "#7fe0a6", border: "1px solid rgba(61,220,132,.4)" }
+                : { background: "var(--color-primary)", color: "var(--color-on-primary)" }
+            }
+          >
+            {staged ? "✓ Staged — remove" : "Add to cleanup tray"}
+          </button>
+        </div>
+      )}
+
+      {selected && !isFile && ontologyEnabled && (
         <div className="flex-none border-t border-line p-3.5">
           <button
             type="button"

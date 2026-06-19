@@ -8,6 +8,7 @@ export function ActivityRail() {
   const top: RailButton[] = [
     { glyph: "▦", title: "Map", onClick: () => setLens("treemap"), active: lens === "treemap" },
     { glyph: "◎", title: "New scan (⌘N)", onClick: () => setOverlay("scan") },
+    { glyph: "≣", title: "Scans", onClick: () => setOverlay("queue") },
     { glyph: "✦", title: "Findings", onClick: () => setLens("board"), active: lens === "board" },
     { glyph: "◷", title: "Library (⌘L)", onClick: () => setOverlay("library") },
   ];

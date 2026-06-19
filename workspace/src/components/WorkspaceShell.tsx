@@ -9,6 +9,9 @@ import { Inspector } from "./Inspector";
 import { CleanupTray } from "./CleanupTray";
 import { ScanOverlay } from "./ScanOverlay";
 import { MiscOverlay } from "./MiscOverlay";
+import { SettingsOverlay } from "./SettingsOverlay";
+import { LibraryOverlay } from "./LibraryOverlay";
+import { ScanQueueOverlay } from "./ScanQueueOverlay";
 import { ReviewModal } from "./ReviewModal";
 import { UndoToast } from "./UndoToast";
 import { EnableIntelligence } from "./EnableIntelligence";
@@ -37,6 +40,11 @@ export function WorkspaceShell() {
       if (mod && e.key.toLowerCase() === "n") {
         e.preventDefault();
         setOverlay("scan");
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        setOverlay("library");
         return;
       }
       if (mod && e.key === ",") {
@@ -69,6 +77,9 @@ export function WorkspaceShell() {
 
       <ScanOverlay />
       <MiscOverlay />
+      <SettingsOverlay />
+      <LibraryOverlay />
+      <ScanQueueOverlay />
       <ReviewModal />
       <UndoToast />
       <EnableIntelligence />

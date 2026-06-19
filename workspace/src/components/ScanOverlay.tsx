@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { chooseNativeFolder } from "@bridge/nativeClient";
+import { useEffect, useState } from "react";
+import { chooseNativeFolder, isNativeRuntime } from "@bridge/nativeClient";
 import { formatBytes, formatCount, type ScanStrategy } from "@bridge/domain";
 import { useScanController } from "../state/scanController";
 import { useWorkspace } from "../state/workspaceStore";
+import { getDefaultStrategy } from "../lib/prefs";
 
 const STRATEGIES: Array<{ id: ScanStrategy; title: string; note: string }> = [
   { id: "smart", title: "⦿ Smart (deep + dedup)", note: "full walk + content hashing to find duplicates · most accurate" },
@@ -12,25 +13,40 @@ const STRATEGIES: Array<{ id: ScanStrategy; title: string; note: string }> = [
 export function ScanOverlay() {
   const { overlay, setOverlay } = useWorkspace();
   const { view, start, cancel, reset } = useScanController();
-  const [folder, setFolder] = useState<string | null>(null);
-  const [strategy, setStrategy] = useState<ScanStrategy>("smart");
+  const [folder, setFolder] = useState("");
+  const [strategy, setStrategy] = useState<ScanStrategy>(getDefaultStrategy);
   const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [native, setNative] = useState(true);
+
+  useEffect(() => {
+    void isNativeRuntime().then(setNative);
+  }, []);
 
   if (overlay !== "scan") return null;
 
   const scanning = view.status === "scanning";
   const close = () => setOverlay(null);
+  const trimmed = folder.trim();
 
   const browse = async () => {
-    const picked = await chooseNativeFolder();
-    if (picked) setFolder(picked);
+    setError(null);
+    try {
+      const picked = await chooseNativeFolder();
+      if (picked) setFolder(picked);
+    } catch (e) {
+      setError(`Folder picker failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
 
   const scanNow = async () => {
-    if (!folder || starting) return;
+    if (!trimmed || starting) return;
     setStarting(true);
+    setError(null);
     try {
-      await start(folder, strategy);
+      await start(trimmed, strategy);
+    } catch (e) {
+      setError(`Couldn't start scan: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setStarting(false);
     }
@@ -58,6 +74,12 @@ export function ScanOverlay() {
         {view.status === "idle" ? (
           <>
             <div className="flex flex-col gap-4 p-4.5" style={{ padding: 18 }}>
+              {!native && (
+                <div className="rounded-[7px] border border-warn/40 bg-warn/[0.08] px-3 py-2 text-11 text-warn">
+                  Folder picker & scanning run in the desktop app — launch it with{" "}
+                  <span className="mono">tauri dev --config src-tauri/tauri.workspace.conf.json</span>.
+                </div>
+              )}
               <div>
                 <div className="mb-2 text-[9.5px] tracking-[0.14em] text-label">SOURCE</div>
                 <div className="rounded-[8px] border border-primary/40 bg-primary/[0.08] px-3 py-2.5">
@@ -71,13 +93,19 @@ export function ScanOverlay() {
               <div>
                 <div className="mb-2 text-[9.5px] tracking-[0.14em] text-label">PATH / SCOPE</div>
                 <div className="flex gap-2">
-                  <div className="mono flex-1 truncate rounded-[7px] border border-line-input bg-field px-3 py-2.5 text-12">
-                    {folder ?? "Choose a folder to scan…"}
-                  </div>
+                  <input
+                    value={folder}
+                    onChange={(e) => setFolder(e.target.value)}
+                    placeholder="Choose or paste a folder to scan…"
+                    spellCheck={false}
+                    className="mono flex-1 rounded-[7px] border border-line-input bg-field px-3 py-2.5 text-12 text-ink placeholder:text-dim focus:border-primary/60 focus:outline-none"
+                  />
                   <button
                     type="button"
                     onClick={() => void browse()}
-                    className="rounded-[7px] border border-line-input px-3 text-12 text-muted hover:text-ink"
+                    disabled={!native}
+                    title={native ? "Pick a folder" : "The folder picker only runs in the desktop app"}
+                    className="rounded-[7px] border border-line-input px-3 text-12 text-muted hover:text-ink disabled:opacity-50"
                   >
                     Browse…
                   </button>
@@ -96,8 +124,8 @@ export function ScanOverlay() {
                         onClick={() => setStrategy(s.id)}
                         className="rounded-[8px] border px-3 py-2.5 text-left"
                         style={{
-                          borderColor: on ? "#2f7d4e" : "var(--color-line-modal)",
-                          background: on ? "rgba(61,220,132,.1)" : "transparent",
+                          borderColor: on ? "var(--color-primary)" : "var(--color-line-modal)",
+                          background: on ? "rgba(61,220,132,.14)" : "transparent",
                         }}
                       >
                         <div className="text-12" style={{ color: on ? "#7fe0a6" : "var(--color-muted)" }}>
@@ -112,10 +140,12 @@ export function ScanOverlay() {
             </div>
 
             <div className="flex items-center gap-2.5 border-t border-line bg-bar px-4 py-3">
-              <span className="text-11 text-dim">Incremental rescans run automatically on re-scan.</span>
+              <span className="text-11 text-dim">
+                {error ? <span className="text-danger">{error}</span> : "Incremental rescans run automatically on re-scan."}
+              </span>
               <button
                 type="button"
-                disabled={!folder || starting}
+                disabled={!trimmed || starting}
                 onClick={() => void scanNow()}
                 className="ml-auto rounded-[7px] bg-primary px-4 py-2 text-12 font-semibold text-on-primary disabled:opacity-50"
               >

@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Lens, Overlay, PinnedCard, SelectedRef, StagedItem, UndoState } from "./types";
+import type { Lens, Overlay, PinnedCard, ResultsQuery, SelectedRef, StagedItem, UndoState } from "./types";
 
 /**
  * The two "glue" globals the architecture study calls out: selection (drives the one
@@ -21,6 +21,7 @@ type WorkspaceState = {
   selected: SelectedRef | null;
   staged: StagedItem[];
   pinned: PinnedCard[];
+  resultsQuery: ResultsQuery | null;
   overlay: Overlay;
   review: boolean;
   undo: UndoState;
@@ -40,6 +41,8 @@ type WorkspaceActions = {
   pinToBoard: (card: PinnedCard) => void;
   unpinCard: (path: string) => void;
   isPinned: (path: string) => boolean;
+  /** Drive the Results lens (from the command spine or the lens controls) and switch to it. */
+  runQuery: (query: ResultsQuery) => void;
   setOverlay: (overlay: Overlay) => void;
   openReview: () => void;
   closeReview: () => void;
@@ -58,6 +61,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [selected, setSelected] = useState<SelectedRef | null>(null);
   const [staged, setStaged] = useState<StagedItem[]>([]);
   const [pinned, setPinned] = useState<PinnedCard[]>([]);
+  const [resultsQuery, setResultsQuery] = useState<ResultsQuery | null>(null);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [review, setReview] = useState(false);
   const [undo, setUndo] = useState<UndoState>(null);
@@ -90,6 +94,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setPinned((prev) => prev.filter((p) => p.path !== path));
   }, []);
   const isPinned = useCallback((path: string) => pinned.some((p) => p.path === path), [pinned]);
+  const runQuery = useCallback((query: ResultsQuery) => {
+    setResultsQuery(query);
+    setLens("results");
+  }, []);
   const openReview = useCallback(() => {
     if (staged.length) setReview(true);
   }, [staged.length]);
@@ -103,6 +111,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selected,
       staged,
       pinned,
+      resultsQuery,
       overlay,
       review,
       undo,
@@ -119,6 +128,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       pinToBoard,
       unpinCard,
       isPinned,
+      runQuery,
       setOverlay,
       openReview,
       closeReview,
@@ -132,6 +142,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selected,
       staged,
       pinned,
+      resultsQuery,
       overlay,
       review,
       undo,
@@ -144,6 +155,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       pinToBoard,
       unpinCard,
       isPinned,
+      runQuery,
       openReview,
       closeReview,
     ]
