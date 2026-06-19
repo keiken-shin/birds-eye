@@ -7,6 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "tauri": "cd .. && frontend\\node_modules\\.bin\\tauri.cmd --config src-tauri/tauri.workspace.conf.json",
+    "tauri:dev": "cd .. && frontend\\node_modules\\.bin\\tauri.cmd dev --config src-tauri/tauri.workspace.conf.json",
+    "tauri:build": "cd .. && frontend\\node_modules\\.bin\\tauri.cmd build --config src-tauri/tauri.workspace.conf.json",
     "test": "vitest",
     "test:run": "vitest run --passWithNoTests"
   },
