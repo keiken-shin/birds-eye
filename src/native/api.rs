@@ -943,6 +943,18 @@ pub struct OntologyStatusRequest {
 pub struct OntologyStatusDto {
     pub enabled: bool,
     pub pending_discoveries: u64,
+    /// Per-populator progress so the UI can say "enrichment incomplete" honestly
+    /// instead of rendering empty findings as "nothing found".
+    pub populators: Vec<PopulatorStateDto>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct PopulatorStateDto {
+    pub name: String,
+    pub status: String,
+    pub files_visited: i64,
+    pub discoveries_emitted: i64,
+    pub last_error: Option<String>,
 }
 
 pub fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusDto, String> {
@@ -950,7 +962,26 @@ pub fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusD
     let enabled = enabled::is_enabled(&conn).map_err(|e| e.to_string())?;
     let pending_discoveries =
         crate::ontology::discoveries::count_pending(&conn).map_err(|e| e.to_string())?;
-    Ok(OntologyStatusDto { enabled, pending_discoveries })
+    let mut stmt = conn
+        .prepare_cached(
+            "SELECT populator_name, status, files_visited, discoveries_emitted, last_error
+             FROM ontology_populator_state ORDER BY populator_name",
+        )
+        .map_err(|e| e.to_string())?;
+    let populators = stmt
+        .query_map([], |row| {
+            Ok(PopulatorStateDto {
+                name: row.get(0)?,
+                status: row.get(1)?,
+                files_visited: row.get(2)?,
+                discoveries_emitted: row.get(3)?,
+                last_error: row.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(OntologyStatusDto { enabled, pending_discoveries, populators })
 }
 
 #[derive(Debug, Clone, Deserialize)]

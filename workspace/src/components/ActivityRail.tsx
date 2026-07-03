@@ -10,7 +10,8 @@ export function ActivityRail() {
     { glyph: "▦", title: "Map", onClick: () => setLens("treemap"), active: lens === "treemap" },
     { glyph: "◎", title: `New scan (${MOD}N)`, onClick: () => setOverlay("scan") },
     { glyph: "≣", title: "Scans", onClick: () => setOverlay("queue") },
-    { glyph: "✦", title: "Findings", onClick: () => setLens("board"), active: lens === "board" },
+    { glyph: "✦", title: "Board", onClick: () => setLens("board"), active: lens === "board" },
+    { glyph: "⧉", title: "Duplicates", onClick: () => setOverlay("duplicates") },
     { glyph: "◷", title: `Library (${MOD}L)`, onClick: () => setOverlay("library") },
   ];
 

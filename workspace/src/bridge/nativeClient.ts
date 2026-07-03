@@ -339,7 +339,19 @@ export async function overrideClassification(indexPath: string, fileId: number, 
   await invoke("override_classification", { request: { index_path: indexPath, file_id: fileId, key, value } });
 }
 
-export type NativeOntologyStatus = { enabled: boolean; pending_discoveries: number };
+export type NativePopulatorState = {
+  name: string;
+  status: "idle" | "running" | "paused" | "completed" | "failed";
+  files_visited: number;
+  discoveries_emitted: number;
+  last_error: string | null;
+};
+
+export type NativeOntologyStatus = {
+  enabled: boolean;
+  pending_discoveries: number;
+  populators: NativePopulatorState[];
+};
 
 export async function ontologyStatus(indexPath: string) {
   return invoke<NativeOntologyStatus>("ontology_status", { request: { index_path: indexPath } });

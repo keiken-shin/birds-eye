@@ -15,6 +15,7 @@ import {
   treemapLensData,
   type NativeIndexEntry,
   type NativeIndexOverview,
+  type NativeOntologyStatus,
   type NativeTreemapLensFolder,
 } from "@bridge/nativeClient";
 import { buildFolderTree, type FolderTree } from "../lib/folderTree";
@@ -31,6 +32,8 @@ type IndexDataValue = {
   tree: FolderTree | null;
   lensByPath: Map<string, NativeTreemapLensFolder>;
   reclaimableTotal: number;
+  /** Last ontology status read — includes per-populator enrichment progress. */
+  ontology: NativeOntologyStatus | null;
   /** Bumps on every successful refreshData — lets lenses (e.g. Board) refetch after enrichment. */
   dataVersion: number;
   refreshIndexes: () => Promise<void>;
@@ -46,6 +49,7 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
   const [overview, setOverview] = useState<NativeIndexOverview | null>(null);
   const [tree, setTree] = useState<FolderTree | null>(null);
   const [lensByPath, setLensByPath] = useState<Map<string, NativeTreemapLensFolder>>(new Map());
+  const [ontology, setOntology] = useState<NativeOntologyStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [dataVersion, setDataVersion] = useState(0);
@@ -89,7 +93,10 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
       setOverview(ov);
       setTree(buildFolderTree(ov.folders, rootPath));
       setLensByPath(new Map(lens.map((r) => [r.folder_path, r])));
-      if (ont) setOntologyEnabled(ont.enabled);
+      if (ont) {
+        setOntologyEnabled(ont.enabled);
+        setOntology(ont);
+      }
       setDataVersion((v) => v + 1); // signal lenses that fresh data (incl. enrichment) landed
     } catch (e) {
       if (id === reqId.current) setError(String(e));
@@ -134,11 +141,12 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
       tree,
       lensByPath,
       reclaimableTotal,
+      ontology,
       dataVersion,
       refreshIndexes,
       refreshData,
     }),
-    [status, error, indexes, activeEntry, overview, tree, lensByPath, reclaimableTotal, dataVersion, refreshIndexes, refreshData]
+    [status, error, indexes, activeEntry, overview, tree, lensByPath, reclaimableTotal, ontology, dataVersion, refreshIndexes, refreshData]
   );
 
   return <IndexDataContext.Provider value={value}>{children}</IndexDataContext.Provider>;

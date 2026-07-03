@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatBytes } from "@bridge/domain";
 import {
   confirmDiscovery,
@@ -12,24 +12,46 @@ import { useIndexData } from "../state/indexData";
 import { useWorkspace } from "../state/workspaceStore";
 import { FINDING_KINDS, baseName, parseFinding, type Finding } from "../lib/discoveries";
 import { VERDICT_STYLES, verdictForFolder } from "../lib/verdict";
-import { DuplicatesSection } from "./DuplicatesSection";
 import { EnableIntelligenceCard } from "./EnableIntelligenceCard";
 import type { PinnedCard } from "../state/types";
 
 /**
- * Board lens — a canvas of findings and pinned folders. Each finding is one discovery
- * (a provenance relation candidate); the card draws the edge subject → object from the
- * payload, with confidence + reclaimable bytes and Confirm/Reject. Confirm writes the fact
- * (it is NOT staging — that's the Cleanup Tray's separate path). Folder cards are pinned
- * from the Inspector and stay Inspector-able; finding endpoints are files and self-contained.
- *
- * ponytail: auto-flow wrap + native scroll, no drag-to-reposition and no minimap — the
- * scrollbar navigates and the wireframe left Board a placeholder. Add an absolute canvas +
- * minimap when findings routinely overflow a screen and spatial arrangement earns its keep.
+ * The Investigation Board (Architecture B): an open canvas you pan and zoom, where
+ * findings, pinned folders, and the duplicates summary live as draggable cards with
+ * relationship edges drawn between them. Positions persist per index — the spatial
+ * arrangement IS the investigation.
  */
+
+type CardModel =
+  | { id: string; kind: "pin"; pin: PinnedCard }
+  | { id: string; kind: "finding"; finding: Finding }
+  | { id: string; kind: "dups"; groups: number; reclaimable: number }
+  | { id: string; kind: "enable" };
+
+type Pos = { x: number; y: number };
+
+const CARD_W = 300;
+const CARD_H: Record<CardModel["kind"], number> = { pin: 128, finding: 216, dups: 118, enable: 190 };
+const GRID_X = CARD_W + 40;
+const GRID_Y = 250;
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 2;
+
+const posKey = (indexPath: string) => `be.ws.board.pos:${indexPath}`;
+
+function loadPositions(indexPath: string | null): Record<string, Pos> {
+  if (!indexPath) return {};
+  try {
+    return JSON.parse(localStorage.getItem(posKey(indexPath)) ?? "{}") as Record<string, Pos>;
+  } catch {
+    return {};
+  }
+}
+
 export function BoardLens() {
-  const { ontologyEnabled, indexPath, pinned, unpinCard, select, selected } = useWorkspace();
-  const { lensByPath, dataVersion, overview } = useIndexData();
+  const { ontologyEnabled, indexPath, pinned, unpinCard, select, selected, setOverlay } =
+    useWorkspace();
+  const { lensByPath, dataVersion, overview, ontology } = useIndexData();
   const [findings, setFindings] = useState<Finding[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -37,6 +59,7 @@ export function BoardLens() {
   const [error, setError] = useState<string | null>(null);
   const reqId = useRef(0);
 
+  // ---- data ----
   const load = useCallback(async () => {
     if (!indexPath || !ontologyEnabled) {
       setFindings([]);
@@ -51,7 +74,7 @@ export function BoardLens() {
           listDiscoveries(indexPath, k, 60).catch(() => [] as NativeDiscovery[])
         )
       );
-      if (id !== reqId.current) return; // superseded by a newer index/enable
+      if (id !== reqId.current) return;
       const all = lists
         .flat()
         .filter((d) => d.status === "Pending")
@@ -64,8 +87,7 @@ export function BoardLens() {
     } finally {
       if (id === reqId.current) setLoading(false);
     }
-    // dataVersion: refetch after refreshData (e.g. enabling intelligence from the Board, which
-    // enriches then refreshes) so findings populate instead of sticking on the pre-enrich empty.
+    // dataVersion: refetch after refreshData so findings track enrichment progress.
   }, [indexPath, ontologyEnabled, dataVersion]);
 
   useEffect(() => {
@@ -87,7 +109,6 @@ export function BoardLens() {
     [load]
   );
 
-  // Pattern-level trust: resolve every pending discovery of a kind in one action.
   const actKind = useCallback(
     async (kind: string, fn: () => Promise<number>) => {
       setBusyKind(kind);
@@ -103,111 +124,322 @@ export function BoardLens() {
     [load]
   );
 
-  const hasDuplicates = (overview?.duplicate_groups.length ?? 0) > 0;
-  const empty = !loading && !findings.length && !pinned.length && !hasDuplicates;
+  // ---- card models ----
+  const dupGroups = overview?.duplicate_groups ?? [];
+  const cards = useMemo<CardModel[]>(() => {
+    const out: CardModel[] = [];
+    if (!ontologyEnabled) out.push({ id: "enable", kind: "enable" });
+    if (dupGroups.length) {
+      out.push({
+        id: "dups",
+        kind: "dups",
+        groups: dupGroups.length,
+        reclaimable: dupGroups.reduce((s, g) => s + g.reclaimable_bytes, 0),
+      });
+    }
+    for (const pin of pinned) out.push({ id: `pin:${pin.path}`, kind: "pin", pin });
+    for (const f of findings) out.push({ id: `find:${f.id}`, kind: "finding", finding: f });
+    return out;
+  }, [ontologyEnabled, dupGroups, pinned, findings]);
+
+  // ---- spatial state ----
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [pan, setPan] = useState<Pos>({ x: 24, y: 24 });
+  const [zoom, setZoom] = useState(1);
+  const [positions, setPositions] = useState<Record<string, Pos>>(() => loadPositions(indexPath));
+  const drag = useRef<
+    | { mode: "pan"; startX: number; startY: number; panX: number; panY: number }
+    | { mode: "card"; id: string; offX: number; offY: number }
+    | null
+  >(null);
+
+  useEffect(() => {
+    setPositions(loadPositions(indexPath));
+  }, [indexPath]);
+
+  const savePositions = useCallback(
+    (next: Record<string, Pos>) => {
+      if (indexPath) localStorage.setItem(posKey(indexPath), JSON.stringify(next));
+    },
+    [indexPath]
+  );
+
+  // Default layout for cards without a saved position: a simple grid, pins/dups first.
+  const placed = useMemo(() => {
+    const out = new Map<string, Pos>();
+    let i = 0;
+    for (const card of cards) {
+      const saved = positions[card.id];
+      out.set(card.id, saved ?? { x: (i % 4) * GRID_X, y: Math.floor(i / 4) * GRID_Y });
+      i++;
+    }
+    return out;
+  }, [cards, positions]);
+
+  // Edges: a pinned folder connects to findings whose endpoints live under it.
+  const edges = useMemo(() => {
+    const out: Array<{ from: Pos; to: Pos; key: string }> = [];
+    for (const card of cards) {
+      if (card.kind !== "finding") continue;
+      const fPos = placed.get(card.id);
+      if (!fPos) continue;
+      for (const pin of pinned) {
+        const under = (p: string) =>
+          p === pin.path || p.startsWith(pin.path + "/") || p.startsWith(pin.path + "\\");
+        if (under(card.finding.subject) || under(card.finding.object)) {
+          const pPos = placed.get(`pin:${pin.path}`);
+          if (pPos) {
+            out.push({
+              key: `${card.id}~${pin.path}`,
+              from: { x: pPos.x + CARD_W / 2, y: pPos.y + CARD_H.pin / 2 },
+              to: { x: fPos.x + CARD_W / 2, y: fPos.y + CARD_H.finding / 2 },
+            });
+          }
+        }
+      }
+    }
+    return out;
+  }, [cards, placed, pinned]);
+
+  // ---- pointer interactions ----
+  const onWheel = useCallback(
+    (e: React.WheelEvent) => {
+      e.preventDefault();
+      const rect = wrapRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      setZoom((z) => {
+        const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * (e.deltaY < 0 ? 1.12 : 0.89)));
+        setPan((p) => ({ x: cx - ((cx - p.x) * nz) / z, y: cy - ((cy - p.y) * nz) / z }));
+        return nz;
+      });
+    },
+    []
+  );
+
+  const onBackgroundDown = useCallback(
+    (e: React.PointerEvent) => {
+      if ((e.target as HTMLElement).closest("[data-board-card]")) return;
+      drag.current = { mode: "pan", startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y };
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    [pan]
+  );
+
+  const onCardDown = useCallback(
+    (id: string) => (e: React.PointerEvent) => {
+      if ((e.target as HTMLElement).closest("button, input, a, video, audio")) return;
+      e.stopPropagation();
+      const pos = placed.get(id) ?? { x: 0, y: 0 };
+      const rect = wrapRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const canvasX = (e.clientX - rect.left - pan.x) / zoom;
+      const canvasY = (e.clientY - rect.top - pan.y) / zoom;
+      drag.current = { mode: "card", id, offX: canvasX - pos.x, offY: canvasY - pos.y };
+      wrapRef.current?.setPointerCapture(e.pointerId);
+    },
+    [placed, pan, zoom]
+  );
+
+  const onMove = useCallback(
+    (e: React.PointerEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      if (d.mode === "pan") {
+        setPan({ x: d.panX + (e.clientX - d.startX), y: d.panY + (e.clientY - d.startY) });
+      } else {
+        const rect = wrapRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const canvasX = (e.clientX - rect.left - pan.x) / zoom;
+        const canvasY = (e.clientY - rect.top - pan.y) / zoom;
+        setPositions((prev) => ({ ...prev, [d.id]: { x: canvasX - d.offX, y: canvasY - d.offY } }));
+      }
+    },
+    [pan, zoom]
+  );
+
+  const onUp = useCallback(() => {
+    if (drag.current?.mode === "card") {
+      setPositions((prev) => {
+        savePositions(prev);
+        return prev;
+      });
+    }
+    drag.current = null;
+  }, [savePositions]);
+
+  // ---- enrichment status ----
+  const running = ontology?.populators.filter((p) => p.status === "running" || p.status === "paused") ?? [];
+  const failed = ontology?.populators.filter((p) => p.status === "failed") ?? [];
+  const visited = running.reduce((s, p) => s + p.files_visited, 0);
+
+  const empty = !loading && !cards.length;
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-auto p-5">
+    <div
+      ref={wrapRef}
+      className="relative min-h-0 flex-1 touch-none select-none overflow-hidden"
+      style={{
+        cursor: "grab",
+        backgroundImage: "radial-gradient(circle, #1a1d23 1px, transparent 1px)",
+        backgroundSize: "26px 26px",
+      }}
+      onWheel={onWheel}
+      onPointerDown={onBackgroundDown}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+    >
+      {/* fixed toolbar */}
+      <div className="pointer-events-none absolute left-0 right-0 top-0 z-20 flex items-center gap-2 px-4 py-2.5">
+        <div className="pointer-events-auto flex items-center gap-2">
+          {FINDING_KINDS.map((kind) => {
+            const group = findings.filter((f) => f.kind === kind);
+            if (group.length < 2) return null;
+            return (
+              <span key={kind} className="flex items-center gap-1.5 rounded-[8px] border border-line bg-panel/90 px-2.5 py-1">
+                <span className="text-10 uppercase tracking-[0.1em] text-label">
+                  {group[0].predicate} · {group.length}
+                </span>
+                <button
+                  type="button"
+                  disabled={busyKind === kind}
+                  onClick={() => void actKind(kind, () => confirmDiscoveryPattern(indexPath!, kind))}
+                  className="rounded-[5px] border border-primary/40 px-1.5 py-0.5 text-10 font-semibold text-primary-ink disabled:opacity-50"
+                >
+                  Confirm all
+                </button>
+                <button
+                  type="button"
+                  disabled={busyKind === kind}
+                  onClick={() => void actKind(kind, () => rejectDiscoveryPattern(indexPath!, kind))}
+                  className="rounded-[5px] border border-white/15 px-1.5 py-0.5 text-10 text-white/60 disabled:opacity-50"
+                >
+                  Reject all
+                </button>
+              </span>
+            );
+          })}
+          {running.length > 0 && (
+            <span
+              className="rounded-[8px] border border-primary/30 bg-panel/90 px-2.5 py-1 text-10 text-primary-ink"
+              style={{ animation: "bePulse 1.8s ease infinite" }}
+            >
+              ⟳ enrichment in progress ({running.map((p) => p.name).join(", ")}
+              {visited > 0 ? ` · ${visited.toLocaleString()} files` : ""}) — findings land here
+            </span>
+          )}
+          {failed.length > 0 && (
+            <span className="rounded-[8px] border border-danger/30 bg-panel/90 px-2.5 py-1 text-10 text-danger" title={failed[0].last_error ?? undefined}>
+              ⚠ {failed.map((p) => p.name).join(", ")} failed — re-run from Settings
+            </span>
+          )}
+        </div>
+        <div className="pointer-events-auto ml-auto flex items-center gap-1.5">
+          <span className="mono text-10 text-dim">{Math.round(zoom * 100)}%</span>
+          <button
+            type="button"
+            onClick={() => {
+              setZoom(1);
+              setPan({ x: 24, y: 24 });
+            }}
+            className="rounded-[6px] border border-line bg-panel/90 px-2 py-0.5 text-10 text-muted hover:text-ink"
+          >
+            Reset view
+          </button>
+        </div>
+      </div>
+
       {error && (
-        <div className="mb-3 rounded-[8px] border border-red-500/30 bg-red-500/[0.08] px-3 py-2 text-11 text-red-300">
+        <div className="absolute left-4 top-12 z-20 rounded-[8px] border border-red-500/30 bg-red-500/[0.08] px-3 py-2 text-11 text-red-300">
           {error}
         </div>
       )}
 
-      {empty ? (
-        <div className="flex h-full items-center justify-center text-center text-12 italic text-label">
-          {ontologyEnabled ? (
-            <>
-              No duplicates or relationships found yet. Run a scan with the Smart strategy for
-              <br />
-              duplicate detection, or pin a folder from the map (Inspector → Pin to board).
-            </>
-          ) : (
-            <div className="w-[440px] not-italic">
-              <div className="mb-3 text-center text-12 text-label">
-                The Board shows duplicates and relationships — enable intelligence for
-                relationship findings.
-              </div>
-              <EnableIntelligenceCard />
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-4">
-          <DuplicatesSection />
-          {!ontologyEnabled && (
-            <div className="w-[440px]">
-              <EnableIntelligenceCard />
-            </div>
-          )}
-          {pinned.length > 0 && (
-            <div className="flex flex-wrap content-start gap-4">
-              {pinned.map((card) => (
-                <PinnedCardView
-                  key={`pin:${card.path}`}
-                  card={card}
-                  selected={selected?.path === card.path}
-                  verdict={
-                    lensByPath.get(card.path) ? verdictForFolder(lensByPath.get(card.path)!) : null
-                  }
-                  onSelect={() => select({ kind: "folder", path: card.path, name: card.name, bytes: card.bytes })}
-                  onUnpin={() => unpinCard(card.path)}
-                />
-              ))}
-            </div>
-          )}
-          {FINDING_KINDS.map((kind) => {
-            const group = findings.filter((f) => f.kind === kind);
-            if (!group.length) return null;
-            return (
-              <div key={kind}>
-                {group.length > 1 && (
-                  <div className="mb-2 flex items-center gap-3">
-                    <span className="text-10 uppercase tracking-[0.14em] text-label">
-                      {group[0].predicate} · {group.length} pending
-                    </span>
-                    <button
-                      type="button"
-                      disabled={busyKind === kind}
-                      onClick={() =>
-                        void actKind(kind, () => confirmDiscoveryPattern(indexPath!, kind))
-                      }
-                      className="rounded-[6px] border border-primary/40 px-2 py-0.5 text-10 font-semibold text-primary-ink disabled:opacity-50"
-                    >
-                      Confirm all
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyKind === kind}
-                      onClick={() =>
-                        void actKind(kind, () => rejectDiscoveryPattern(indexPath!, kind))
-                      }
-                      className="rounded-[6px] border border-white/15 px-2 py-0.5 text-10 text-white/60 disabled:opacity-50"
-                    >
-                      Reject all
-                    </button>
-                  </div>
-                )}
-                <div className="flex flex-wrap content-start gap-4">
-                  {group.map((f) => (
-                    <FindingCardView
-                      key={f.id}
-                      f={f}
-                      busy={busyId === f.id || busyKind === kind}
-                      onConfirm={() => void act(f.id, () => confirmDiscovery(indexPath!, f.id))}
-                      onReject={() => void act(f.id, () => rejectDiscovery(indexPath!, f.id))}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+      {empty && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center text-center text-12 italic text-label">
+          {running.length
+            ? "Enrichment is running — findings appear here as they're discovered."
+            : "Nothing on the board yet. Findings land here after enrichment; pin folders from the Inspector."}
         </div>
       )}
 
-      {loading && !findings.length && (
-        <div className="mt-4 text-12 italic text-label">Loading findings…</div>
-      )}
+      {/* pannable/zoomable content */}
+      <div
+        className="absolute left-0 top-0"
+        style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transformOrigin: "0 0" }}
+      >
+        <svg className="pointer-events-none absolute overflow-visible" style={{ left: 0, top: 0, width: 1, height: 1 }}>
+          {edges.map((e) => (
+            <line
+              key={e.key}
+              x1={e.from.x}
+              y1={e.from.y}
+              x2={e.to.x}
+              y2={e.to.y}
+              stroke="rgba(61,220,132,.25)"
+              strokeWidth={1.5 / zoom}
+              strokeDasharray="5 4"
+            />
+          ))}
+        </svg>
+
+        {cards.map((card) => {
+          const pos = placed.get(card.id)!;
+          return (
+            <div
+              key={card.id}
+              data-board-card
+              onPointerDown={onCardDown(card.id)}
+              className="absolute"
+              style={{ left: pos.x, top: pos.y, width: card.kind === "enable" ? 440 : CARD_W, cursor: "default" }}
+            >
+              {card.kind === "enable" && <EnableIntelligenceCard />}
+              {card.kind === "dups" && (
+                <DuplicatesCard groups={card.groups} reclaimable={card.reclaimable} onOpen={() => setOverlay("duplicates")} />
+              )}
+              {card.kind === "pin" && (
+                <PinnedCardView
+                  card={card.pin}
+                  selected={selected?.path === card.pin.path}
+                  verdict={lensByPath.get(card.pin.path) ? verdictForFolder(lensByPath.get(card.pin.path)!) : null}
+                  onSelect={() => select({ kind: "folder", path: card.pin.path, name: card.pin.name, bytes: card.pin.bytes })}
+                  onUnpin={() => unpinCard(card.pin.path)}
+                />
+              )}
+              {card.kind === "finding" && (
+                <FindingCardView
+                  f={card.finding}
+                  busy={busyId === card.finding.id || busyKind === card.finding.kind}
+                  onConfirm={() => void act(card.finding.id, () => confirmDiscovery(indexPath!, card.finding.id))}
+                  onReject={() => void act(card.finding.id, () => rejectDiscovery(indexPath!, card.finding.id))}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DuplicatesCard({ groups, reclaimable, onOpen }: { groups: number; reclaimable: number; onOpen: () => void }) {
+  return (
+    <div className="rounded-[11px] border border-line bg-panel p-3.5">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="rounded-[5px] bg-primary/[0.1] px-2 py-0.5 text-10 font-semibold uppercase tracking-[0.1em] text-primary-ink">
+          duplicates
+        </span>
+        <span className="mono ml-auto text-10 text-dim">{groups} groups</span>
+      </div>
+      <div className="mono mb-3 text-11 text-primary-ink">↑ {formatBytes(reclaimable)} reclaimable</div>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="w-full rounded-[7px] bg-primary py-1.5 text-11 font-semibold text-on-primary"
+      >
+        Open workbench — compare copies
+      </button>
     </div>
   );
 }
@@ -240,7 +472,7 @@ function FindingCardView({
   onReject: () => void;
 }) {
   return (
-    <div className="w-[300px] rounded-[11px] border border-line bg-panel p-3.5">
+    <div className="rounded-[11px] border border-line bg-panel p-3.5">
       <div className="mb-3 flex items-center justify-between">
         <span className="rounded-[5px] bg-primary/[0.1] px-2 py-0.5 text-10 font-semibold uppercase tracking-[0.1em] text-primary-ink">
           finding
@@ -248,7 +480,6 @@ function FindingCardView({
         <span className="mono text-10 text-dim">{(f.confidence * 100).toFixed(0)}% confident</span>
       </div>
 
-      {/* The edge: subject (reclaimable) ──predicate──▶ object (original it depends on). */}
       <PathChip path={f.subject} accent />
       <div className="my-1.5 flex items-center gap-2 pl-3 text-10 text-label">
         <span className="text-primary-ink">↓</span>
@@ -256,9 +487,7 @@ function FindingCardView({
       </div>
       <PathChip path={f.object} />
 
-      <div className="mono mt-3 text-11 text-primary-ink">
-        ↑ {formatBytes(f.bytes)} reclaimable if confirmed
-      </div>
+      <div className="mono mt-3 text-11 text-primary-ink">↑ {formatBytes(f.bytes)} reclaimable if confirmed</div>
 
       <div className="mt-3 flex gap-2">
         <button
@@ -299,7 +528,7 @@ function PinnedCardView({
   return (
     <div
       onClick={onSelect}
-      className="w-[300px] cursor-pointer rounded-[11px] border bg-panel p-3.5"
+      className="cursor-pointer rounded-[11px] border bg-panel p-3.5"
       style={{
         borderColor: selected ? "#3ddc84" : "var(--color-line)",
         boxShadow: selected ? "0 0 0 1px #3ddc84" : "none",

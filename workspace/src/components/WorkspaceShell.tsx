@@ -12,6 +12,7 @@ import { MiscOverlay } from "./MiscOverlay";
 import { SettingsOverlay } from "./SettingsOverlay";
 import { LibraryOverlay } from "./LibraryOverlay";
 import { ScanQueueOverlay } from "./ScanQueueOverlay";
+import { DuplicatesOverlay } from "./DuplicatesOverlay";
 import { ReviewModal } from "./ReviewModal";
 import { UndoToast } from "./UndoToast";
 import { EnableIntelligence } from "./EnableIntelligence";
@@ -85,6 +86,7 @@ export function WorkspaceShell() {
       <SettingsOverlay />
       <LibraryOverlay />
       <ScanQueueOverlay />
+      <DuplicatesOverlay />
       <ReviewModal />
       <UndoToast />
       <EnableIntelligence />

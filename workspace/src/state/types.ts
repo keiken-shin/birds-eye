@@ -1,5 +1,5 @@
 export type Lens = "treemap" | "board" | "results";
-export type Overlay = "scan" | "settings" | "shortcuts" | "library" | "queue" | null;
+export type Overlay = "scan" | "settings" | "shortcuts" | "library" | "queue" | "duplicates" | null;
 
 /** Verdict taxonomy derived from the real backend (src/index/schema.rs cleanup view). */
 export type Verdict = "safe" | "review" | "protected" | "keep";

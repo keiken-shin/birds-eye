@@ -179,7 +179,9 @@ export function ResultsLens() {
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             {!loading && shown.length === 0 ? (
-              <div className="p-6 text-center text-12 italic text-label">No files match.</div>
+              <EmptyViewExplanation
+                viewId={resultsQuery?.kind === "view" ? resultsQuery.viewId : null}
+              />
             ) : (
               shown.map((r) => {
                 const staged = isStaged(r.path);
@@ -290,6 +292,38 @@ function Icicle({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Why a saved view can be legitimately empty: most views filter on enrichment facts
+ * that specific populators produce (or that only exist after the user confirms
+ * findings on the Board). Bare "No files match" reads as a bug — say what's missing.
+ */
+const VIEW_REQUIREMENTS: Record<string, string> = {
+  "finished-untouched":
+    "Needs Project entities with lifecycle facts. No finished Projects were detected on this index yet — project detection improves as enrichment completes.",
+  "regenerable-large":
+    "Needs replaceability facts from deeper enrichment. If enrichment hasn't finished a full pass (see the Board's status), these aren't populated yet.",
+  "unprojected-files":
+    "Needs Project detection to have run — until enrichment completes a pass, no files are assigned to (or excluded from) Projects.",
+  unclassified:
+    "Everything on this index already has a classification — that's a good thing.",
+  "orphan-sources":
+    "Needs confirmed derived-from relationships. Confirm findings on the Board first — views over relationships only see confirmed facts.",
+  "orphan-backups":
+    "Needs confirmed backup-of relationships. Confirm findings on the Board first — views over relationships only see confirmed facts.",
+};
+
+function EmptyViewExplanation({ viewId }: { viewId: string | null }) {
+  const explanation = viewId ? VIEW_REQUIREMENTS[viewId] : null;
+  return (
+    <div className="mx-auto max-w-[460px] p-6 text-center">
+      <div className="text-12 italic text-label">No files match.</div>
+      {explanation && (
+        <div className="mt-2 text-11 leading-relaxed text-dim">{explanation}</div>
+      )}
     </div>
   );
 }
