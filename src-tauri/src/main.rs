@@ -51,29 +51,29 @@ struct AppState {
     jobs: Mutex<ScanJobManager>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse, String> {
     birds_eye::native::api::scan_to_index(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn query_index(request: IndexQueryRequest) -> Result<IndexOverviewDto, String> {
     query_index_overview(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultDto>, String> {
     search_index_files(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn duplicate_group_files(
     request: DuplicateGroupFilesRequest,
 ) -> Result<Vec<DuplicateFileSummaryDto>, String> {
     query_duplicate_group_files(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_indexes(app: tauri::AppHandle) -> Result<Vec<IndexMetadataDto>, String> {
     let index_dir = index_dir(&app)?;
     let mut entries = Vec::new();
@@ -95,7 +95,7 @@ fn list_indexes(app: tauri::AppHandle) -> Result<Vec<IndexMetadataDto>, String> 
     Ok(entries)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_index(app: tauri::AppHandle, index_path: PathBuf) -> Result<(), String> {
     let index_dir = index_dir(&app)?;
     let canonical_dir = index_dir
@@ -112,7 +112,7 @@ fn delete_index(app: tauri::AppHandle, index_path: PathBuf) -> Result<(), String
     fs::remove_file(canonical_index).map_err(|error| format!("failed to delete index: {error}"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn start_scan_job(
     state: tauri::State<'_, AppState>,
     request: StartScanJobRequest,
@@ -130,7 +130,7 @@ struct StartScanJobForRootResponse {
     index_path: PathBuf,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn start_scan_job_for_root(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -160,7 +160,7 @@ fn start_scan_job_for_root(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn cancel_scan_job(state: tauri::State<'_, AppState>, job_id: u64) -> Result<(), String> {
     let jobs = state
         .jobs
@@ -169,7 +169,7 @@ fn cancel_scan_job(state: tauri::State<'_, AppState>, job_id: u64) -> Result<(),
     jobs.cancel_job(job_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn scan_job_events(
     state: tauri::State<'_, AppState>,
     job_id: u64,
@@ -182,7 +182,7 @@ fn scan_job_events(
     jobs.job_events_since(job_id, offset)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn scan_job_status(state: tauri::State<'_, AppState>, job_id: u64) -> Result<JobStatusDto, String> {
     let jobs = state
         .jobs
@@ -191,113 +191,113 @@ fn scan_job_status(state: tauri::State<'_, AppState>, job_id: u64) -> Result<Job
     jobs.job_status(job_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
     do_trash_files(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     do_reveal_in_explorer(path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn cleanup_plan(request: CleanupPlanRequest) -> Result<CleanupPlanResponse, String> {
     do_cleanup_plan(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn execute_cleanup_plan(request: ExecuteCleanupPlanRequest) -> Result<CleanupResult, String> {
     do_execute_cleanup_plan(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn recently_cleaned(request: RecentlyCleanedRequest) -> Result<Vec<CleanupLogEntry>, String> {
     do_recently_cleaned_log(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn restore_from_cleanup_log(request: RestoreCleanupRequest) -> Result<(), String> {
     do_restore_from_cleanup_log(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn pin_file(request: PinFileRequest) -> Result<(), String> {
     do_pin_file(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn unpin_file(request: UnpinFileRequest) -> Result<(), String> {
     do_unpin_file(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_cleanup_candidates(index_path: PathBuf) -> Result<Vec<CleanupCandidate>, String> {
     do_list_cleanup_candidates(index_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn treemap_lens_data(request: TreemapLensRequest) -> Result<Vec<TreemapLensFolderDto>, String> {
     do_treemap_lens_data(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn discoveries(request: DiscoveriesRequest) -> Result<Vec<Discovery>, String> {
     do_discoveries(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn confirm_discovery(request: ResolveDiscoveryRequest) -> Result<(), String> {
     do_confirm_discovery(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn reject_discovery(request: ResolveDiscoveryRequest) -> Result<(), String> {
     do_reject_discovery(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn confirm_discovery_pattern(request: ResolveDiscoveryKindRequest) -> Result<u32, String> {
     do_confirm_discovery_pattern(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn reject_discovery_pattern(request: ResolveDiscoveryKindRequest) -> Result<u32, String> {
     do_reject_discovery_pattern(request)
 }
 
 // infallible — the catalog is static
-#[tauri::command]
+#[tauri::command(async)]
 fn saved_views() -> Vec<SavedView> {
     do_saved_views()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn run_saved_view(request: RunSavedViewRequest) -> Result<Vec<SavedViewRow>, String> {
     do_run_saved_view(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn file_provenance(request: FileProvenanceRequest) -> Result<FileProvenanceDto, String> {
     do_file_provenance(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn override_classification(request: OverrideClassificationRequest) -> Result<(), String> {
     do_override_classification(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusDto, String> {
     do_ontology_status(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_ontology_enabled(request: SetOntologyEnabledRequest) -> Result<(), String> {
     do_set_ontology_enabled(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn run_ontology_enrichment(
     request: RunOntologyEnrichmentRequest,
 ) -> Result<RunOntologyEnrichmentResponse, String> {

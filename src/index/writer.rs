@@ -146,6 +146,11 @@ impl IndexWriter {
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, IndexError> {
         let connection = Connection::open(path)?;
+        // Concurrent access is normal (UI reads while a scan/enrichment writes): wait for
+        // locks instead of failing with "database is locked", and use WAL so readers
+        // don't block on the writer at all.
+        connection.busy_timeout(std::time::Duration::from_secs(5))?;
+        let _: String = connection.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
         let writer = Self {
             connection,
             session_id: None,
