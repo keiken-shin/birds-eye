@@ -210,7 +210,7 @@ function ScanProgress({
         <span>runs in background — you can keep working in any lens</span>
         {done ? (
           <>
-            <span className="ml-auto text-primary-ink">
+            <span className={"ml-auto " + (view.status === "failed" ? "text-danger" : "text-primary-ink")}>
               {view.status === "complete" ? "✓ index ready" : view.status}
             </span>
             <button

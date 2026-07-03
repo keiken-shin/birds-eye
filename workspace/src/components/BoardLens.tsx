@@ -285,14 +285,21 @@ export function BoardLens() {
   // State rows saying running/paused with NO active job mean an interrupted pass —
   // that gets an explicit amber chip with a Resume action, never a frozen "running".
   const liveEnrich = jobActive && jobView.message.startsWith("Enrichment") ? jobView : null;
+  // Optional-chain populators: a hot-reloaded frontend can briefly talk to an older
+  // backend whose status payload lacks the field — degrade, don't crash the Board.
   const interrupted =
     !jobActive &&
-    (ontology?.populators.some((p) => p.status === "running" || p.status === "paused") ?? false);
-  const failed = ontology?.populators.filter((p) => p.status === "failed") ?? [];
+    (ontology?.populators?.some((p) => p.status === "running" || p.status === "paused") ?? false);
+  const failed = ontology?.populators?.filter((p) => p.status === "failed") ?? [];
   const resumeEnrichment = () => {
-    if (!activeEntry?.root_path) return;
-    enqueue(activeEntry.root_path, activeEntry.scan_strategy ?? "smart");
-    setOverlay("queue");
+    if (!activeEntry?.root_path) {
+      setError("Can't resume — this index has no recorded scan root. Run a new scan (Ctrl+N).");
+      return;
+    }
+    const outcome = enqueue(activeEntry.root_path, activeEntry.scan_strategy ?? "smart");
+    // The scan sheet is where live progress and logs render; the queue overlay only
+    // lists indexes. Follow the job to the right surface.
+    setOverlay(outcome === "started" ? "scan" : "queue");
   };
 
   const empty = !loading && !cards.length;

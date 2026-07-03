@@ -101,9 +101,15 @@ export function useScanJob(onComplete?: (indexPath: string) => void) {
 
   const start = useCallback(async (root: string, strategy: ScanStrategy) => {
     lineCount.current = 0;
-    const { jobId, indexPath } = await startNativeScan(root, strategy);
-    jobRef.current = { jobId, indexPath };
-    setView({ ...IDLE, jobId, indexPath, status: "scanning", message: "Scanning…" });
+    try {
+      const { jobId, indexPath } = await startNativeScan(root, strategy);
+      jobRef.current = { jobId, indexPath };
+      setView({ ...IDLE, jobId, indexPath, status: "scanning", message: "Scanning…" });
+    } catch (e) {
+      // A rejected start must be visible, not an unhandled rejection in the console.
+      jobRef.current = null;
+      setView({ ...IDLE, status: "failed", message: `Couldn't start the scan: ${String(e)}` });
+    }
   }, []);
 
   const cancel = useCallback(async () => {
