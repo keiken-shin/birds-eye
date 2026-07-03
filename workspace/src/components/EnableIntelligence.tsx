@@ -5,7 +5,7 @@ import { useEnableIntelligence } from "../hooks/useEnableIntelligence";
 /** First-class, non-destructive opt-in prompt — appears once per index when intelligence is off. */
 export function EnableIntelligence() {
   const { indexPath, ontologyEnabled } = useWorkspace();
-  const { enable, busy } = useEnableIntelligence();
+  const { enable, busy, error } = useEnableIntelligence();
   const [dismissed, setDismissed] = useState(true);
 
   useEffect(() => {
@@ -27,6 +27,11 @@ export function EnableIntelligence() {
         Classify this index to reveal safety verdicts, what's reclaimable, and why each folder
         exists. Enabling is non-destructive and reversible at any time.
       </div>
+      {error && (
+        <div className="mb-3 rounded-[7px] border border-danger/30 bg-danger/[0.08] px-3 py-2 text-[11px] text-danger">
+          Couldn't enable: {error}
+        </div>
+      )}
       <div className="flex justify-end gap-2">
         <button
           type="button"

@@ -6,8 +6,8 @@ import { useWorkspace } from "../state/workspaceStore";
 import { getDefaultStrategy } from "../lib/prefs";
 
 const STRATEGIES: Array<{ id: ScanStrategy; title: string; note: string }> = [
-  { id: "smart", title: "⦿ Smart (deep + dedup)", note: "full walk + content hashing to find duplicates · most accurate" },
-  { id: "metadata", title: "◯ Metadata only", note: "fast index without hashing · seconds" },
+  { id: "smart", title: "Smart (deep + dedup)", note: "full walk + content hashing to find duplicates · most accurate" },
+  { id: "metadata", title: "Metadata only", note: "fast index without hashing · seconds" },
 ];
 
 export function ScanOverlay() {
@@ -129,7 +129,7 @@ export function ScanOverlay() {
                         }}
                       >
                         <div className="text-12" style={{ color: on ? "#7fe0a6" : "var(--color-muted)" }}>
-                          {s.title}
+                          {on ? "⦿" : "◯"} {s.title}
                         </div>
                         <div className="mt-0.5 text-10 text-dim">{s.note}</div>
                       </button>

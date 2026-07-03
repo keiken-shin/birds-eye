@@ -8,7 +8,7 @@ import { useScanController } from "../state/scanController";
 export function ScanQueueOverlay() {
   const { overlay, setOverlay, setIndexPath } = useWorkspace();
   const { indexes, activeEntry, refreshIndexes } = useIndexData();
-  const { start } = useScanController();
+  const { enqueue, queue, dequeue } = useScanController();
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -22,13 +22,14 @@ export function ScanQueueOverlay() {
     setOverlay(null);
   };
 
-  const handleRescan = async (entry: NativeIndexEntry) => {
+  const handleRescan = (entry: NativeIndexEntry) => {
     if (!entry.root_path) return;
     setRescanningId(entry.index_path);
     setError(null);
     try {
-      await start(entry.root_path, entry.scan_strategy);
-      setOverlay("scan");
+      // Runs now if idle, else lines up behind the running scan. Only follow it to the
+      // progress sheet when it actually started.
+      if (enqueue(entry.root_path, entry.scan_strategy) === "started") setOverlay("scan");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -87,6 +88,34 @@ export function ScanQueueOverlay() {
           {error && (
             <div className="mb-3 rounded-[7px] border border-danger/30 bg-danger/[0.08] px-3 py-2 text-12 text-danger">
               {error}
+            </div>
+          )}
+          {queue.length > 0 && (
+            <div className="mb-3.5">
+              <div className="mb-1.5 text-10 tracking-[0.14em] text-label">
+                ◷ QUEUED · runs after the active scan
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {queue.map((q, i) => (
+                  <div
+                    key={`${q.root}:${i}`}
+                    className="flex items-center gap-2 rounded-[7px] border border-line-modal bg-window px-3 py-1.5"
+                  >
+                    <span className="mono text-11 text-dim">{i + 1}</span>
+                    <span className="truncate text-12" title={q.root}>
+                      {lastSegment(q.root)}
+                    </span>
+                    <span className="text-faint text-10">{q.strategy}</span>
+                    <button
+                      type="button"
+                      onClick={() => dequeue(i)}
+                      className="ml-auto rounded-[5px] border border-line-modal px-2 py-0.5 text-11 text-dim hover:text-danger"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           {indexes.length === 0 ? (
@@ -159,7 +188,7 @@ export function ScanQueueOverlay() {
                           <button
                             type="button"
                             disabled={isRescanning || rescanningId !== null}
-                            onClick={() => void handleRescan(entry)}
+                            onClick={() => handleRescan(entry)}
                             className="rounded-[6px] border border-line-modal px-2.5 py-1 text-11 text-ink-soft hover:text-ink disabled:opacity-50"
                           >
                             {isRescanning ? "Starting…" : "Re-scan"}

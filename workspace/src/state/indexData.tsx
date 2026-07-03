@@ -81,13 +81,15 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
       const [ov, lens, ont] = await Promise.all([
         queryNativeIndex(indexPath, QUERY_LIMIT),
         treemapLensData(indexPath).catch(() => [] as NativeTreemapLensFolder[]),
-        ontologyStatus(indexPath).catch(() => ({ enabled: false, pending_discoveries: 0 })),
+        // null (not false) on error: a status-read failure must not silently report a
+        // just-enabled index as disabled and bounce the UI back to the opt-in prompt.
+        ontologyStatus(indexPath).catch(() => null),
       ]);
       if (id !== reqId.current) return; // a newer request superseded this one
       setOverview(ov);
       setTree(buildFolderTree(ov.folders, rootPath));
       setLensByPath(new Map(lens.map((r) => [r.folder_path, r])));
-      setOntologyEnabled(ont.enabled);
+      if (ont) setOntologyEnabled(ont.enabled);
       setDataVersion((v) => v + 1); // signal lenses that fresh data (incl. enrichment) landed
     } catch (e) {
       if (id === reqId.current) setError(String(e));

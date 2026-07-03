@@ -20,7 +20,7 @@ pub fn list_all_candidates(conn: &Connection) -> Result<Vec<CleanupCandidate>, O
 /// Apply a scope filter to an already-fetched candidate list.
 /// - `reasons`: keep only candidates whose reason is in this set (empty = all reasons).
 /// - `max_size`: keep only candidates with `size <= max_size` (None = no cap).
-/// - `path_prefix`: keep only candidates whose path starts with this prefix (None = any path).
+/// - `path_prefix`: keep only candidates at or under this path (None = any path).
 pub fn filter_candidates(
     candidates: Vec<CleanupCandidate>,
     reasons: &[String],
@@ -31,8 +31,25 @@ pub fn filter_candidates(
         .into_iter()
         .filter(|c| reasons.is_empty() || reasons.iter().any(|r| r == &c.reason))
         .filter(|c| max_size.map(|m| c.size <= m).unwrap_or(true))
-        .filter(|c| path_prefix.map(|p| c.path.starts_with(p)).unwrap_or(true))
+        .filter(|c| path_prefix.map(|p| path_under_prefix(&c.path, p)).unwrap_or(true))
         .collect()
+}
+
+/// Boundary-aware path scoping: `path` matches `prefix` only when it IS the prefix or sits
+/// under it past a separator. A raw `starts_with` would let staging file `report.txt` also
+/// sweep `report.txt.bak`, or folder `proj` also sweep sibling `project` — data loss.
+fn path_under_prefix(path: &str, prefix: &str) -> bool {
+    if path == prefix {
+        return true;
+    }
+    let stem = prefix.trim_end_matches(['/', '\\']);
+    if stem.is_empty() {
+        return true; // prefix was only separators (e.g. a drive/filesystem root) → matches all
+    }
+    match path.strip_prefix(stem) {
+        Some(rest) => rest.starts_with('/') || rest.starts_with('\\'),
+        None => false,
+    }
 }
 
 fn row_to_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanupCandidate> {
@@ -251,5 +268,25 @@ mod tests {
 
         let under_a = filter_candidates(all, &[], None, Some("/a/"));
         assert_eq!(under_a.len(), 2);
+    }
+
+    #[test]
+    fn path_prefix_respects_separator_boundaries() {
+        // Staging one file must never sweep a same-stem sibling (report.txt vs report.txt.bak),
+        // and scoping to a folder must never catch a sibling sharing its name prefix (proj/project).
+        let all = vec![
+            CleanupCandidate { file_id: 1, entity_id: 1, path: r"D:\x\report.txt".into(), size: 10, reason: "scratch".into() },
+            CleanupCandidate { file_id: 2, entity_id: 2, path: r"D:\x\report.txt.bak".into(), size: 10, reason: "scratch".into() },
+            CleanupCandidate { file_id: 3, entity_id: 3, path: r"D:\proj\a.js".into(), size: 10, reason: "scratch".into() },
+            CleanupCandidate { file_id: 4, entity_id: 4, path: r"D:\project\b.js".into(), size: 10, reason: "scratch".into() },
+        ];
+
+        let just_report = filter_candidates(all.clone(), &[], None, Some(r"D:\x\report.txt"));
+        assert_eq!(just_report.len(), 1, "report.txt must not drag in report.txt.bak");
+        assert_eq!(just_report[0].file_id, 1);
+
+        let under_proj = filter_candidates(all, &[], None, Some(r"D:\proj"));
+        assert_eq!(under_proj.len(), 1, "folder proj must not catch sibling project");
+        assert_eq!(under_proj[0].file_id, 3);
     }
 }

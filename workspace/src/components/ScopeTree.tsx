@@ -6,7 +6,7 @@ import { VERDICT_STYLES, verdictForFolder } from "../lib/verdict";
 
 export function ScopeTree() {
   const { tree, lensByPath, indexes, activeEntry } = useIndexData();
-  const { scopePath, selected, ontologyEnabled, setOverlay, drillInto, select, setIndexPath, setScopePath } =
+  const { scopePath, selected, ontologyEnabled, setOverlay, select, setIndexPath, setScopePath } =
     useWorkspace();
 
   const dotColor = (node: FolderNode): string => {
@@ -15,18 +15,27 @@ export function ScopeTree() {
     return VERDICT_STYLES[verdictForFolder(row)].tx;
   };
 
-  const onRow = (node: FolderNode) => {
+  // Clicking a row replaces the scope with that node's own chain (never accumulates), and
+  // re-clicking the active node collapses it. `parent` is the top-level path for depth-1 rows.
+  const onRow = (node: FolderNode, parent: string | null) => {
+    const isScoped = scopePath[scopePath.length - 1] === node.path;
+    if (isScoped || selected?.path === node.path) {
+      select(null);
+      if (isScoped) setScopePath(parent ? [parent] : []);
+      return;
+    }
     select({ kind: "folder", path: node.path, name: node.name, bytes: node.bytes });
-    if (node.hasChildren) drillInto(node.path);
+    const chain = parent ? [parent, node.path] : [node.path];
+    setScopePath(node.hasChildren ? chain : parent ? [parent] : []);
   };
 
-  const rows: Array<{ node: FolderNode; depth: number }> = [];
+  const rows: Array<{ node: FolderNode; depth: number; parent: string | null }> = [];
   for (const top of tree?.topLevel ?? []) {
-    rows.push({ node: top, depth: 0 });
+    rows.push({ node: top, depth: 0, parent: null });
     if (scopePath.includes(top.path)) {
       for (const childPath of top.childrenPaths) {
         const child = tree!.byPath.get(childPath);
-        if (child) rows.push({ node: child, depth: 1 });
+        if (child) rows.push({ node: child, depth: 1, parent: top.path });
       }
     }
   }
@@ -45,14 +54,14 @@ export function ScopeTree() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2">
-        {rows.map(({ node, depth }) => {
+        {rows.map(({ node, depth, parent }) => {
           const active = scopePath.includes(node.path) || selected?.path === node.path;
           const expanded = scopePath.includes(node.path);
           return (
             <button
               key={node.path}
               type="button"
-              onClick={() => onRow(node)}
+              onClick={() => onRow(node, parent)}
               className="flex w-full items-center justify-between rounded-[7px] px-2 py-1.5 text-left text-[12.5px]"
               style={{
                 paddingLeft: depth ? 22 : 8,

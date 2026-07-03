@@ -13,7 +13,7 @@ import { useWorkspace } from "../state/workspaceStore";
  * the EnableIntelligence prompt so there is one source of truth for the opt-in flow.
  */
 export function useEnableIntelligence() {
-  const { indexPath, ontologyEnabled, setOntologyEnabled } = useWorkspace();
+  const { indexPath, ontologyEnabled } = useWorkspace();
   const { refreshData } = useIndexData();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,8 +24,10 @@ export function useEnableIntelligence() {
       setBusy(true);
       setError(null);
       try {
+        // No optimistic flip: `ontologyEnabled` is only turned on by refreshData's confirmed
+        // status read at the end, so a failure in enable OR enrichment leaves the prompt up
+        // with its error visible instead of silently unmounting it. `busy` covers the spinner.
         await setOntologyEnabledNative(indexPath, true);
-        setOntologyEnabled(true);
         await runOntologyEnrichment(indexPath, budget);
         await refreshData();
       } catch (e) {
@@ -34,7 +36,7 @@ export function useEnableIntelligence() {
         setBusy(false);
       }
     },
-    [indexPath, busy, refreshData, setOntologyEnabled]
+    [indexPath, busy, refreshData]
   );
 
   return { enable, busy, error, enabled: ontologyEnabled };
