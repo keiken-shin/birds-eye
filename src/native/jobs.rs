@@ -447,6 +447,17 @@ impl ScanJobManager {
                             let state_conn = crate::index::open_index_connection(&request.index_path)
                                 .ok()
                                 .map(Mutex::new);
+                            // A row still claiming 'running' is a leftover from a killed run —
+                            // flip to 'paused' so status reads reflect reality; the orchestrator
+                            // re-marks each populator Running as this pass reaches it.
+                            if let Some(conn) = &state_conn {
+                                if let Ok(conn) = conn.lock() {
+                                    let _ = conn.execute(
+                                        "UPDATE ontology_populator_state SET status='paused' WHERE status='running'",
+                                        [],
+                                    );
+                                }
+                            }
                             let total_files = stats.files_scanned;
                             let enrichment_progress: crate::ontology::populators::PopulatorProgress =
                                 Arc::new(move |name: &str, visited: u64| {

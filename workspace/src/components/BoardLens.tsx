@@ -52,7 +52,7 @@ function loadPositions(indexPath: string | null): Record<string, Pos> {
 export function BoardLens() {
   const { ontologyEnabled, indexPath, pinned, unpinCard, select, selected, setOverlay } =
     useWorkspace();
-  const { lensByPath, dataVersion, overview, ontology } = useIndexData();
+  const { lensByPath, dataVersion, overview, ontology, activeEntry } = useIndexData();
   const [findings, setFindings] = useState<Finding[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -94,6 +94,16 @@ export function BoardLens() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // While a scan/enrichment job is live, refresh findings periodically so they
+  // stream onto the board instead of appearing all at once at the end.
+  const { view: jobView, enqueue } = useScanController();
+  const jobActive = jobView.status === "scanning";
+  useEffect(() => {
+    if (!jobActive) return;
+    const t = setInterval(() => void load(), 15_000);
+    return () => clearInterval(t);
+  }, [jobActive, load]);
 
   const act = useCallback(
     async (id: number, fn: () => Promise<void>) => {
@@ -271,23 +281,19 @@ export function BoardLens() {
   }, [savePositions]);
 
   // ---- enrichment status ----
-  // Prefer the live job stream (real-time while a scan's phase 2 runs); fall back to
-  // the persisted populator state (covers enrichment progress across app restarts).
-  const { view: jobView } = useScanController();
-  const liveEnrich =
-    jobView.status === "scanning" && jobView.message.startsWith("Enrichment") ? jobView : null;
-  const running = ontology?.populators.filter((p) => p.status === "running" || p.status === "paused") ?? [];
+  // The progress bar shows only while a job is actually streaming (live truth).
+  // State rows saying running/paused with NO active job mean an interrupted pass —
+  // that gets an explicit amber chip with a Resume action, never a frozen "running".
+  const liveEnrich = jobActive && jobView.message.startsWith("Enrichment") ? jobView : null;
+  const interrupted =
+    !jobActive &&
+    (ontology?.populators.some((p) => p.status === "running" || p.status === "paused") ?? false);
   const failed = ontology?.populators.filter((p) => p.status === "failed") ?? [];
-  const visited = running.reduce((s, p) => s + p.files_visited, 0);
-  const enrichLabel = liveEnrich
-    ? liveEnrich.message.replace("Enrichment · ", "")
-    : running.map((p) => p.name).join(", ");
-  const enrichPct = liveEnrich
-    ? Math.max(0, liveEnrich.pct)
-    : ontology?.total_files && visited > 0
-      ? Math.min(100, Math.round((visited / ontology.total_files) * 100))
-      : null;
-  const showEnrich = liveEnrich !== null || running.length > 0;
+  const resumeEnrichment = () => {
+    if (!activeEntry?.root_path) return;
+    enqueue(activeEntry.root_path, activeEntry.scan_strategy ?? "smart");
+    setOverlay("queue");
+  };
 
   const empty = !loading && !cards.length;
 
@@ -335,20 +341,28 @@ export function BoardLens() {
               </span>
             );
           })}
-          {showEnrich && (
+          {liveEnrich && (
             <span className="flex items-center gap-2 rounded-[8px] border border-primary/30 bg-panel/90 px-2.5 py-1 text-10 text-primary-ink">
-              <span>⟳ enrichment · {enrichLabel}</span>
-              {enrichPct !== null && (
-                <>
-                  <span className="relative h-[4px] w-[90px] overflow-hidden rounded-full bg-white/10">
-                    <span
-                      className="absolute inset-y-0 left-0 rounded-full bg-primary transition-[width] duration-500"
-                      style={{ width: `${enrichPct}%` }}
-                    />
-                  </span>
-                  <span className="mono">{Math.round(enrichPct)}%</span>
-                </>
-              )}
+              <span>⟳ {liveEnrich.message.replace("Enrichment · ", "enrichment · ")}</span>
+              <span className="relative h-[4px] w-[90px] overflow-hidden rounded-full bg-white/10">
+                <span
+                  className="absolute inset-y-0 left-0 rounded-full bg-primary transition-[width] duration-500"
+                  style={{ width: `${Math.max(2, liveEnrich.pct)}%` }}
+                />
+              </span>
+              <span className="mono">{Math.max(0, Math.round(liveEnrich.pct))}%</span>
+            </span>
+          )}
+          {interrupted && (
+            <span className="flex items-center gap-2 rounded-[8px] border border-warn/40 bg-panel/90 px-2.5 py-1 text-10 text-warn">
+              <span>⏸ enrichment interrupted — findings are incomplete</span>
+              <button
+                type="button"
+                onClick={resumeEnrichment}
+                className="rounded-[5px] border border-warn/40 px-1.5 py-0.5 text-10 font-semibold text-warn"
+              >
+                Resume
+              </button>
             </span>
           )}
           {failed.length > 0 && (
@@ -380,9 +394,11 @@ export function BoardLens() {
 
       {empty && (
         <div className="absolute inset-0 z-10 flex items-center justify-center text-center text-12 italic text-label">
-          {showEnrich
+          {liveEnrich
             ? "Enrichment is running — findings appear here as they're discovered."
-            : "Nothing on the board yet. Findings land here after enrichment; pin folders from the Inspector."}
+            : interrupted
+              ? "Enrichment was interrupted before finishing — resume it from the chip above."
+              : "Nothing on the board yet. Findings land here after enrichment; pin folders from the Inspector."}
         </div>
       )}
 
