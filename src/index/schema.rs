@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 7;
+pub const CURRENT_SCHEMA_VERSION: u32 = 8;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -416,6 +416,37 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (7, strftime('%s', 'now'));
 "#;
 
+pub const MIGRATION_008: &str = r#"
+-- Rebuild ontology_cleanup_log to admit the transient 'pending' restore_status:
+-- the executor now logs BEFORE trashing so a crash mid-clean can't leave a file
+-- in the recycle bin with no trace. SQLite cannot alter CHECK constraints.
+CREATE TABLE ontology_cleanup_log_v8 (
+  id INTEGER PRIMARY KEY,
+  cleanup_plan_id INTEGER NOT NULL REFERENCES ontology_cleanup_plans(id) ON DELETE CASCADE,
+  file_id INTEGER NOT NULL,
+  original_path TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  cleaned_at INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  gating_facts TEXT NOT NULL,
+  restore_status TEXT NOT NULL CHECK (restore_status IN ('pending', 'in_recycle_bin', 'restored', 'expired')) DEFAULT 'in_recycle_bin',
+  expires_at INTEGER
+);
+
+INSERT INTO ontology_cleanup_log_v8
+SELECT id, cleanup_plan_id, file_id, original_path, size, cleaned_at, reason,
+       gating_facts, restore_status, expires_at
+FROM ontology_cleanup_log;
+
+DROP TABLE ontology_cleanup_log;
+ALTER TABLE ontology_cleanup_log_v8 RENAME TO ontology_cleanup_log;
+
+CREATE INDEX IF NOT EXISTS idx_cleanup_log_status ON ontology_cleanup_log(restore_status, expires_at);
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (8, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -424,6 +455,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (5, MIGRATION_005),
     (6, MIGRATION_006),
     (7, MIGRATION_007),
+    (8, MIGRATION_008),
 ];
 
 #[cfg(test)]
@@ -432,8 +464,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 7);
-        assert_eq!(ALL_MIGRATIONS.len(), 7);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 8);
+        assert_eq!(ALL_MIGRATIONS.len(), 8);
     }
 
     #[test]

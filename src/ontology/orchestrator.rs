@@ -278,7 +278,7 @@ pub fn run_phase2(
     budget: BudgetTier,
     pause: Arc<AtomicBool>,
 ) -> Result<bool, OntologyError> {
-    let mut conn = Connection::open(index_path)?;
+    let mut conn = crate::index::open_index_connection(index_path)?;
     if !is_enabled(&conn)? {
         return Ok(false);
     }

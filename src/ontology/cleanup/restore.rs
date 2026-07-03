@@ -125,7 +125,7 @@ pub fn restore_with(
 
 /// Public entry point: open the index, use the OS recycle bin.
 pub fn restore_from_cleanup_log(index_path: &Path, entry_id: i64) -> Result<(), OntologyError> {
-    let mut conn = Connection::open(index_path)?;
+    let mut conn = crate::index::open_index_connection(index_path)?;
     restore_with(&mut conn, entry_id, &SystemRestorer)
 }
 

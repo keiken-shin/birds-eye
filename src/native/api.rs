@@ -224,7 +224,7 @@ pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
 
 /// Build a draft cleanup plan from a scope and return its live candidate preview.
 pub fn cleanup_plan(request: CleanupPlanRequest) -> Result<CleanupPlanResponse, String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     let scope = CleanupScope {
         reasons: request.reasons,
         max_size: request.max_size,
@@ -244,7 +244,7 @@ pub fn cleanup_plan(request: CleanupPlanRequest) -> Result<CleanupPlanResponse, 
 
 /// Execute a previously created draft plan: recycle-bin-first, with restore log.
 pub fn execute_cleanup_plan(request: ExecuteCleanupPlanRequest) -> Result<CleanupResult, String> {
-    let mut conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let mut conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     let retention = request.retention_days.unwrap_or(DEFAULT_RETENTION_DAYS);
     execute_plan_with(&mut conn, request.plan_id, &SystemTrasher, retention)
         .map_err(|e| e.to_string())
@@ -254,7 +254,7 @@ pub fn execute_cleanup_plan(request: ExecuteCleanupPlanRequest) -> Result<Cleanu
 pub fn recently_cleaned_log(
     request: RecentlyCleanedRequest,
 ) -> Result<Vec<CleanupLogEntry>, String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     // Lazy retention enforcement: flip past-due entries to 'expired' whenever the
     // Library is read, so the advertised recovery window is actually honored.
     crate::ontology::cleanup::restore::expire_old_entries(&conn, crate::ontology::cleanup::unix_now())
@@ -264,31 +264,31 @@ pub fn recently_cleaned_log(
 
 /// Restore a cleaned file from the recycle bin to its original path.
 pub fn restore_from_cleanup_log(request: RestoreCleanupRequest) -> Result<(), String> {
-    let mut conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let mut conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     restore_with(&mut conn, request.entry_id, &SystemRestorer).map_err(|e| e.to_string())
 }
 
 /// Pin a file so it is permanently excluded from cleanup queues.
 pub fn pin_file(request: PinFileRequest) -> Result<(), String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     pin_file_db(&conn, request.file_id, request.note.as_deref()).map_err(|e| e.to_string())
 }
 
 /// Remove a pin.
 pub fn unpin_file(request: UnpinFileRequest) -> Result<(), String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     unpin_file_db(&conn, request.file_id).map_err(|e| e.to_string())
 }
 
 /// List the live cleanup candidates without creating a plan (preview/treemap feed).
 pub fn list_cleanup_candidates(index_path: PathBuf) -> Result<Vec<CleanupCandidate>, String> {
-    let conn = Connection::open(&index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&index_path).map_err(|e| e.to_string())?;
     list_all_candidates(&conn).map_err(|e| e.to_string())
 }
 
 /// Folder-level ontology aggregates for the treemap lenses.
 pub fn treemap_lens_data(request: TreemapLensRequest) -> Result<Vec<TreemapLensFolderDto>, String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     treemap_lens_data_for_conn(&conn).map_err(|e| e.to_string())
 }
 
@@ -478,6 +478,12 @@ pub fn reveal_in_explorer(path: String) -> Result<(), String> {
 }
 
 fn reveal_target_path(path: &str) -> Result<PathBuf, String> {
+    // The Windows branch below interpolates the path into explorer's raw command line
+    // inside quotes; a quote in the path would break out of them. No legal Windows
+    // path contains one, so reject rather than escape.
+    if path.contains('"') {
+        return Err("path contains a quote character".to_owned());
+    }
     let original = Path::new(path);
     if original.exists() {
         return Ok(original
@@ -756,27 +762,27 @@ pub struct ResolveDiscoveryKindRequest {
 }
 
 pub fn discoveries(request: DiscoveriesRequest) -> Result<Vec<Discovery>, String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     list_pending_by_kind(&conn, &request.kind, request.limit).map_err(|e| e.to_string())
 }
 
 pub fn confirm_discovery_cmd(request: ResolveDiscoveryRequest) -> Result<(), String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     confirm_discovery(&conn, request.id).map_err(|e| e.to_string())
 }
 
 pub fn reject_discovery_cmd(request: ResolveDiscoveryRequest) -> Result<(), String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     reject_discovery(&conn, request.id, request.reason.as_deref()).map_err(|e| e.to_string())
 }
 
 pub fn confirm_discovery_pattern(request: ResolveDiscoveryKindRequest) -> Result<u32, String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     confirm_discoveries_by_kind(&conn, &request.kind).map_err(|e| e.to_string())
 }
 
 pub fn reject_discovery_pattern(request: ResolveDiscoveryKindRequest) -> Result<u32, String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     reject_discoveries_by_kind(&conn, &request.kind, request.reason.as_deref())
         .map_err(|e| e.to_string())
 }
@@ -798,7 +804,7 @@ pub fn saved_views() -> Vec<SavedView> {
 }
 
 pub fn run_saved_view_cmd(request: RunSavedViewRequest) -> Result<Vec<SavedViewRow>, String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     let params = ViewParams { days: request.days, min_bytes: request.min_bytes };
     run_saved_view(&conn, &request.view_id, &params).map_err(|e| e.to_string())
 }
@@ -840,7 +846,7 @@ const PROVENANCE_KEYS: &[&str] = &[keys::ROLE, keys::REPLACEABILITY, keys::SENSI
 const PROVENANCE_PREDS: &[&str] = &[predicates::DERIVED_FROM, predicates::BACKUP_OF, predicates::PART_OF, predicates::IN_FOLDER];
 
 pub fn file_provenance(request: FileProvenanceRequest) -> Result<FileProvenanceDto, String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     let path: String = conn
         .query_row("SELECT path FROM files WHERE id = ?1", [request.file_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -900,7 +906,7 @@ pub struct OverrideClassificationRequest {
 }
 
 pub fn override_classification(request: OverrideClassificationRequest) -> Result<(), String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     let entity = match find_entity_for_file(&conn, request.file_id).map_err(|e| e.to_string())? {
         Some(e) => e,
         None => {
@@ -940,7 +946,7 @@ pub struct OntologyStatusDto {
 }
 
 pub fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusDto, String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     let enabled = enabled::is_enabled(&conn).map_err(|e| e.to_string())?;
     let pending_discoveries =
         crate::ontology::discoveries::count_pending(&conn).map_err(|e| e.to_string())?;
@@ -954,7 +960,7 @@ pub struct SetOntologyEnabledRequest {
 }
 
 pub fn set_ontology_enabled(request: SetOntologyEnabledRequest) -> Result<(), String> {
-    let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     if request.enabled {
         enabled::enable(&conn).map_err(|e| e.to_string())
     } else {

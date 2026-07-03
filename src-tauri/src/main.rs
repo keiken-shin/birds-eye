@@ -1,7 +1,7 @@
 use birds_eye::native::api::{
     index_metadata,
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
-    search_files as search_index_files, trash_files as do_trash_files,
+    search_files as search_index_files,
     reveal_in_explorer as do_reveal_in_explorer,
     // Plan 3 cleanup
     cleanup_plan as do_cleanup_plan, execute_cleanup_plan as do_execute_cleanup_plan,
@@ -28,8 +28,7 @@ use birds_eye::native::api::{
     TreemapLensFolderDto, TreemapLensRequest,
     DuplicateFileSummaryDto, DuplicateGroupFilesRequest,
     FileSearchResultDto, IndexMetadataDto, IndexOverviewDto, IndexQueryRequest,
-    ScanToIndexRequest, ScanToIndexResponse, SearchFilesRequest,
-    TrashFilesRequest, TrashFilesResponse,
+    SearchFilesRequest,
 };
 use birds_eye::ontology::cleanup::executor::CleanupResult;
 use birds_eye::ontology::cleanup::restore::CleanupLogEntry;
@@ -49,11 +48,6 @@ use tauri::{Emitter, Manager};
 
 struct AppState {
     jobs: Mutex<ScanJobManager>,
-}
-
-#[tauri::command(async)]
-fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse, String> {
-    birds_eye::native::api::scan_to_index(request)
 }
 
 #[tauri::command(async)]
@@ -192,13 +186,34 @@ fn scan_job_status(state: tauri::State<'_, AppState>, job_id: u64) -> Result<Job
 }
 
 #[tauri::command(async)]
-fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
-    do_trash_files(request)
-}
-
-#[tauri::command(async)]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     do_reveal_in_explorer(path)
+}
+
+/// Allow the asset protocol to serve files under this index's scan root, so the
+/// Inspector can preview media. The root is read from the index itself (which must
+/// live in the app index dir) — the webview never gets to name an arbitrary path.
+#[tauri::command(async)]
+fn allow_preview_root(app: tauri::AppHandle, index_path: PathBuf) -> Result<String, String> {
+    let index_dir = index_dir(&app)?;
+    let canonical_dir = index_dir
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve index directory: {error}"))?;
+    let canonical_index = index_path
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve index path: {error}"))?;
+    if !canonical_index.starts_with(canonical_dir) {
+        return Err("refusing to read an index outside the app index directory".to_owned());
+    }
+
+    let metadata = index_metadata(canonical_index)?;
+    let root = metadata
+        .root_path
+        .ok_or_else(|| "index has no recorded scan root".to_owned())?;
+    app.asset_protocol_scope()
+        .allow_directory(&root, true)
+        .map_err(|error| format!("failed to scope preview root: {error}"))?;
+    Ok(root)
 }
 
 #[tauri::command(async)]
@@ -311,7 +326,6 @@ fn main() {
             jobs: Mutex::new(ScanJobManager::new()),
         })
         .invoke_handler(tauri::generate_handler![
-            scan_to_index,
             query_index,
             search_files,
             duplicate_group_files,
@@ -322,7 +336,7 @@ fn main() {
             cancel_scan_job,
             scan_job_events,
             scan_job_status,
-            trash_files,
+            allow_preview_root,
             reveal_in_explorer,
             cleanup_plan,
             execute_cleanup_plan,

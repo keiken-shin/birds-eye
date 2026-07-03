@@ -116,6 +116,17 @@ impl ScanJobManager {
                 .jobs
                 .lock()
                 .map_err(|_| "job lock poisoned".to_owned())?;
+            // Evict all but the most recent finished jobs so the map (and their event
+            // buffers) doesn't grow for the lifetime of the process. Ids are monotonic.
+            let mut terminal: Vec<u64> = jobs
+                .iter()
+                .filter(|(_, j)| j.status != JobStatusDto::Running)
+                .map(|(id, _)| *id)
+                .collect();
+            terminal.sort_unstable_by(|a, b| b.cmp(a));
+            for id in terminal.into_iter().skip(3) {
+                jobs.remove(&id);
+            }
             jobs.insert(
                 job_id,
                 JobState {
@@ -729,18 +740,27 @@ impl JobEventDto {
     }
 }
 
+/// Per-job event history cap. The UI renders only the last ~200 log lines and
+/// backfills tolerate gaps, so an unbounded Vec would just leak for the session.
+const MAX_EVENTS_PER_JOB: usize = 1_000;
+
 fn push_event(
     jobs: &Arc<Mutex<HashMap<u64, JobState>>>,
     job_id: u64,
     event: JobEventDto,
     listener: Option<&JobEventListener>,
 ) {
-    if let Ok(mut jobs) = jobs.lock() {
-        if let Some(job) = jobs.get_mut(&job_id) {
-            job.status = event.status.clone();
-            job.events.push(event.clone());
+    // A poisoned lock only means a worker panicked mid-update; the event buffer is
+    // still valid data — recover it rather than silently dropping events forever.
+    let mut jobs = jobs.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(job) = jobs.get_mut(&job_id) {
+        job.status = event.status.clone();
+        if job.events.len() >= MAX_EVENTS_PER_JOB {
+            job.events.remove(0);
         }
+        job.events.push(event.clone());
     }
+    drop(jobs);
 
     if let Some(listener) = listener {
         listener(event);

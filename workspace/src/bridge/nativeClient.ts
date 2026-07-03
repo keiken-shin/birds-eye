@@ -158,14 +158,13 @@ export async function queryNativeDuplicateFiles(indexPath: string, groupId: numb
   });
 }
 
-export type TrashFilesResult = {
-  failed: Array<{ path: string; reason: string }>;
-};
-
-export async function trashFiles(paths: string[]): Promise<TrashFilesResult> {
-  return invoke<TrashFilesResult>("trash_files", {
-    request: { paths },
-  });
+/**
+ * Allow the asset protocol to serve this index's scan root for media preview.
+ * The backend validates the index lives in the app dir and derives the root
+ * itself. Returns the allowed root path.
+ */
+export async function allowPreviewRoot(indexPath: string) {
+  return invoke<string>("allow_preview_root", { indexPath });
 }
 
 export async function listNativeIndexes() {

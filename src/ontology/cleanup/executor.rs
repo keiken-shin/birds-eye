@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Default restore-log retention window (Constitutional Defense #1).
-pub const DEFAULT_RETENTION_DAYS: i64 = 90;
+/// Matches the "recoverable for 30 days" product copy — keep the two in sync.
+pub const DEFAULT_RETENTION_DAYS: i64 = 30;
 const SECONDS_PER_DAY: i64 = 86_400;
 
 /// Abstraction over "send this path to the OS recycle bin". Production uses the
@@ -78,35 +79,60 @@ pub fn execute_plan_with(
         let gating = gating_facts_for(conn, cand)?;
         let gating_json = serde_json::to_string(&gating)?;
 
+        // Log FIRST (status 'pending'), then trash, then promote. A crash or DB error
+        // after the trash succeeds still leaves a recoverable log row — a file must
+        // never sit in the recycle bin without a trace in the Library.
+        conn.execute(
+            "INSERT INTO ontology_cleanup_log
+                (cleanup_plan_id, file_id, original_path, size, cleaned_at, reason,
+                 gating_facts, restore_status, expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8)",
+            params![
+                plan_id,
+                cand.file_id,
+                cand.path,
+                cand.size,
+                now,
+                cand.reason,
+                gating_json,
+                expires_at,
+            ],
+        )?;
+        let log_id = conn.last_insert_rowid();
+
         match trasher.send_to_trash(Path::new(&cand.path)) {
             Ok(()) => {
-                // Record the cleanup BEFORE marking the file deleted, so a crash
-                // between the two leaves a recoverable log entry.
-                conn.execute(
-                    "INSERT INTO ontology_cleanup_log
-                        (cleanup_plan_id, file_id, original_path, size, cleaned_at, reason,
-                         gating_facts, restore_status, expires_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'in_recycle_bin', ?8)",
-                    params![
-                        plan_id,
-                        cand.file_id,
-                        cand.path,
-                        cand.size,
-                        now,
-                        cand.reason,
-                        gating_json,
-                        expires_at,
-                    ],
-                )?;
-                conn.execute(
-                    "UPDATE files SET deleted_at = ?2 WHERE id = ?1",
-                    params![cand.file_id, now],
-                )?;
-                cleaned += 1;
-                bytes_cleaned += cand.size.max(0) as u64;
+                let bookkeeping = conn
+                    .execute(
+                        "UPDATE ontology_cleanup_log SET restore_status = 'in_recycle_bin' WHERE id = ?1",
+                        params![log_id],
+                    )
+                    .and_then(|_| {
+                        conn.execute(
+                            "UPDATE files SET deleted_at = ?2 WHERE id = ?1",
+                            params![cand.file_id, now],
+                        )
+                    });
+                match bookkeeping {
+                    Ok(_) => {
+                        cleaned += 1;
+                        bytes_cleaned += cand.size.max(0) as u64;
+                    }
+                    // Per-file isolation for DB errors too: the file IS in the recycle
+                    // bin and the 'pending' log row keeps the trail.
+                    Err(e) => failed.push(CleanupFailure {
+                        file_id: cand.file_id,
+                        path: cand.path.clone(),
+                        reason: format!("trashed, but bookkeeping failed: {e}"),
+                    }),
+                }
             }
             Err(reason) => {
-                // Per-file isolation: one failure does not abort the plan.
+                // Trash failed: drop the provisional row; per-file isolation.
+                let _ = conn.execute(
+                    "DELETE FROM ontology_cleanup_log WHERE id = ?1",
+                    params![log_id],
+                );
                 failed.push(CleanupFailure {
                     file_id: cand.file_id,
                     path: cand.path.clone(),
@@ -132,7 +158,7 @@ pub fn execute_cleanup_plan(
     index_path: &Path,
     plan_id: i64,
 ) -> Result<CleanupResult, OntologyError> {
-    let mut conn = Connection::open(index_path)?;
+    let mut conn = crate::index::open_index_connection(index_path)?;
     execute_plan_with(&mut conn, plan_id, &SystemTrasher, DEFAULT_RETENTION_DAYS)
 }
 
