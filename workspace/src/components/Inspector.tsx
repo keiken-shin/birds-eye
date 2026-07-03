@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { formatBytes, formatCount } from "@bridge/domain";
-import { REASON_LABELS, type NativeTreemapLensFolder } from "@bridge/nativeClient";
+import { REASON_LABELS, revealInExplorer, type NativeTreemapLensFolder } from "@bridge/nativeClient";
 import { useIndexData } from "../state/indexData";
 import { useWorkspace } from "../state/workspaceStore";
 import { VERDICT_STYLES, canStage, explainFolder, verdictForFolder } from "../lib/verdict";
@@ -81,7 +81,15 @@ export function Inspector() {
           <>
             <div className="mb-0.5 flex items-center gap-2.5">
               <span className="text-[16px]">◇</span>
-              <span className="text-[16px] font-semibold">{selected.name}</span>
+              <span className="min-w-0 flex-1 truncate text-[16px] font-semibold">{selected.name}</span>
+              <button
+                type="button"
+                title="Reveal in Explorer"
+                onClick={() => void revealInExplorer(selected.path).catch(() => {})}
+                className="flex-none rounded-[6px] border border-line px-2 py-1 text-10 text-muted hover:text-ink"
+              >
+                ⌖ Reveal
+              </button>
             </div>
             <div className="mono mb-4 break-all text-[10.5px] text-dim">{selected.path}</div>
 

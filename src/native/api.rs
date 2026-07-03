@@ -255,6 +255,10 @@ pub fn recently_cleaned_log(
     request: RecentlyCleanedRequest,
 ) -> Result<Vec<CleanupLogEntry>, String> {
     let conn = Connection::open(&request.index_path).map_err(|e| e.to_string())?;
+    // Lazy retention enforcement: flip past-due entries to 'expired' whenever the
+    // Library is read, so the advertised recovery window is actually honored.
+    crate::ontology::cleanup::restore::expire_old_entries(&conn, crate::ontology::cleanup::unix_now())
+        .map_err(|e| e.to_string())?;
     recently_cleaned(&conn, request.limit, request.offset).map_err(|e| e.to_string())
 }
 
