@@ -15,6 +15,20 @@ export function UndoToast() {
     return () => clearTimeout(t);
   }, [undo, setUndo]);
 
+  // ⌘Z / Ctrl-Z restores the last clean while the toast is up (text fields keep their own undo).
+  useEffect(() => {
+    if (!undo) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "z" || !(e.metaKey || e.ctrlKey) || e.shiftKey) return;
+      const tag = (document.activeElement?.tagName ?? "").toUpperCase();
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      e.preventDefault();
+      void onUndo();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+
   if (!undo) return null;
 
   const onUndo = async () => {

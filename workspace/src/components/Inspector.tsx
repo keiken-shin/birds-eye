@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { formatBytes, formatCount } from "@bridge/domain";
 import { REASON_LABELS, type NativeTreemapLensFolder } from "@bridge/nativeClient";
 import { useIndexData } from "../state/indexData";
@@ -52,6 +53,20 @@ export function Inspector() {
     if (!selected) return;
     toggleStaged({ path: selected.path, name: selected.name, bytes: selected.bytes, reason: null, verdict: "review", kind: "file" });
   };
+
+  // ⇧↵ stages the current selection — same gating as the button below.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" || !e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = (document.activeElement?.tagName ?? "").toUpperCase();
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      e.preventDefault();
+      if (isFile) onStageFile();
+      else if (ontologyEnabled && (stageable || staged) && verdict !== "protected") onStage();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
 
   return (
     <div className="flex w-[316px] flex-none flex-col border-l border-line bg-panel">

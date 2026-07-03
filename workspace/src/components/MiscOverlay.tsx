@@ -1,13 +1,15 @@
 import { useWorkspace } from "../state/workspaceStore";
+import { MOD, isMac } from "../lib/keys";
 
 const SHORTCUTS: Array<[string, string]> = [
-  ["New scan", "⌘N"],
-  ["Command line", "⌥⌘K"],
+  ["New scan", `${MOD}N`],
+  ["Command line", isMac ? "⌥⌘K" : "Ctrl+K"],
   ["Treemap · Board · Results", "1 · 2 · 3"],
-  ["Stage selection", "⇧↵"],
-  ["Review & clean", "⌘↵"],
-  ["Undo last clean", "⌘Z"],
-  ["Settings", "⌘,"],
+  ["Up one level (treemap)", isMac ? "⌫" : "Backspace"],
+  ["Stage selection", isMac ? "⇧↵" : "Shift+Enter"],
+  ["Review & clean", isMac ? "⌘↵" : "Ctrl+Enter"],
+  ["Undo last clean", `${MOD}Z`],
+  ["Settings", `${MOD},`],
   ["Shortcuts", "?"],
   ["Close overlay", "Esc"],
 ];

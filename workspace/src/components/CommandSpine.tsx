@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listSavedViews, type NativeSavedView } from "@bridge/nativeClient";
 import { useWorkspace } from "../state/workspaceStore";
 import { parseIntent } from "../lib/intent";
+import { isMac } from "../lib/keys";
 import type { Lens } from "../state/types";
 
 const LENSES: Array<{ id: Lens; label: string }> = [
@@ -62,7 +63,7 @@ export function CommandSpine() {
           spellCheck={false}
           className="flex-1 bg-transparent text-[13.5px] text-ink outline-none placeholder:text-dim"
         />
-        <span className="mono text-[10.5px] text-[#4b515a]">⌥⌘K</span>
+        <span className="mono text-[10.5px] text-[#4b515a]">{isMac ? "⌥⌘K" : "Ctrl+K"}</span>
       </div>
       <div className="flex flex-none gap-[2px] rounded-[9px] border border-line-input bg-field p-[3px]">
         {LENSES.map((l) => (

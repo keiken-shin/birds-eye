@@ -17,7 +17,8 @@ import { UndoToast } from "./UndoToast";
 import { EnableIntelligence } from "./EnableIntelligence";
 
 export function WorkspaceShell() {
-  const { setLens, setOverlay, openReview, review, overlay, closeReview } = useWorkspace();
+  const { setLens, setOverlay, openReview, review, overlay, closeReview, lens, scopePath, popScopeTo } =
+    useWorkspace();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -57,11 +58,15 @@ export function WorkspaceShell() {
         else if (e.key === "1") setLens("treemap");
         else if (e.key === "2") setLens("board");
         else if (e.key === "3") setLens("results");
+        else if (e.key === "Backspace" && lens === "treemap" && scopePath.length) {
+          e.preventDefault();
+          popScopeTo(scopePath.length - 1);
+        }
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [review, overlay, setLens, setOverlay, openReview, closeReview]);
+  }, [review, overlay, setLens, setOverlay, openReview, closeReview, lens, scopePath, popScopeTo]);
 
   return (
     <div className="relative flex h-screen flex-col overflow-hidden bg-base text-ink">
