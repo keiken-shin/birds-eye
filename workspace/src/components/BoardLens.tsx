@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { formatBytes } from "@bridge/domain";
 import {
   confirmDiscovery,
+  confirmDiscoveryPattern,
   listDiscoveries,
   rejectDiscovery,
+  rejectDiscoveryPattern,
   type NativeDiscovery,
 } from "@bridge/nativeClient";
 import { useIndexData } from "../state/indexData";
@@ -30,6 +32,7 @@ export function BoardLens() {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [busyKind, setBusyKind] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reqId = useRef(0);
 
@@ -83,6 +86,22 @@ export function BoardLens() {
     [load]
   );
 
+  // Pattern-level trust: resolve every pending discovery of a kind in one action.
+  const actKind = useCallback(
+    async (kind: string, fn: () => Promise<number>) => {
+      setBusyKind(kind);
+      try {
+        await fn();
+        await load();
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setBusyKind(null);
+      }
+    },
+    [load]
+  );
+
   if (!ontologyEnabled) {
     return (
       <div className="flex flex-1 items-center justify-center p-6">
@@ -114,28 +133,69 @@ export function BoardLens() {
           from the map (Inspector → Pin to board).
         </div>
       ) : (
-        <div className="flex flex-wrap content-start gap-4">
-          {pinned.map((card) => (
-            <PinnedCardView
-              key={`pin:${card.path}`}
-              card={card}
-              selected={selected?.path === card.path}
-              verdict={
-                lensByPath.get(card.path) ? verdictForFolder(lensByPath.get(card.path)!) : null
-              }
-              onSelect={() => select({ kind: "folder", path: card.path, name: card.name, bytes: card.bytes })}
-              onUnpin={() => unpinCard(card.path)}
-            />
-          ))}
-          {findings.map((f) => (
-            <FindingCardView
-              key={f.id}
-              f={f}
-              busy={busyId === f.id}
-              onConfirm={() => void act(f.id, () => confirmDiscovery(indexPath!, f.id))}
-              onReject={() => void act(f.id, () => rejectDiscovery(indexPath!, f.id))}
-            />
-          ))}
+        <div className="flex flex-col gap-4">
+          {pinned.length > 0 && (
+            <div className="flex flex-wrap content-start gap-4">
+              {pinned.map((card) => (
+                <PinnedCardView
+                  key={`pin:${card.path}`}
+                  card={card}
+                  selected={selected?.path === card.path}
+                  verdict={
+                    lensByPath.get(card.path) ? verdictForFolder(lensByPath.get(card.path)!) : null
+                  }
+                  onSelect={() => select({ kind: "folder", path: card.path, name: card.name, bytes: card.bytes })}
+                  onUnpin={() => unpinCard(card.path)}
+                />
+              ))}
+            </div>
+          )}
+          {FINDING_KINDS.map((kind) => {
+            const group = findings.filter((f) => f.kind === kind);
+            if (!group.length) return null;
+            return (
+              <div key={kind}>
+                {group.length > 1 && (
+                  <div className="mb-2 flex items-center gap-3">
+                    <span className="text-10 uppercase tracking-[0.14em] text-label">
+                      {group[0].predicate} · {group.length} pending
+                    </span>
+                    <button
+                      type="button"
+                      disabled={busyKind === kind}
+                      onClick={() =>
+                        void actKind(kind, () => confirmDiscoveryPattern(indexPath!, kind))
+                      }
+                      className="rounded-[6px] border border-primary/40 px-2 py-0.5 text-10 font-semibold text-primary-ink disabled:opacity-50"
+                    >
+                      Confirm all
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyKind === kind}
+                      onClick={() =>
+                        void actKind(kind, () => rejectDiscoveryPattern(indexPath!, kind))
+                      }
+                      className="rounded-[6px] border border-white/15 px-2 py-0.5 text-10 text-white/60 disabled:opacity-50"
+                    >
+                      Reject all
+                    </button>
+                  </div>
+                )}
+                <div className="flex flex-wrap content-start gap-4">
+                  {group.map((f) => (
+                    <FindingCardView
+                      key={f.id}
+                      f={f}
+                      busy={busyId === f.id || busyKind === kind}
+                      onConfirm={() => void act(f.id, () => confirmDiscovery(indexPath!, f.id))}
+                      onReject={() => void act(f.id, () => rejectDiscovery(indexPath!, f.id))}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
