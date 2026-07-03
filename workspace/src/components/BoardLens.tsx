@@ -213,11 +213,14 @@ export function BoardLens() {
   }, [cards, placed, pinned]);
 
   // ---- pointer interactions ----
-  const onWheel = useCallback(
-    (e: React.WheelEvent) => {
+  // Wheel zoom needs preventDefault, and React (like Chrome) registers wheel
+  // listeners as passive — so attach a non-passive native listener instead.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const rect = wrapRef.current?.getBoundingClientRect();
-      if (!rect) return;
+      const rect = el.getBoundingClientRect();
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
       setZoom((z) => {
@@ -225,9 +228,10 @@ export function BoardLens() {
         setPan((p) => ({ x: cx - ((cx - p.x) * nz) / z, y: cy - ((cy - p.y) * nz) / z }));
         return nz;
       });
-    },
-    []
-  );
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   const onBackgroundDown = useCallback(
     (e: React.PointerEvent) => {
@@ -313,7 +317,6 @@ export function BoardLens() {
         backgroundImage: "radial-gradient(circle, #1a1d23 1px, transparent 1px)",
         backgroundSize: "26px 26px",
       }}
-      onWheel={onWheel}
       onPointerDown={onBackgroundDown}
       onPointerMove={onMove}
       onPointerUp={onUp}
