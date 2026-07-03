@@ -1,7 +1,6 @@
 use crate::index::writer::ScanMode;
 use crate::index::IndexWriter;
 use crate::native::phase_timer::{PhaseTimer, PhaseTimingEntry};
-use crate::ontology::orchestrator::run_phase2;
 use crate::ontology::populators::BudgetTier;
 use crate::scanner::{ScanController, ScanEvent, ScanOptions, Scanner};
 use serde::{Deserialize, Serialize};
@@ -439,10 +438,45 @@ impl ScanJobManager {
                                 "enrichment",
                                 "phase 2 starting".to_owned(),
                             );
-                            match run_phase2(
+                            // Live enrichment progress: emit Running events the scan UI already
+                            // renders, and best-effort-mirror the count into the populator state
+                            // row so ontology_status (the Board's chip) shows it too.
+                            let progress_jobs = Arc::clone(&jobs);
+                            let progress_listener_arc = listener.clone();
+                            let progress_stats = stats.clone();
+                            let state_conn = crate::index::open_index_connection(&request.index_path)
+                                .ok()
+                                .map(Mutex::new);
+                            let total_files = stats.files_scanned;
+                            let enrichment_progress: crate::ontology::populators::PopulatorProgress =
+                                Arc::new(move |name: &str, visited: u64| {
+                                    push_event(
+                                        &progress_jobs,
+                                        job_id,
+                                        JobEventDto::running_with_progress(
+                                            job_id,
+                                            format!("Enrichment · {name}"),
+                                            &progress_stats,
+                                            visited.min(total_files),
+                                            total_files.max(1),
+                                        ),
+                                        progress_listener_arc.as_ref(),
+                                    );
+                                    if let Some(conn) = &state_conn {
+                                        if let Ok(conn) = conn.lock() {
+                                            let _ = conn.execute(
+                                                "UPDATE ontology_populator_state
+                                                 SET files_visited = ?2 WHERE populator_name = ?1",
+                                                rusqlite::params![name, visited as i64],
+                                            );
+                                        }
+                                    }
+                                });
+                            match crate::ontology::orchestrator::run_phase2_with_progress(
                                 &request.index_path,
                                 BudgetTier::CheapOnly,
                                 Arc::clone(&worker_enrichment_pause),
+                                Some(enrichment_progress),
                             ) {
                                 Ok(true) => emit_log(
                                     &jobs,

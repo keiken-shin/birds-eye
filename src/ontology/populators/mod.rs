@@ -39,11 +39,19 @@ impl BudgetTier {
     }
 }
 
-#[derive(Debug, Clone)]
+/// Throttled live-progress sink: (populator_name, files_visited_so_far).
+pub type PopulatorProgress = Arc<dyn Fn(&str, u64) + Send + Sync>;
+
+/// Files between progress callbacks — frequent enough to feel live, cheap enough to ignore.
+const PROGRESS_EVERY: u64 = 2_048;
+
+#[derive(Clone)]
 pub struct PopulatorContext {
     pub budget: BudgetTier,
     pub pause: Arc<AtomicBool>,
     counters: PopulatorReport,
+    progress: Option<PopulatorProgress>,
+    populator_name: String,
 }
 
 impl PopulatorContext {
@@ -52,7 +60,15 @@ impl PopulatorContext {
             budget,
             pause,
             counters: PopulatorReport::default(),
+            progress: None,
+            populator_name: String::new(),
         }
+    }
+
+    pub fn with_progress(mut self, progress: Option<PopulatorProgress>, name: &str) -> Self {
+        self.progress = progress;
+        self.populator_name = name.to_owned();
+        self
     }
 
     pub fn is_paused(&self) -> bool {
@@ -61,6 +77,11 @@ impl PopulatorContext {
 
     pub fn note_file(&mut self) {
         self.counters.files_visited += 1;
+        if self.counters.files_visited % PROGRESS_EVERY == 0 {
+            if let Some(progress) = &self.progress {
+                progress(&self.populator_name, self.counters.files_visited);
+            }
+        }
     }
 
     pub fn note_assertion(&mut self) {

@@ -189,6 +189,16 @@ impl PopulatorOrchestrator {
         budget: BudgetTier,
         pause: Arc<AtomicBool>,
     ) -> Result<Vec<(String, PopulatorOutcome)>, OntologyError> {
+        self.run_with_progress(conn, budget, pause, None)
+    }
+
+    pub fn run_with_progress(
+        &self,
+        conn: &mut Connection,
+        budget: BudgetTier,
+        pause: Arc<AtomicBool>,
+        progress: Option<crate::ontology::populators::PopulatorProgress>,
+    ) -> Result<Vec<(String, PopulatorOutcome)>, OntologyError> {
         let mut outcomes = Vec::new();
 
         for populator in self.ordered() {
@@ -204,7 +214,8 @@ impl PopulatorOrchestrator {
                     state.cursor.as_deref()
                 }
             });
-            let mut ctx = PopulatorContext::new(budget, Arc::clone(&pause));
+            let mut ctx = PopulatorContext::new(budget, Arc::clone(&pause))
+                .with_progress(progress.clone(), populator.name());
             upsert_state(
                 conn,
                 populator.name(),
@@ -278,12 +289,21 @@ pub fn run_phase2(
     budget: BudgetTier,
     pause: Arc<AtomicBool>,
 ) -> Result<bool, OntologyError> {
+    run_phase2_with_progress(index_path, budget, pause, None)
+}
+
+pub fn run_phase2_with_progress(
+    index_path: &Path,
+    budget: BudgetTier,
+    pause: Arc<AtomicBool>,
+    progress: Option<crate::ontology::populators::PopulatorProgress>,
+) -> Result<bool, OntologyError> {
     let mut conn = crate::index::open_index_connection(index_path)?;
     if !is_enabled(&conn)? {
         return Ok(false);
     }
 
-    PopulatorOrchestrator::default().run(&mut conn, budget, pause)?;
+    PopulatorOrchestrator::default().run_with_progress(&mut conn, budget, pause, progress)?;
     Ok(true)
 }
 

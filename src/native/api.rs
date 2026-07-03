@@ -943,6 +943,8 @@ pub struct OntologyStatusRequest {
 pub struct OntologyStatusDto {
     pub enabled: bool,
     pub pending_discoveries: u64,
+    /// Live files in the index — the denominator for populator progress.
+    pub total_files: u64,
     /// Per-populator progress so the UI can say "enrichment incomplete" honestly
     /// instead of rendering empty findings as "nothing found".
     pub populators: Vec<PopulatorStateDto>,
@@ -962,6 +964,9 @@ pub fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusD
     let enabled = enabled::is_enabled(&conn).map_err(|e| e.to_string())?;
     let pending_discoveries =
         crate::ontology::discoveries::count_pending(&conn).map_err(|e| e.to_string())?;
+    let total_files: i64 = conn
+        .query_row("SELECT COUNT(*) FROM files WHERE deleted_at IS NULL", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare_cached(
             "SELECT populator_name, status, files_visited, discoveries_emitted, last_error
@@ -981,7 +986,12 @@ pub fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusD
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
-    Ok(OntologyStatusDto { enabled, pending_discoveries, populators })
+    Ok(OntologyStatusDto {
+        enabled,
+        pending_discoveries,
+        total_files: total_files.max(0) as u64,
+        populators,
+    })
 }
 
 #[derive(Debug, Clone, Deserialize)]

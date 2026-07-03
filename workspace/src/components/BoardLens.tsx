@@ -9,6 +9,7 @@ import {
   type NativeDiscovery,
 } from "@bridge/nativeClient";
 import { useIndexData } from "../state/indexData";
+import { useScanController } from "../state/scanController";
 import { useWorkspace } from "../state/workspaceStore";
 import { FINDING_KINDS, baseName, parseFinding, type Finding } from "../lib/discoveries";
 import { VERDICT_STYLES, verdictForFolder } from "../lib/verdict";
@@ -270,9 +271,23 @@ export function BoardLens() {
   }, [savePositions]);
 
   // ---- enrichment status ----
+  // Prefer the live job stream (real-time while a scan's phase 2 runs); fall back to
+  // the persisted populator state (covers enrichment progress across app restarts).
+  const { view: jobView } = useScanController();
+  const liveEnrich =
+    jobView.status === "scanning" && jobView.message.startsWith("Enrichment") ? jobView : null;
   const running = ontology?.populators.filter((p) => p.status === "running" || p.status === "paused") ?? [];
   const failed = ontology?.populators.filter((p) => p.status === "failed") ?? [];
   const visited = running.reduce((s, p) => s + p.files_visited, 0);
+  const enrichLabel = liveEnrich
+    ? liveEnrich.message.replace("Enrichment · ", "")
+    : running.map((p) => p.name).join(", ");
+  const enrichPct = liveEnrich
+    ? Math.max(0, liveEnrich.pct)
+    : ontology?.total_files && visited > 0
+      ? Math.min(100, Math.round((visited / ontology.total_files) * 100))
+      : null;
+  const showEnrich = liveEnrich !== null || running.length > 0;
 
   const empty = !loading && !cards.length;
 
@@ -320,13 +335,20 @@ export function BoardLens() {
               </span>
             );
           })}
-          {running.length > 0 && (
-            <span
-              className="rounded-[8px] border border-primary/30 bg-panel/90 px-2.5 py-1 text-10 text-primary-ink"
-              style={{ animation: "bePulse 1.8s ease infinite" }}
-            >
-              ⟳ enrichment in progress ({running.map((p) => p.name).join(", ")}
-              {visited > 0 ? ` · ${visited.toLocaleString()} files` : ""}) — findings land here
+          {showEnrich && (
+            <span className="flex items-center gap-2 rounded-[8px] border border-primary/30 bg-panel/90 px-2.5 py-1 text-10 text-primary-ink">
+              <span>⟳ enrichment · {enrichLabel}</span>
+              {enrichPct !== null && (
+                <>
+                  <span className="relative h-[4px] w-[90px] overflow-hidden rounded-full bg-white/10">
+                    <span
+                      className="absolute inset-y-0 left-0 rounded-full bg-primary transition-[width] duration-500"
+                      style={{ width: `${enrichPct}%` }}
+                    />
+                  </span>
+                  <span className="mono">{Math.round(enrichPct)}%</span>
+                </>
+              )}
             </span>
           )}
           {failed.length > 0 && (
@@ -358,7 +380,7 @@ export function BoardLens() {
 
       {empty && (
         <div className="absolute inset-0 z-10 flex items-center justify-center text-center text-12 italic text-label">
-          {running.length
+          {showEnrich
             ? "Enrichment is running — findings appear here as they're discovered."
             : "Nothing on the board yet. Findings land here after enrichment; pin folders from the Inspector."}
         </div>
