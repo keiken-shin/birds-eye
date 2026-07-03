@@ -1,43 +1,47 @@
 import { useCallback, useState } from "react";
-import {
-  runOntologyEnrichment,
-  setOntologyEnabled as setOntologyEnabledNative,
-  type NativeEnrichmentBudget,
-} from "@bridge/nativeClient";
+import { setOntologyEnabled as setOntologyEnabledNative } from "@bridge/nativeClient";
+import { getDefaultStrategy } from "../lib/prefs";
 import { useIndexData } from "../state/indexData";
+import { useScanController } from "../state/scanController";
 import { useWorkspace } from "../state/workspaceStore";
 
 /**
- * Enable cleanup intelligence for the active index, then run enrichment so verdicts /
- * reclaimable / related actually populate, then refresh. Shared by the Inspector CTA and
- * the EnableIntelligence prompt so there is one source of truth for the opt-in flow.
+ * Enable cleanup intelligence for the active index, then hand enrichment to the scan job:
+ * an incremental rescan re-walks only what changed and its phase 2 runs the (cheap-budget)
+ * enrichment on a background thread with live progress in the scan queue overlay.
+ * The old path — awaiting `run_ontology_enrichment` inline — read file metadata for the
+ * whole drive with zero feedback; on a real index that is 10+ minutes of a button
+ * saying "Enriching…". Shared by the Inspector CTA and the EnableIntelligence prompt.
  */
 export function useEnableIntelligence() {
-  const { indexPath, ontologyEnabled } = useWorkspace();
-  const { refreshData } = useIndexData();
+  const { indexPath, ontologyEnabled, setOverlay } = useWorkspace();
+  const { refreshData, activeEntry } = useIndexData();
+  const { enqueue } = useScanController();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const enable = useCallback(
-    async (budget: NativeEnrichmentBudget = "standard") => {
-      if (!indexPath || busy) return;
-      setBusy(true);
-      setError(null);
-      try {
-        // No optimistic flip: `ontologyEnabled` is only turned on by refreshData's confirmed
-        // status read at the end, so a failure in enable OR enrichment leaves the prompt up
-        // with its error visible instead of silently unmounting it. `busy` covers the spinner.
-        await setOntologyEnabledNative(indexPath, true);
-        await runOntologyEnrichment(indexPath, budget);
-        await refreshData();
-      } catch (e) {
-        setError(String(e));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [indexPath, busy, refreshData]
-  );
+  const enable = useCallback(async () => {
+    if (!indexPath || busy) return;
+    const root = activeEntry?.root_path;
+    if (!root) {
+      setError("No scan root recorded for this index — run a new scan instead.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await setOntologyEnabledNative(indexPath, true);
+      // Confirmed enable flips the prompt away via refreshData's status read; verdicts
+      // stream in when the job's enrichment phase lands and onComplete refreshes again.
+      await refreshData();
+      enqueue(root, getDefaultStrategy());
+      setOverlay("queue");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [indexPath, busy, activeEntry, refreshData, enqueue, setOverlay]);
 
   return { enable, busy, error, enabled: ontologyEnabled };
 }

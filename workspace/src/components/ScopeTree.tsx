@@ -5,7 +5,7 @@ import { nodeName, type FolderNode } from "../lib/folderTree";
 import { VERDICT_STYLES, verdictForFolder } from "../lib/verdict";
 
 export function ScopeTree() {
-  const { tree, lensByPath, indexes, activeEntry } = useIndexData();
+  const { tree, lensByPath, indexes, activeEntry, status } = useIndexData();
   const { scopePath, selected, ontologyEnabled, setOverlay, select, setIndexPath, setScopePath } =
     useWorkspace();
 
@@ -81,7 +81,12 @@ export function ScopeTree() {
           );
         })}
         {!rows.length && (
-          <div className="px-2 py-3 text-11 italic text-label">No folders in scope.</div>
+          <div
+            className="px-2 py-3 text-11 italic text-label"
+            style={status === "loading" ? { animation: "bePulse 1.6s ease infinite" } : undefined}
+          >
+            {status === "loading" ? "Loading index…" : "No folders in scope."}
+          </div>
         )}
 
         <div className="mx-1 mb-2 mt-3.5 text-10 tracking-[0.14em] text-label">◷ RECENT SCANS</div>

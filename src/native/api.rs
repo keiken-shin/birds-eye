@@ -288,7 +288,29 @@ pub fn treemap_lens_data(request: TreemapLensRequest) -> Result<Vec<TreemapLensF
     treemap_lens_data_for_conn(&conn).map_err(|e| e.to_string())
 }
 
+/// Every ancestor prefix of `path` (including `path` itself), longest first:
+/// `a/b/c.txt` → `a/b/c.txt`, `a/b`, `a`. Handles both separators.
+fn path_ancestors(path: &str) -> impl Iterator<Item = &str> {
+    let mut cur = Some(path);
+    std::iter::from_fn(move || {
+        let out = cur?;
+        cur = out.rfind(['/', '\\']).map(|i| &out[..i]).filter(|p| !p.is_empty());
+        Some(out)
+    })
+}
+
 fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<TreemapLensFolderDto>> {
+    // Folder paths once; file rows attribute to their ancestor folders in Rust. The previous
+    // SQL prefix-join (folders × files ON LIKE) was O(folders·files) — unusable on real indexes.
+    let mut folder_paths = conn
+        .prepare_cached("SELECT path FROM folders")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    folder_paths.sort();
+    folder_paths.dedup();
+    let folder_set: std::collections::HashSet<&str> =
+        folder_paths.iter().map(String::as_str).collect();
+
     let mut role = DominantByFolder::default();
     let mut replaceability = DominantByFolder::default();
     let mut lifecycle = DominantByFolder::default();
@@ -296,7 +318,7 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
     let mut reclaimable: HashMap<String, i64> = HashMap::new();
 
     let mut stmt = conn.prepare_cached(
-        "SELECT fo.path AS folder_path,
+        "SELECT f.path,
                 COALESCE(f.size, 0) AS size,
                 (SELECT a.value FROM ontology_attrs a
                  WHERE a.entity_id = e.id AND a.key = 'role' AND a.display_in_global_views = 1
@@ -309,10 +331,9 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
                  JOIN ontology_attrs pa ON pa.entity_id = pe.id AND pa.key = 'lifecycle' AND pa.display_in_global_views = 1
                  WHERE r.subject_id = e.id AND r.predicate = 'partOf'
                  ORDER BY pa.confidence DESC, pa.asserted_at DESC LIMIT 1) AS lifecycle
-         FROM folders fo
-         JOIN files f ON f.deleted_at IS NULL
-              AND (f.path = fo.path OR f.path LIKE fo.path || '/%' OR f.path LIKE fo.path || '\\%')
-         JOIN ontology_entities e ON e.kind = 'File' AND e.linked_file_id = f.id",
+         FROM files f
+         JOIN ontology_entities e ON e.kind = 'File' AND e.linked_file_id = f.id
+         WHERE f.deleted_at IS NULL",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -325,19 +346,18 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
     })?;
 
     for row in rows {
-        let (folder_path, size, row_role, row_replaceability, row_lifecycle) = row?;
-        role.add(&folder_path, row_role.as_deref(), size);
-        replaceability.add(&folder_path, row_replaceability.as_deref(), size);
-        lifecycle.add(&folder_path, row_lifecycle.as_deref(), size);
+        let (file_path, size, row_role, row_replaceability, row_lifecycle) = row?;
+        for ancestor in path_ancestors(&file_path) {
+            if !folder_set.contains(ancestor) {
+                continue;
+            }
+            role.add(ancestor, row_role.as_deref(), size);
+            replaceability.add(ancestor, row_replaceability.as_deref(), size);
+            lifecycle.add(ancestor, row_lifecycle.as_deref(), size);
+        }
     }
 
-    let mut stmt = conn.prepare_cached(
-        "SELECT fo.path AS folder_path, c.reason, SUM(c.size) AS reclaimable_bytes
-         FROM folders fo
-         JOIN v_cleanup_candidates c
-              ON c.path = fo.path OR c.path LIKE fo.path || '/%' OR c.path LIKE fo.path || '\\%'
-         GROUP BY fo.path, c.reason",
-    )?;
+    let mut stmt = conn.prepare_cached("SELECT path, reason, size FROM v_cleanup_candidates")?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -347,18 +367,15 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
     })?;
 
     for row in rows {
-        let (folder_path, reason, bytes) = row?;
-        cleanup_reason.add(&folder_path, Some(&reason), bytes);
-        *reclaimable.entry(folder_path).or_insert(0) += bytes;
+        let (file_path, reason, bytes) = row?;
+        for ancestor in path_ancestors(&file_path) {
+            if !folder_set.contains(ancestor) {
+                continue;
+            }
+            cleanup_reason.add(ancestor, Some(&reason), bytes);
+            *reclaimable.entry(ancestor.to_owned()).or_insert(0) += bytes;
+        }
     }
-
-    let mut folder_paths = conn
-        .prepare_cached("SELECT path FROM folders ORDER BY total_bytes DESC, path ASC")?
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-
-    folder_paths.sort();
-    folder_paths.dedup();
 
     Ok(folder_paths
         .into_iter()
@@ -375,7 +392,7 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
 
 #[derive(Default)]
 struct DominantByFolder {
-    bytes: HashMap<(String, String), i64>,
+    bytes: HashMap<String, HashMap<String, i64>>,
 }
 
 impl DominantByFolder {
@@ -385,20 +402,23 @@ impl DominantByFolder {
         };
         *self
             .bytes
-            .entry((folder_path.to_owned(), value.to_owned()))
+            .entry(folder_path.to_owned())
+            .or_default()
+            .entry(value.to_owned())
             .or_insert(0) += bytes.max(0);
     }
 
     fn get(&self, folder_path: &str) -> Option<String> {
-        self.bytes
-            .iter()
-            .filter(|((path, _), _)| path == folder_path)
-            .max_by(|((_, left_value), left_bytes), ((_, right_value), right_bytes)| {
-                left_bytes
-                    .cmp(right_bytes)
-                    .then_with(|| right_value.cmp(left_value))
-            })
-            .map(|((_, value), _)| value.clone())
+        self.bytes.get(folder_path).and_then(|values| {
+            values
+                .iter()
+                .max_by(|(left_value, left_bytes), (right_value, right_bytes)| {
+                    left_bytes
+                        .cmp(right_bytes)
+                        .then_with(|| right_value.cmp(left_value))
+                })
+                .map(|(value, _)| value.clone())
+        })
     }
 }
 

@@ -9,8 +9,9 @@ import { NEUTRAL_STYLE, VERDICT_STYLES, verdictForFolder } from "../lib/verdict"
 const GAP = 3;
 
 export function TreemapLens() {
-  const { tree, lensByPath } = useIndexData();
-  const { scopePath, selected, ontologyEnabled, select, drillInto, isStaged } = useWorkspace();
+  const { tree, lensByPath, status, error, refreshData } = useIndexData();
+  const { scopePath, selected, ontologyEnabled, select, drillInto, isStaged, setOverlay } =
+    useWorkspace();
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ w: 640, h: 560 });
   const [hover, setHover] = useState<string | null>(null);
@@ -97,13 +98,45 @@ export function TreemapLens() {
         );
       })}
 
-      {!rects.length && (
-        <div className="flex h-full items-center justify-center text-12 italic text-label">
-          {tree
-            ? "No subfolders at this scope — select a parent or scan a folder with nested directories."
-            : "Scan a folder to see its storage map."}
-        </div>
-      )}
+      {!rects.length &&
+        (status === "loading" ? (
+          <div className="flex h-full items-center justify-center">
+            <span className="text-13 text-label" style={{ animation: "bePulse 1.6s ease infinite" }}>
+              Loading index…
+            </span>
+          </div>
+        ) : status === "error" ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3">
+            <div className="max-w-[440px] text-center text-12 leading-relaxed text-danger">
+              Couldn't read this index: {error}
+            </div>
+            <button
+              type="button"
+              onClick={() => void refreshData()}
+              className="rounded-[8px] border border-line-modal px-4 py-2 text-12 text-muted hover:text-ink"
+            >
+              Retry
+            </button>
+          </div>
+        ) : tree ? (
+          <div className="flex h-full items-center justify-center text-12 italic text-label">
+            No subfolders at this scope — select a parent or scan a folder with nested directories.
+          </div>
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-4">
+            <div className="text-[15px] font-medium text-muted">No storage indexed yet</div>
+            <div className="max-w-[380px] text-center text-12 leading-relaxed text-label">
+              Scan a folder or drive to map what's inside it — everything stays on this machine.
+            </div>
+            <button
+              type="button"
+              onClick={() => setOverlay("scan")}
+              className="rounded-[9px] bg-primary px-6 py-2.5 text-13 font-semibold text-on-primary"
+            >
+              ◎ Scan a folder
+            </button>
+          </div>
+        ))}
     </div>
   );
 }

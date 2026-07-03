@@ -22,13 +22,14 @@ export function EnableIntelligence() {
 
   return (
     <div className="be-in absolute bottom-[74px] left-1/2 z-[55] w-[min(520px,calc(100%-32px))] -translate-x-1/2 rounded-[12px] border border-primary/40 bg-overlay p-4 shadow-[0_18px_70px_rgba(0,0,0,.58)]">
-      <div className="mb-1 text-13 font-semibold text-primary">Cleanup intelligence</div>
-      <div className="mb-3 text-[11.5px] leading-relaxed text-muted">
+      <div className="mb-1.5 text-[15px] font-semibold text-primary">Cleanup intelligence</div>
+      <div className="mb-3 text-[12.5px] leading-relaxed text-muted">
         Classify this index to reveal safety verdicts, what's reclaimable, and why each folder
-        exists. Enabling is non-destructive and reversible at any time.
+        exists. Runs as a background scan with live progress — non-destructive and reversible
+        at any time.
       </div>
       {error && (
-        <div className="mb-3 rounded-[7px] border border-danger/30 bg-danger/[0.08] px-3 py-2 text-[11px] text-danger">
+        <div className="mb-3 rounded-[7px] border border-danger/30 bg-danger/[0.08] px-3 py-2 text-[11.5px] text-danger">
           Couldn't enable: {error}
         </div>
       )}
@@ -36,7 +37,7 @@ export function EnableIntelligence() {
         <button
           type="button"
           onClick={dismiss}
-          className="mono rounded-[7px] border border-white/15 px-3.5 py-1.5 text-11 text-white/60"
+          className="rounded-[7px] border border-white/15 px-4 py-2 text-12 text-white/60"
         >
           Not now
         </button>
@@ -44,9 +45,9 @@ export function EnableIntelligence() {
           type="button"
           disabled={busy}
           onClick={() => void enable()}
-          className="rounded-[7px] bg-primary px-3.5 py-1.5 text-11 font-semibold text-on-primary disabled:opacity-50"
+          className="rounded-[7px] bg-primary px-4 py-2 text-12 font-semibold text-on-primary disabled:opacity-50"
         >
-          {busy ? "Enriching…" : "Enable & enrich"}
+          {busy ? "Starting…" : "Enable intelligence"}
         </button>
       </div>
     </div>
