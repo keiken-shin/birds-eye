@@ -3,9 +3,8 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 
-// `@bridge` resolves to the existing frontend's source so the new shell reuses the
-// backend bridge (nativeClient.ts) and domain helpers verbatim — no copy, no drift.
-const bridge = fileURLToPath(new URL("../frontend/src", import.meta.url));
+// `@bridge` is the Tauri backend bridge (nativeClient.ts) and domain helpers.
+const bridge = fileURLToPath(new URL("./src/bridge", import.meta.url));
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -16,8 +15,6 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5174,
     strictPort: true,
-    // Allow importing files from the sibling frontend/src (outside this root).
-    fs: { allow: [".."] },
   },
   test: {
     environment: "jsdom",

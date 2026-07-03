@@ -16,9 +16,9 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "paths": {
-      "@bridge/*": ["../frontend/src/*"]
+      "@bridge/*": ["./src/bridge/*"]
     }
   },
-  "include": ["src", "../frontend/src/nativeClient.ts", "../frontend/src/domain.ts"],
+  "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

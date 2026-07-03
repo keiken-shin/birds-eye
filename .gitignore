@@ -1,7 +1,5 @@
 /target/
 /src-tauri/target/
-/frontend/node_modules/
-/frontend/dist/
 /workspace/dist/
 /workspace/node_modules/
 
