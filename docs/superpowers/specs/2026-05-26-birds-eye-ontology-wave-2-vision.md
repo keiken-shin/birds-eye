@@ -2,7 +2,7 @@
 
 *Companion document to the Wave 1 spec. Captures the cognition-side ambition so it isn't lost while Wave 1 ships.*
 
-*Date: 2026-05-26. Status: Vision (not yet a buildable spec). Authored alongside the Wave 1 spec to preserve the unified ontology view from the original design dialogue (see `2026-05-26-birds-eye-ontology-chapters-1-6.md`).*
+*Date: 2026-05-26. Status: Vision (not yet a buildable spec) — **deferred to post-release**; Wave 1 is shipped and this document is the starting point for a future Wave 2 spec, not current scope. Authored alongside the Wave 1 spec to preserve the unified ontology view from the original design dialogue (see `2026-05-26-birds-eye-ontology-chapters-1-6.md`).*
 
 ---
 
