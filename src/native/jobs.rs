@@ -349,6 +349,10 @@ impl ScanJobManager {
 
                 if !was_completed {
                     // Cancelled or Failed: emit immediately, no refinement.
+                    // Close our file handles first — a terminal event promises the
+                    // index (and its directory) is free for others to open or remove.
+                    log_file.borrow_mut().take();
+                    drop(writer);
                     push_event(&jobs, job_id, event, listener.as_ref());
                 } else if let Some(stats) = completed_stats {
                     // Run refinement first with Running-status progress events, then emit
@@ -470,9 +474,14 @@ impl ScanJobManager {
                             }
                             let completed =
                                 terminal_after_enrichment(completed, &worker_enrichment_pause);
+                            // Terminal event = "index is free": close handles first.
+                            log_file.borrow_mut().take();
+                            drop(writer);
                             push_event(&jobs, job_id, completed, listener.as_ref());
                         }
                         Err(error) => {
+                            log_file.borrow_mut().take();
+                            drop(writer);
                             push_event(
                                 &jobs,
                                 job_id,
@@ -486,6 +495,8 @@ impl ScanJobManager {
                     }
                 } else {
                     // Completed but no stats (unexpected) — emit as-is.
+                    log_file.borrow_mut().take();
+                    drop(writer);
                     push_event(&jobs, job_id, event, listener.as_ref());
                 }
             }

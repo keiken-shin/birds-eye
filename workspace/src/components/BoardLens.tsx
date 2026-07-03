@@ -12,6 +12,7 @@ import { useIndexData } from "../state/indexData";
 import { useWorkspace } from "../state/workspaceStore";
 import { FINDING_KINDS, baseName, parseFinding, type Finding } from "../lib/discoveries";
 import { VERDICT_STYLES, verdictForFolder } from "../lib/verdict";
+import { DuplicatesSection } from "./DuplicatesSection";
 import { EnableIntelligenceCard } from "./EnableIntelligenceCard";
 import type { PinnedCard } from "../state/types";
 
@@ -28,7 +29,7 @@ import type { PinnedCard } from "../state/types";
  */
 export function BoardLens() {
   const { ontologyEnabled, indexPath, pinned, unpinCard, select, selected } = useWorkspace();
-  const { lensByPath, dataVersion } = useIndexData();
+  const { lensByPath, dataVersion, overview } = useIndexData();
   const [findings, setFindings] = useState<Finding[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -102,21 +103,8 @@ export function BoardLens() {
     [load]
   );
 
-  if (!ontologyEnabled) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-6">
-        <div className="w-[440px]">
-          <div className="mb-3 text-center text-12 text-label">
-            The Board shows relationships found during enrichment — enable intelligence to
-            populate it.
-          </div>
-          <EnableIntelligenceCard />
-        </div>
-      </div>
-    );
-  }
-
-  const empty = !loading && !findings.length && !pinned.length;
+  const hasDuplicates = (overview?.duplicate_groups.length ?? 0) > 0;
+  const empty = !loading && !findings.length && !pinned.length && !hasDuplicates;
 
   return (
     <div className="relative min-h-0 flex-1 overflow-auto p-5">
@@ -128,12 +116,30 @@ export function BoardLens() {
 
       {empty ? (
         <div className="flex h-full items-center justify-center text-center text-12 italic text-label">
-          No relationships found yet. Confirm findings from enrichment, or pin a folder
-          <br />
-          from the map (Inspector → Pin to board).
+          {ontologyEnabled ? (
+            <>
+              No duplicates or relationships found yet. Run a scan with the Smart strategy for
+              <br />
+              duplicate detection, or pin a folder from the map (Inspector → Pin to board).
+            </>
+          ) : (
+            <div className="w-[440px] not-italic">
+              <div className="mb-3 text-center text-12 text-label">
+                The Board shows duplicates and relationships — enable intelligence for
+                relationship findings.
+              </div>
+              <EnableIntelligenceCard />
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-4">
+          <DuplicatesSection />
+          {!ontologyEnabled && (
+            <div className="w-[440px]">
+              <EnableIntelligenceCard />
+            </div>
+          )}
           {pinned.length > 0 && (
             <div className="flex flex-wrap content-start gap-4">
               {pinned.map((card) => (

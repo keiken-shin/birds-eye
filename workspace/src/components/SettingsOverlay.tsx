@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { ScanStrategy } from "@bridge/domain";
+import { useIndexData } from "../state/indexData";
+import { useScanController } from "../state/scanController";
 import { useWorkspace } from "../state/workspaceStore";
 import { getDefaultStrategy, setDefaultStrategy } from "../lib/prefs";
 
@@ -15,8 +17,17 @@ const STRATEGIES: Array<{ id: ScanStrategy; title: string; note: string }> = [
  * knobs — they'd only half-apply over the half-tokenized styles, which would be theater.
  */
 export function SettingsOverlay() {
-  const { overlay, setOverlay } = useWorkspace();
+  const { overlay, setOverlay, ontologyEnabled } = useWorkspace();
+  const { activeEntry } = useIndexData();
+  const { enqueue } = useScanController();
   const [strategy, setStrategy] = useState<ScanStrategy>(getDefaultStrategy);
+
+  const rerunEnrichment = () => {
+    if (!activeEntry?.root_path) return;
+    // An incremental rescan's phase 2 re-runs enrichment with live progress.
+    enqueue(activeEntry.root_path, strategy);
+    setOverlay("queue");
+  };
 
   if (overlay !== "settings") return null;
   const close = () => setOverlay(null);
@@ -70,6 +81,27 @@ export function SettingsOverlay() {
             </div>
             <div className="mt-1.5 text-10 text-dim">New scans start on this; you can still switch per scan.</div>
           </div>
+
+          {ontologyEnabled && activeEntry?.root_path && (
+            <div>
+              <div className="mb-2 text-[9.5px] tracking-[0.14em] text-label">INTELLIGENCE</div>
+              <div className="flex items-center justify-between rounded-[8px] border border-line bg-inset px-3 py-2.5">
+                <div>
+                  <div className="text-12 text-muted">Re-run enrichment</div>
+                  <div className="mt-0.5 text-10 text-dim">
+                    Incremental rescan of {activeEntry.root_path} — refreshes verdicts and findings.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={rerunEnrichment}
+                  className="flex-none rounded-[7px] border border-primary/40 px-3 py-1.5 text-11 font-semibold text-primary-ink"
+                >
+                  Run now
+                </button>
+              </div>
+            </div>
+          )}
 
           <div>
             <div className="mb-2 text-[9.5px] tracking-[0.14em] text-label">APPEARANCE</div>

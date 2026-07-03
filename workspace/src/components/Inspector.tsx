@@ -5,6 +5,7 @@ import { useIndexData } from "../state/indexData";
 import { useWorkspace } from "../state/workspaceStore";
 import { VERDICT_STYLES, canStage, explainFolder, verdictForFolder } from "../lib/verdict";
 import { EnableIntelligenceCard } from "./EnableIntelligenceCard";
+import { FilePreview } from "./FilePreview";
 
 function Label({ children }: { children: React.ReactNode }) {
   return <div className="mb-1.5 text-10 tracking-[0.12em] text-label">{children}</div>;
@@ -100,6 +101,7 @@ export function Inspector() {
 
             {isFile ? (
               <>
+                <FilePreview path={selected.path} />
                 <div className="mb-3 text-[11.5px] leading-relaxed text-label">
                   A single file from the results. Folder-level verdicts and "why it exists" live on
                   the map — select its folder there for the full picture. Stage it below to add it

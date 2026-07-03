@@ -1,4 +1,4 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ScanStrategy } from "./domain";
@@ -167,6 +167,11 @@ export async function allowPreviewRoot(indexPath: string) {
   return invoke<string>("allow_preview_root", { indexPath });
 }
 
+/** Webview-loadable URL for a local file (valid only under a root allowed above). */
+export function previewSrc(path: string) {
+  return convertFileSrc(path);
+}
+
 export async function listNativeIndexes() {
   return invoke<NativeIndexEntry[]>("list_indexes");
 }
@@ -211,7 +216,7 @@ export type NativeCleanupLogEntry = {
   size: number;
   cleaned_at: number;
   reason: string;
-  restore_status: "in_recycle_bin" | "restored" | "expired";
+  restore_status: "pending" | "in_recycle_bin" | "restored" | "expired";
   expires_at: number | null;
 };
 
