@@ -1,6 +1,11 @@
 @import "tailwindcss";
 
-/* Dark theme tokens lifted from docs/goal/Birds Eye Workspace.dc.html (the hi-fi target). */
+/*
+ * Bird's Eye design tokens.
+ * Dark theme lifted from docs/goal/Birds Eye Workspace.dc.html (the hi-fi target),
+ * extended with the validated category palette (docs/reimagine.md).
+ * Every color in the app routes through these tokens — no hardcoded literals.
+ */
 @theme {
   /* Surfaces */
   --color-base: #0a0b0d; /* app backdrop */
@@ -10,14 +15,16 @@
   --color-inset: #111317; /* cards, inputs-on-panel */
   --color-field: #0b0c0f; /* command input bg */
   --color-overlay: #13151a; /* modals / toasts */
+  --color-raised: #191c22; /* disabled fills, keep-verdict bg */
 
   /* Lines */
   --color-line: #1e2128;
   --color-line-soft: #1a1d23;
   --color-line-input: #23262d;
   --color-line-modal: #2a2e36;
+  --color-line-strong: #3a3f48;
 
-  /* Text */
+  /* Text ramp */
   --color-ink: #e6e8ea;
   --color-ink-soft: #c4c9d2;
   --color-muted: #9aa0a8;
@@ -25,19 +32,48 @@
   --color-dim: #6b7178;
   --color-label: #5b616a;
 
-  /* Accents */
-  /* ponytail: accent is fixed green; ~24 components hardcode the literal (#3ddc84 / rgba(61,220,132))
-     instead of this var, so a runtime accent picker would only half-apply. Route those literals
-     through --color-primary before exposing an accent setting. */
+  /* Accent (single source of truth — components must use these, never literals) */
   --color-primary: #3ddc84;
   --color-on-primary: #06140c;
   --color-primary-ink: #7fe0a6;
   --color-primary-bright: #aef0c8;
+  --color-primary-dim: color-mix(in srgb, var(--color-primary) 13%, transparent);
+  --color-primary-wash: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  --color-primary-edge: color-mix(in srgb, var(--color-primary) 32%, transparent);
   --color-history: #5b8cff;
   --color-warn: #e0a44a;
   --color-danger: #e06a5a;
 
-  /* Numeric scale used across the mock */
+  /* Verdict palette (safe / review / protected / keep) — bg · border · text */
+  --color-safe-bg: #15311f;
+  --color-safe-bd: #2f7d4e;
+  --color-safe-tx: #7fe0a6;
+  --color-review-bg: #23262e;
+  --color-review-bd: #3a4150;
+  --color-review-tx: #cdd2da;
+  --color-protected-bg: #2a2417;
+  --color-protected-bd: #6b5630;
+  --color-protected-tx: #e0c489;
+  --color-keep-bg: #191c22;
+  --color-keep-bd: #2a2f38;
+  --color-keep-tx: #aab0b8;
+
+  /* Category palette — media kinds, CVD-validated as a set on --color-window */
+  --color-cat-video: #d1651f;
+  --color-cat-code: #4b82e8;
+  --color-cat-document: #bd8813;
+  --color-cat-archive: #9177ee;
+  --color-cat-model: #7f8c1a;
+  --color-cat-music: #d15590;
+  --color-cat-photo: #22a3c9;
+  --color-cat-installer: #d0544a;
+  --color-cat-other: #5f6672;
+
+  /* Chart chrome */
+  --color-grid: #1c1f26;
+  --color-axis: #2b303a;
+
+  /* Numeric type scale (dense desktop-app ramp) */
   --text-9: 0.5625rem;
   --text-10: 0.625rem;
   --text-105: 0.656rem;
@@ -47,8 +83,12 @@
   --text-125: 0.781rem;
   --text-13: 0.8125rem;
   --text-135: 0.844rem;
+  --text-15: 0.9375rem;
 
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: "Space Grotesk Variable", "Space Grotesk", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
+    monospace;
 }
 
 * {
@@ -64,11 +104,11 @@ body,
 body {
   background: var(--color-base);
   color: var(--color-ink);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 ::selection {
-  background: rgba(61, 220, 132, 0.3);
+  background: color-mix(in srgb, var(--color-primary) 30%, transparent);
 }
 .mono {
   font-family: var(--font-mono);
@@ -80,6 +120,12 @@ button:not(:disabled) {
 }
 button:disabled {
   cursor: not-allowed;
+}
+
+/* Keyboard focus is always visible, mouse focus stays quiet. */
+:focus-visible {
+  outline: 2px solid var(--color-primary-edge);
+  outline-offset: 1px;
 }
 
 ::-webkit-scrollbar {
@@ -116,10 +162,43 @@ button:disabled {
 .be-in {
   animation: beIn 0.18s ease;
 }
+@keyframes beRise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* Staggered card entrance for dashboard sections. */
+.be-rise {
+  animation: beRise 0.35s ease both;
+}
+.be-d1 {
+  animation-delay: 0.05s;
+}
+.be-d2 {
+  animation-delay: 0.1s;
+}
+.be-d3 {
+  animation-delay: 0.15s;
+}
+.be-d4 {
+  animation-delay: 0.2s;
+}
+
+/* The open-canvas signature: dot grid on any pan/zoom surface. */
+.be-canvas {
+  background-image: radial-gradient(circle at 1px 1px, #23262d 1.2px, transparent 0);
+  background-size: 24px 24px;
+}
 
 /* Honor the OS "reduce motion" preference natively — no toggle, no state. */
 @media (prefers-reduced-motion: reduce) {
-  .be-in {
+  .be-in,
+  .be-rise {
     animation: none;
   }
   * {

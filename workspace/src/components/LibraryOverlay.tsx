@@ -1,8 +1,28 @@
 import { useState, useEffect, useRef } from "react";
-import { recentlyCleaned, restoreCleanupEntry, type NativeCleanupLogEntry } from "@bridge/nativeClient";
-import { formatBytes, lastSegment } from "@bridge/domain";
+import { ArchiveRestore } from "lucide-react";
+import {
+  recentlyCleaned,
+  restoreCleanupEntry,
+  type NativeCleanupLogEntry,
+} from "@bridge/nativeClient";
+import { formatBytes, formatCount, lastSegment } from "@bridge/domain";
 import { useWorkspace } from "../state/workspaceStore";
 import { useIndexData } from "../state/indexData";
+import { OverlayShell } from "./ui/OverlayShell";
+import { Button } from "./ui/Button";
+import { Card, EmptyState } from "./ui/Card";
+import { Tag } from "./ui/Chip";
+
+type RestoreStatus = NativeCleanupLogEntry["restore_status"];
+
+const STATUS_TAG: Record<RestoreStatus, { tone: "green" | "neutral" | "blue"; label: string }> = {
+  in_recycle_bin: { tone: "green", label: "RECYCLE BIN" },
+  restored: { tone: "neutral", label: "RESTORED" },
+  expired: { tone: "neutral", label: "EXPIRED" },
+  pending: { tone: "blue", label: "PENDING" },
+};
+
+const RESTORABLE = new Set<RestoreStatus>(["in_recycle_bin", "pending"]);
 
 export function LibraryOverlay() {
   const { overlay, setOverlay, indexPath } = useWorkspace();
@@ -54,113 +74,92 @@ export function LibraryOverlay() {
 
   if (overlay !== "library") return null;
 
-  const statusPill = (status: NativeCleanupLogEntry["restore_status"]) => {
-    if (status === "in_recycle_bin") {
-      return (
-        <span className="rounded-[5px] bg-primary/[0.15] px-1.5 py-0.5 text-10 text-primary-ink">
-          In recycle bin
-        </span>
-      );
-    }
-    if (status === "restored") {
-      return (
-        <span className="rounded-[5px] bg-overlay px-1.5 py-0.5 text-10 text-muted border border-line-modal">
-          Restored
-        </span>
-      );
-    }
-    return (
-      <span className="rounded-[5px] px-1.5 py-0.5 text-10 text-dim">
-        Expired
-      </span>
-    );
-  };
+  const restorable = entries.filter((e) => RESTORABLE.has(e.restore_status)).length;
+  const nowSec = Math.floor(Date.now() / 1000);
 
   return (
-    <div
-      className="absolute inset-0 z-40 flex items-center justify-center bg-[rgba(6,7,9,.66)] backdrop-blur-[3px]"
-      onClick={close}
+    <OverlayShell
+      title="Recently cleaned"
+      meta={
+        !loading && !error && indexPath ? `${formatCount(restorable)} restorable` : undefined
+      }
+      width={580}
+      onClose={close}
     >
-      <div
-        className="be-in flex max-h-[660px] w-[580px] flex-col overflow-hidden rounded-[14px] border border-line-modal bg-overlay shadow-[0_30px_80px_-20px_rgba(0,0,0,.8)]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center gap-2.5 border-b border-line px-4.5 py-4" style={{ paddingInline: 18 }}>
-          <span className="text-[15px] font-semibold">Library</span>
-          <span className="text-11 text-dim">recently cleaned · recoverable for 30 days</span>
-          {!loading && !error && indexPath && (
-            <span className="mono text-11 text-label">
-              {entries.length} {entries.length === 1 ? "item" : "items"}
-            </span>
-          )}
-          <button type="button" onClick={close} className="ml-auto text-[16px] text-dim hover:text-ink">
-            ✕
-          </button>
+      <div className="px-4.5 py-3.5">
+        <div className="mb-3 text-105 leading-relaxed text-dim">
+          Everything Bird's Eye cleans goes to the Windows Recycle Bin first and is tracked here
+          for 30 days — restore it with one click. Files deleted outside Bird's Eye don't appear.
         </div>
-
-        {/* Body */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-4.5 py-3.5" style={{ paddingInline: 18 }}>
-          {loading && (
-            <div className="py-6 text-center text-12 text-muted">Loading cleaned items…</div>
-          )}
-          {error && (
-            <div className="py-3 text-12 text-danger">{error}</div>
-          )}
-          {!loading && !indexPath && (
-            <div className="py-6 text-12 italic text-label">Scan a folder first.</div>
-          )}
-          {!loading && indexPath && entries.length === 0 && !error && (
-            <div className="py-6 text-12 italic text-label">
-              Nothing cleaned yet — quarantined items will appear here, recoverable for 30 days.
-            </div>
-          )}
-          {!loading && entries.length > 0 && (
-            <div className="flex flex-col gap-2">
-              {entries.map((entry) => {
-                const isRestoring = restoringId === entry.id;
-                const canRestore = entry.restore_status === "in_recycle_bin";
-                return (
-                  <div
-                    key={entry.id}
-                    className="flex items-start gap-2.5 rounded-[9px] border border-line-modal bg-window px-3 py-2.5"
+        {loading && <div className="py-6 text-center text-12 text-muted">Loading cleaned items…</div>}
+        {error && <div className="py-3 text-12 text-danger">{error}</div>}
+        {!loading && !indexPath && (
+          <div className="py-6 text-center text-12 text-faint">
+            Scan a folder first — cleaned items appear here.
+          </div>
+        )}
+        {!loading && indexPath && entries.length === 0 && !error && (
+          <EmptyState
+            icon={ArchiveRestore}
+            title="Nothing cleaned yet"
+            hint="Items you clean land here first — restorable for 30 days before they expire."
+          />
+        )}
+        {!loading && entries.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {entries.map((entry) => {
+              const isRestoring = restoringId === entry.id;
+              const canRestore = RESTORABLE.has(entry.restore_status);
+              const tag = STATUS_TAG[entry.restore_status];
+              const daysLeft =
+                entry.expires_at !== null && canRestore
+                  ? Math.ceil((entry.expires_at - nowSec) / 86_400)
+                  : null;
+              return (
+                <Card key={entry.id} className="flex items-center gap-3 px-3 py-2.5">
+                  <span
+                    className={`flex h-8 w-8 flex-none items-center justify-center rounded-lg ${
+                      canRestore ? "bg-primary-dim text-primary-ink" : "bg-raised text-faint"
+                    }`}
                   >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-13" title={entry.original_path}>
+                    <ArchiveRestore size={15} strokeWidth={2} aria-hidden />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-125 font-medium text-ink">
                         {lastSegment(entry.original_path)}
-                      </div>
-                      <div
-                        className="mono mt-0.5 truncate text-[10.5px] text-dim"
-                        title={entry.original_path}
-                      >
-                        {entry.original_path}
-                      </div>
-                      <div className="mt-1 flex items-center gap-2 text-10 text-muted">
-                        <span className="mono">{formatBytes(entry.size)}</span>
-                        <span className="text-label">·</span>
-                        <span>{new Date(entry.cleaned_at * 1000).toLocaleDateString()}</span>
-                      </div>
+                      </span>
+                      <Tag tone={tag.tone}>{tag.label}</Tag>
                     </div>
-                    <div className="flex flex-none flex-col items-end gap-1.5 pt-0.5">
-                      {statusPill(entry.restore_status)}
-                      {canRestore && (
-                        <button
-                          type="button"
-                          disabled={isRestoring || restoringId !== null}
-                          onClick={() => void restore(entry)}
-                          className="rounded-[6px] border border-line-modal px-2.5 py-1 text-11 text-ink-soft hover:text-ink disabled:opacity-50"
-                        >
-                          {isRestoring ? "Restoring…" : "Restore"}
-                        </button>
-                      )}
+                    <div className="mono truncate text-105 text-dim" title={entry.original_path}>
+                      {entry.original_path}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                  <div className="flex flex-none flex-col items-end gap-0.5">
+                    <span className="mono text-115 font-semibold text-ink-soft">
+                      {formatBytes(entry.size)}
+                    </span>
+                    {daysLeft !== null && daysLeft > 0 ? (
+                      <span className="mono text-105 text-dim">expires in {daysLeft}d</span>
+                    ) : null}
+                  </div>
+                  {canRestore ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="flex-none"
+                      disabled={isRestoring || restoringId !== null}
+                      onClick={() => void restore(entry)}
+                    >
+                      {isRestoring ? "Restoring…" : "Restore"}
+                    </Button>
+                  ) : null}
+                </Card>
+              );
+            })}
+          </div>
+        )}
       </div>
-    </div>
+    </OverlayShell>
   );
 }

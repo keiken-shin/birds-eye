@@ -85,6 +85,7 @@ pub struct FileSummaryDto {
     pub size: i64,
     pub extension: Option<String>,
     pub media_kind: String,
+    pub modified_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -111,6 +112,9 @@ pub struct DuplicateGroupSummaryDto {
     pub file_count: i64,
     pub reclaimable_bytes: i64,
     pub confidence: f64,
+    /// Up to a handful of member paths, largest first — lets the UI relate
+    /// groups to folders and findings without a per-group fetch.
+    pub sample_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -125,6 +129,10 @@ pub struct DuplicateFileSummaryDto {
 #[derive(Debug, Clone, Deserialize)]
 pub struct TrashFilesRequest {
     pub paths: Vec<String>,
+    /// When set, successfully trashed paths are marked deleted in this index so
+    /// the UI stays honest until the next rescan.
+    #[serde(default)]
+    pub index_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -210,6 +218,7 @@ pub struct TreemapLensFolderDto {
 
 pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
     let mut failed = Vec::new();
+    let mut trashed = Vec::new();
     // We call delete() per path (not delete_all) so one failure does not abort the rest.
     for path in &request.paths {
         if let Err(error) = trash::delete(path) {
@@ -217,9 +226,104 @@ pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
                 path: path.clone(),
                 reason: error.to_string(),
             });
+        } else {
+            trashed.push(path.clone());
         }
     }
+    if let Some(index_path) = &request.index_path {
+        mark_deleted_in_index(index_path, &trashed);
+    }
     TrashFilesResponse { failed }
+}
+
+/// Best-effort: flag paths as deleted in the index so views drop them before the
+/// next rescan. Rollups go slightly stale until then — the UI queues a rescan.
+fn mark_deleted_in_index(index_path: &Path, paths: &[String]) {
+    if paths.is_empty() {
+        return;
+    }
+    let Ok(conn) = crate::index::open_index_connection(index_path) else {
+        return;
+    };
+    for path in paths {
+        let _ = conn.execute(
+            "UPDATE files SET deleted_at = strftime('%s','now') WHERE path = ?1",
+            rusqlite::params![path],
+        );
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MoveSpec {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MoveFilesRequest {
+    pub moves: Vec<MoveSpec>,
+    #[serde(default)]
+    pub index_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MoveFailure {
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MoveFilesResponse {
+    pub moved: i64,
+    pub failed: Vec<MoveFailure>,
+}
+
+/// Move files to a new location: rename when possible, copy+remove across
+/// volumes. Never overwrites an existing destination. Moved sources are marked
+/// deleted in the index; destinations are picked up by the next (re)scan.
+pub fn move_files(request: MoveFilesRequest) -> MoveFilesResponse {
+    let mut failed = Vec::new();
+    let mut moved_sources = Vec::new();
+
+    for spec in &request.moves {
+        let to = Path::new(&spec.to);
+        if to.exists() {
+            failed.push(MoveFailure {
+                path: spec.from.clone(),
+                reason: "destination already exists".to_owned(),
+            });
+            continue;
+        }
+        if let Some(parent) = to.parent() {
+            if let Err(error) = std::fs::create_dir_all(parent) {
+                failed.push(MoveFailure {
+                    path: spec.from.clone(),
+                    reason: format!("cannot create destination folder: {error}"),
+                });
+                continue;
+            }
+        }
+        let result = std::fs::rename(&spec.from, to).or_else(|_| {
+            // Cross-volume move: copy then remove the source.
+            std::fs::copy(&spec.from, to)
+                .and_then(|_| std::fs::remove_file(&spec.from))
+        });
+        match result {
+            Ok(()) => moved_sources.push(spec.from.clone()),
+            Err(error) => failed.push(MoveFailure {
+                path: spec.from.clone(),
+                reason: error.to_string(),
+            }),
+        }
+    }
+
+    if let Some(index_path) = &request.index_path {
+        mark_deleted_in_index(index_path, &moved_sources);
+    }
+    MoveFilesResponse {
+        moved: moved_sources.len() as i64,
+        failed,
+    }
 }
 
 /// Build a draft cleanup plan from a scope and return its live candidate preview.
@@ -525,6 +629,20 @@ pub struct FolderMediaSummaryDto {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct TimelineBucketDto {
+    pub bucket: String,
+    pub file_count: i64,
+    pub total_bytes: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct AgeBucketDto {
+    pub bucket: String,
+    pub file_count: i64,
+    pub total_bytes: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct IndexOverviewDto {
     pub folders: Vec<FolderSummaryDto>,
     pub files: Vec<FileSummaryDto>,
@@ -532,6 +650,8 @@ pub struct IndexOverviewDto {
     pub duplicate_groups: Vec<DuplicateGroupSummaryDto>,
     pub media: Vec<MediaSummaryDto>,
     pub folder_media: Vec<FolderMediaSummaryDto>,
+    pub timeline: Vec<TimelineBucketDto>,
+    pub age_buckets: Vec<AgeBucketDto>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -605,6 +725,7 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
                 size: file.size,
                 extension: file.extension,
                 media_kind: file.media_kind,
+                modified_at: file.modified_at,
             })
             .collect(),
         extensions: writer
@@ -627,6 +748,7 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
                 file_count: group.file_count,
                 reclaimable_bytes: group.reclaimable_bytes,
                 confidence: group.confidence,
+                sample_paths: group.sample_paths,
             })
             .collect(),
         media: writer
@@ -647,6 +769,26 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
                 folder_path: media.folder_path,
                 media_kind: media.media_kind,
                 total_bytes: media.total_bytes,
+            })
+            .collect(),
+        timeline: writer
+            .timeline_summaries(24)
+            .map_err(|error| format!("{error:?}"))?
+            .into_iter()
+            .map(|bucket| TimelineBucketDto {
+                bucket: bucket.bucket,
+                file_count: bucket.file_count,
+                total_bytes: bucket.total_bytes,
+            })
+            .collect(),
+        age_buckets: writer
+            .age_summaries()
+            .map_err(|error| format!("{error:?}"))?
+            .into_iter()
+            .map(|bucket| AgeBucketDto {
+                bucket: bucket.bucket,
+                file_count: bucket.file_count,
+                total_bytes: bucket.total_bytes,
             })
             .collect(),
     })
@@ -1332,6 +1474,7 @@ mod tests {
     fn trash_files_nonexistent_path_is_recorded_as_failure() {
         let response = trash_files(TrashFilesRequest {
             paths: vec!["/this/path/does/not/exist/xyz.bin".to_owned()],
+            index_path: None,
         });
         assert_eq!(response.failed.len(), 1);
         assert_eq!(response.failed[0].path, "/this/path/does/not/exist/xyz.bin");

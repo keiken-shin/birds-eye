@@ -3,6 +3,8 @@ use birds_eye::native::api::{
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
     search_files as search_index_files,
     reveal_in_explorer as do_reveal_in_explorer,
+    trash_files as do_trash_files, move_files as do_move_files,
+    TrashFilesRequest, TrashFilesResponse, MoveFilesRequest, MoveFilesResponse,
     // Plan 3 cleanup
     cleanup_plan as do_cleanup_plan, execute_cleanup_plan as do_execute_cleanup_plan,
     recently_cleaned_log as do_recently_cleaned_log,
@@ -190,6 +192,18 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
     do_reveal_in_explorer(path)
 }
 
+/// User-override removal: recycle-bin delete for paths the safety predicate
+/// holds back. Only ever invoked from the Review gate's explicit consent flow.
+#[tauri::command(async)]
+fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
+    do_trash_files(request)
+}
+
+#[tauri::command(async)]
+fn move_files(request: MoveFilesRequest) -> MoveFilesResponse {
+    do_move_files(request)
+}
+
 /// Allow the asset protocol to serve files under this index's scan root, so the
 /// Inspector can preview media. The root is read from the index itself (which must
 /// live in the app index dir) — the webview never gets to name an arbitrary path.
@@ -338,6 +352,8 @@ fn main() {
             scan_job_status,
             allow_preview_root,
             reveal_in_explorer,
+            trash_files,
+            move_files,
             cleanup_plan,
             execute_cleanup_plan,
             recently_cleaned,

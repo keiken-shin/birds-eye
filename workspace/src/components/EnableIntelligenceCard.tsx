@@ -1,4 +1,7 @@
+import { Sparkles } from "lucide-react";
 import { useEnableIntelligence } from "../hooks/useEnableIntelligence";
+import { Card } from "./ui/Card";
+import { Button } from "./ui/Button";
 
 /**
  * The opt-in CTA shown wherever intelligence is required but off (Inspector, Board lens).
@@ -7,25 +10,23 @@ import { useEnableIntelligence } from "../hooks/useEnableIntelligence";
 export function EnableIntelligenceCard() {
   const { enable, busy, error } = useEnableIntelligence();
   return (
-    <div className="rounded-[9px] border border-primary/30 bg-primary/[0.06] p-3">
-      <div className="mb-1 text-13 font-semibold text-primary">Enable intelligence</div>
-      <div className="mb-3 text-12 leading-relaxed text-muted">
-        Classify this index to reveal why each folder exists, what's reclaimable, and a safety
-        verdict. Runs as a background scan with live progress — non-destructive and reversible.
+    <Card className="p-3">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-primary-dim text-primary">
+          <Sparkles size={15} strokeWidth={2} aria-hidden />
+        </span>
+        <span className="min-w-0 flex-1 text-115 leading-snug text-muted">
+          Classifies every folder on-device — why it exists, what depends on it, what's reclaimable.
+        </span>
+        <Button variant="primary" size="sm" className="flex-none" disabled={busy} onClick={() => void enable()}>
+          {busy ? "Starting…" : "Enable intelligence"}
+        </Button>
       </div>
-      {error && (
-        <div className="mb-2 rounded-[6px] border border-danger/30 bg-danger/[0.08] px-2.5 py-1.5 text-11 text-danger">
-          {error}
+      {error ? (
+        <div className="mt-2.5 rounded-lg border border-danger/40 bg-danger/10 px-2.5 py-1.5 text-11 text-danger">
+          Couldn't enable: {error}
         </div>
-      )}
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => void enable()}
-        className="w-full rounded-[8px] bg-primary py-2 text-12 font-semibold text-on-primary disabled:opacity-50"
-      >
-        {busy ? "Starting…" : "Enable intelligence"}
-      </button>
-    </div>
+      ) : null}
+    </Card>
   );
 }

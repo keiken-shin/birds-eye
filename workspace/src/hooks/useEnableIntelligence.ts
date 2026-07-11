@@ -14,7 +14,7 @@ import { useWorkspace } from "../state/workspaceStore";
  * saying "Enriching…". Shared by the Inspector CTA and the EnableIntelligence prompt.
  */
 export function useEnableIntelligence() {
-  const { indexPath, ontologyEnabled, setOverlay } = useWorkspace();
+  const { indexPath, ontologyEnabled, setView } = useWorkspace();
   const { refreshData, activeEntry } = useIndexData();
   const { enqueue } = useScanController();
   const [busy, setBusy] = useState(false);
@@ -35,13 +35,13 @@ export function useEnableIntelligence() {
       // stream in when the job's enrichment phase lands and onComplete refreshes again.
       await refreshData();
       enqueue(root, getDefaultStrategy());
-      setOverlay("queue");
+      setView("scans");
     } catch (e) {
       setError(String(e));
     } finally {
       setBusy(false);
     }
-  }, [indexPath, busy, activeEntry, refreshData, enqueue, setOverlay]);
+  }, [indexPath, busy, activeEntry, refreshData, enqueue, setView]);
 
   return { enable, busy, error, enabled: ontologyEnabled };
 }

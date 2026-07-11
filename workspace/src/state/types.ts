@@ -1,10 +1,25 @@
-export type Lens = "treemap" | "board" | "results";
-export type Overlay = "scan" | "settings" | "shortcuts" | "library" | "queue" | "duplicates" | null;
+/**
+ * The stage views — representation switches over the same index, never page
+ * loads. Overview is the hub; Treemap/Board/Files are the investigation
+ * lenses; Duplicates/Cleanup/Timeline are the insight views the goal comps
+ * call the bare minimum.
+ */
+export type StageView =
+  | "overview"
+  | "treemap"
+  | "board"
+  | "files"
+  | "duplicates"
+  | "cleanup"
+  | "timeline"
+  | "scans";
+
+export type Overlay = "scan" | "settings" | "shortcuts" | "library" | null;
 
 /** Verdict taxonomy derived from the real backend (src/index/schema.rs cleanup view). */
 export type Verdict = "safe" | "review" | "protected" | "keep";
 
-/** What the Inspector is bound to. Folders are the primary M1 target (treemap nodes). */
+/** What the Inspector is bound to. Folders are the primary target (treemap nodes). */
 export type SelectedRef = {
   kind: "folder" | "file";
   path: string;
@@ -25,13 +40,13 @@ export type StagedItem = {
 
 export type UndoState = { entryIds: number[]; freed: number } | null;
 
-/** A folder collected onto the Board lens (the selection→board glue). Folders are Inspector-able. */
+/** A folder collected onto the Board (the selection→board glue). */
 export type PinnedCard = { path: string; name: string; bytes: number };
 
 /**
- * What the Results lens is showing. The command spine (M4) and the lens's own controls
- * both produce one of these via `runQuery`, which is the single source the fetch keys on —
- * free-text search (`search_files`) or a curated saved view (`run_saved_view`).
+ * What the Files view is showing. The command spine and the view's own
+ * controls both produce one of these via `runQuery` — free-text search
+ * (`search_files`) or a curated saved view (`run_saved_view`).
  */
 export type ResultsQuery =
   | { kind: "search"; text: string }

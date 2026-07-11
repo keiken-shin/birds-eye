@@ -6,17 +6,25 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Lens, Overlay, PinnedCard, ResultsQuery, SelectedRef, StagedItem, UndoState } from "./types";
+import type {
+  Overlay,
+  PinnedCard,
+  ResultsQuery,
+  SelectedRef,
+  StagedItem,
+  StageView,
+  UndoState,
+} from "./types";
 
 /**
  * The two "glue" globals the architecture study calls out: selection (drives the one
- * Inspector) and the cleanup tray (collects from any lens). Plus shell nav state.
+ * Inspector) and the cleanup tray (collects from any view). Plus shell nav state.
  * Index data (overview / lens rows) is fetched by hooks keyed on indexPath, not held here.
  */
 type WorkspaceState = {
   indexPath: string | null;
   ontologyEnabled: boolean;
-  lens: Lens;
+  view: StageView;
   scopePath: string[]; // folder paths from root → current scope
   selected: SelectedRef | null;
   staged: StagedItem[];
@@ -30,7 +38,7 @@ type WorkspaceState = {
 type WorkspaceActions = {
   setIndexPath: (path: string | null) => void;
   setOntologyEnabled: (enabled: boolean) => void;
-  setLens: (lens: Lens) => void;
+  setView: (view: StageView) => void;
   setScopePath: (path: string[]) => void;
   drillInto: (folderPath: string) => void;
   popScopeTo: (depth: number) => void;
@@ -41,7 +49,7 @@ type WorkspaceActions = {
   pinToBoard: (card: PinnedCard) => void;
   unpinCard: (path: string) => void;
   isPinned: (path: string) => boolean;
-  /** Drive the Results lens (from the command spine or the lens controls) and switch to it. */
+  /** Drive the Files view (from the command spine or the view's controls) and switch to it. */
   runQuery: (query: ResultsQuery) => void;
   setOverlay: (overlay: Overlay) => void;
   openReview: () => void;
@@ -56,7 +64,7 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [indexPath, setIndexPath] = useState<string | null>(null);
   const [ontologyEnabled, setOntologyEnabled] = useState(false);
-  const [lens, setLens] = useState<Lens>("treemap");
+  const [view, setView] = useState<StageView>("overview");
   const [scopePath, setScopePath] = useState<string[]>([]);
   const [selected, setSelected] = useState<SelectedRef | null>(null);
   const [staged, setStaged] = useState<StagedItem[]>([]);
@@ -86,9 +94,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const isStaged = useCallback((path: string) => staged.some((s) => s.path === path), [staged]);
   const clearStaged = useCallback(() => setStaged([]), []);
 
+  // Pinning collects quietly — it never yanks you out of the view you're in.
+  // The Board shows the card next time you flip to it (rail badge signals it).
   const pinToBoard = useCallback((card: PinnedCard) => {
     setPinned((prev) => (prev.some((p) => p.path === card.path) ? prev : [...prev, card]));
-    setLens("board"); // follow the wireframe: pinning takes you to the board it landed on
   }, []);
   const unpinCard = useCallback((path: string) => {
     setPinned((prev) => prev.filter((p) => p.path !== path));
@@ -96,7 +105,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const isPinned = useCallback((path: string) => pinned.some((p) => p.path === path), [pinned]);
   const runQuery = useCallback((query: ResultsQuery) => {
     setResultsQuery(query);
-    setLens("results");
+    setView("files");
   }, []);
   const openReview = useCallback(() => {
     if (staged.length) setReview(true);
@@ -106,7 +115,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     () => ({
       indexPath,
       ontologyEnabled,
-      lens,
+      view,
       scopePath,
       selected,
       staged,
@@ -117,7 +126,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       undo,
       setIndexPath,
       setOntologyEnabled,
-      setLens,
+      setView,
       setScopePath,
       drillInto,
       popScopeTo,
@@ -137,7 +146,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [
       indexPath,
       ontologyEnabled,
-      lens,
+      view,
       scopePath,
       selected,
       staged,

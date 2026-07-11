@@ -1,17 +1,54 @@
 import { useWorkspace } from "../state/workspaceStore";
 import { MOD, isMac } from "../lib/keys";
+import { STAGE_VIEWS } from "../lib/viewRegistry";
+import { OverlayShell } from "./ui/OverlayShell";
+import { SectionLabel } from "./ui/Card";
+import { Kbd } from "./ui/Chip";
 
-const SHORTCUTS: Array<[string, string]> = [
-  ["New scan", `${MOD}N`],
-  ["Command line", isMac ? "⌥⌘K" : "Ctrl+K"],
-  ["Treemap · Board · Results", "1 · 2 · 3"],
-  ["Up one level (treemap)", isMac ? "⌫" : "Backspace"],
-  ["Stage selection", isMac ? "⇧↵" : "Shift+Enter"],
-  ["Review & clean", isMac ? "⌘↵" : "Ctrl+Enter"],
-  ["Undo last clean", `${MOD}Z`],
-  ["Settings", `${MOD},`],
-  ["Shortcuts", "?"],
-  ["Close overlay", "Esc"],
+type Row = { label: string; keys: string };
+
+/** Derived from STAGE_VIEWS so the 1–7 bindings can never drift from the switcher. */
+const GROUPS: Array<{ title: string; rows: Row[] }> = [
+  {
+    title: "Views",
+    rows: [
+      ...STAGE_VIEWS.map((v) => ({ label: v.label, keys: v.key })),
+      { label: "Up one level (treemap)", keys: isMac ? "⌫" : "Backspace" },
+      { label: "Toggle inspector", keys: `${MOD}I` },
+    ],
+  },
+  {
+    title: "Command",
+    rows: [{ label: "Focus command bar", keys: isMac ? "⌘K" : "Ctrl+K" }],
+  },
+  {
+    title: "Board canvas",
+    rows: [
+      { label: "Marquee select", keys: "Shift+Drag" },
+      { label: "Add / remove from selection", keys: "Shift+Click" },
+      { label: "Select all cards", keys: `${MOD}A` },
+      { label: "Nudge selection", keys: "Arrows" },
+      { label: "Clear selection", keys: "Esc" },
+    ],
+  },
+  {
+    title: "Cleanup",
+    rows: [
+      { label: "Stage selection", keys: isMac ? "⇧↵" : "Shift+Enter" },
+      { label: "Review & clean", keys: isMac ? "⌘↵" : "Ctrl+Enter" },
+      { label: "Undo last clean", keys: `${MOD}Z` },
+    ],
+  },
+  {
+    title: "System",
+    rows: [
+      { label: "New scan", keys: `${MOD}N` },
+      { label: "Recently cleaned", keys: `${MOD}L` },
+      { label: "Settings", keys: `${MOD},` },
+      { label: "Shortcuts", keys: "?" },
+      { label: "Close overlay", keys: "Esc" },
+    ],
+  },
 ];
 
 /** Shortcuts reference. Settings, Library, and Scans each have their own overlay component now. */
@@ -19,32 +56,23 @@ export function MiscOverlay() {
   const { overlay, setOverlay } = useWorkspace();
   if (overlay !== "shortcuts") return null;
 
-  const close = () => setOverlay(null);
-
   return (
-    <div
-      className="absolute inset-0 z-40 flex items-center justify-center bg-[rgba(6,7,9,.66)] backdrop-blur-[3px]"
-      onClick={close}
-    >
-      <div
-        className="be-in flex w-[440px] flex-col overflow-hidden rounded-[14px] border border-line-modal bg-overlay shadow-[0_30px_80px_-20px_rgba(0,0,0,.8)]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-2.5 border-b border-line bg-bar px-4 py-3">
-          <span className="text-[14px] font-semibold">Keyboard shortcuts</span>
-          <button type="button" onClick={close} className="ml-auto text-[14px] text-dim hover:text-ink">
-            ✕
-          </button>
-        </div>
-        <div className="flex flex-col gap-2.5 text-[12px] text-ink-soft" style={{ padding: 18 }}>
-          {SHORTCUTS.map(([label, keys]) => (
-            <div key={label} className="flex justify-between">
-              <span>{label}</span>
-              <span className="mono text-ink">{keys}</span>
+    <OverlayShell title="Keyboard shortcuts" width={460} onClose={() => setOverlay(null)}>
+      <div className="flex flex-col gap-4 p-4.5">
+        {GROUPS.map((group) => (
+          <section key={group.title}>
+            <SectionLabel className="mb-2">{group.title}</SectionLabel>
+            <div className="flex flex-col gap-1.5">
+              {group.rows.map((row) => (
+                <div key={row.label} className="flex items-center justify-between gap-3">
+                  <span className="text-12 text-ink-soft">{row.label}</span>
+                  <Kbd>{row.keys}</Kbd>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </section>
+        ))}
       </div>
-    </div>
+    </OverlayShell>
   );
 }

@@ -1,31 +1,48 @@
+import { ArrowRight, X } from "lucide-react";
 import { formatBytes } from "@bridge/domain";
 import { useWorkspace } from "../state/workspaceStore";
+import { Button } from "./ui/Button";
+import { SectionLabel } from "./ui/Card";
+
+const MAX_CHIPS = 6;
 
 export function CleanupTray() {
   const { staged, toggleStaged, openReview } = useWorkspace();
   const total = staged.reduce((s, item) => s + item.bytes, 0);
+  const shown = staged.slice(0, MAX_CHIPS);
+  const overflow = staged.length - shown.length;
 
   return (
-    <div className="flex h-[60px] flex-none items-center gap-2.5 border-t border-line bg-bar px-3.5">
-      <span className="flex-none text-11 tracking-[0.1em] text-label">CLEANUP TRAY</span>
+    <div className="flex h-[60px] flex-none items-center gap-3 border-t border-line bg-bar px-3.5">
+      <SectionLabel className="flex-none">Cleanup tray</SectionLabel>
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
         {staged.length ? (
-          staged.map((item) => (
-            <span
-              key={item.path}
-              className="flex flex-none items-center gap-1.5 rounded-[7px] border border-primary/30 bg-primary/[0.1] px-2.5 py-1.5 text-[11.5px] text-primary-bright"
-              title={item.path}
-            >
-              {item.name} <span className="mono text-primary-ink">{formatBytes(item.bytes)}</span>
-              <button
-                type="button"
-                onClick={() => toggleStaged(item)}
-                className="text-[13px] leading-none text-dim hover:text-ink"
+          <>
+            {shown.map((item) => (
+              <span
+                key={item.path}
+                title={item.path}
+                className="flex flex-none items-center gap-1.5 rounded-full border border-primary-edge bg-primary-dim py-1 pl-2.5 pr-1.5 text-115 text-primary-bright"
               >
-                ×
-              </button>
-            </span>
-          ))
+                <span className="max-w-40 truncate">{item.name}</span>
+                <span className="mono text-primary-ink">{formatBytes(item.bytes)}</span>
+                <button
+                  type="button"
+                  aria-label={`Unstage ${item.name}`}
+                  title={`Unstage ${item.name}`}
+                  onClick={() => toggleStaged(item)}
+                  className="flex h-4 w-4 flex-none items-center justify-center rounded-full text-faint transition-colors hover:text-ink"
+                >
+                  <X size={11} strokeWidth={2} aria-hidden />
+                </button>
+              </span>
+            ))}
+            {overflow > 0 ? (
+              <span className="flex flex-none items-center rounded-full border border-line-modal px-2.5 py-1 text-115 text-faint">
+                +{overflow} more
+              </span>
+            ) : null}
+          </>
         ) : (
           <span className="text-12 italic text-label">
             Nothing staged — select something and add it here.
@@ -33,19 +50,15 @@ export function CleanupTray() {
         )}
       </div>
       <span className="mono flex-none text-13 text-primary-ink">{formatBytes(total)}</span>
-      <button
-        type="button"
+      <Button
+        variant="primary"
+        icon={ArrowRight}
         disabled={!staged.length}
         onClick={openReview}
-        className="flex-none rounded-[8px] px-3.5 py-2 text-[12.5px] font-semibold"
-        style={
-          staged.length
-            ? { background: "var(--color-primary)", color: "var(--color-on-primary)" }
-            : { background: "#191c22", color: "#5b616a", cursor: "not-allowed" }
-        }
+        className="flex-none"
       >
-        Review &amp; clean →
-      </button>
+        Review &amp; clean
+      </Button>
     </div>
   );
 }

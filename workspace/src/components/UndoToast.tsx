@@ -1,14 +1,46 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { CircleCheck, TriangleAlert, X } from "lucide-react";
 import { formatBytes } from "@bridge/domain";
 import { restoreCleanupEntry } from "@bridge/nativeClient";
 import { useIndexData } from "../state/indexData";
 import { useWorkspace } from "../state/workspaceStore";
+import { Button, IconButton } from "./ui/Button";
 
 export function UndoToast() {
   const { undo, setUndo, indexPath } = useWorkspace();
   const { refreshData } = useIndexData();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const onUndo = useCallback(async () => {
+    if (!indexPath || busy || !undo) return;
+    setBusy(true);
+    try {
+      let failures = 0;
+      for (const id of undo.entryIds) {
+        try {
+          await restoreCleanupEntry(indexPath, id);
+        } catch {
+          failures++;
+        }
+      }
+      if (failures) {
+        setError(
+          `${failures} of ${undo.entryIds.length} items could not be restored — see Recently cleaned`
+        );
+      } else {
+        setUndo(null);
+      }
+      await refreshData();
+    } finally {
+      setBusy(false);
+    }
+  }, [indexPath, busy, undo, setUndo, refreshData]);
+
+  // A new (or cleared) undo starts with a clean slate — never show a stale failure.
+  useEffect(() => {
+    setError(null);
+  }, [undo]);
 
   useEffect(() => {
     // Don't auto-dismiss while showing a restore failure — the user must see it.
@@ -29,54 +61,33 @@ export function UndoToast() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  });
+  }, [undo, onUndo]);
 
   if (!undo) return null;
 
-  const onUndo = async () => {
-    if (!indexPath || busy) return;
-    setBusy(true);
-    try {
-      let failures = 0;
-      for (const id of undo.entryIds) {
-        try {
-          await restoreCleanupEntry(indexPath, id);
-        } catch {
-          failures++;
-        }
-      }
-      if (failures) {
-        setError(`${failures} of ${undo.entryIds.length} items could not be restored — see Library`);
-      } else {
-        setUndo(null);
-      }
-      await refreshData();
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <div className="be-in absolute bottom-[74px] left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-[10px] border border-line-modal bg-overlay px-3.5 py-2.5 shadow-[0_14px_40px_-10px_rgba(0,0,0,.7)]">
-      <span className={error ? "text-danger" : "text-primary-ink"}>{error ? "⚠" : "✓"}</span>
-      <span className="text-[12.5px]">
+    <div className="be-in absolute bottom-[74px] left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2.5 rounded-[10px] border border-line-modal bg-overlay px-3.5 py-2.5 shadow-[0_14px_40px_-10px_rgba(0,0,0,0.7)]">
+      {error ? (
+        <TriangleAlert size={15} className="flex-none text-warn" aria-hidden />
+      ) : (
+        <CircleCheck size={15} className="flex-none text-primary-ink" aria-hidden />
+      )}
+      <span className="text-125 text-ink-soft">
         {error ?? (
           <>
-            Cleaned <b className="mono">{formatBytes(undo.freed)}</b> — moved to Quarantine
+            Cleaned <b className="mono text-ink">{formatBytes(undo.freed)}</b> — moved to recycle bin
           </>
         )}
       </span>
-      <button
-        type="button"
+      <Button
+        variant="subtle"
+        size="sm"
         disabled={busy || !undo.entryIds.length}
         onClick={() => void onUndo()}
-        className="ml-1.5 text-[12.5px] font-semibold text-primary disabled:opacity-40"
       >
         {busy ? "Restoring…" : "Undo"}
-      </button>
-      <button type="button" onClick={() => setUndo(null)} className="ml-1 text-dim hover:text-ink">
-        ×
-      </button>
+      </Button>
+      <IconButton icon={X} label="Dismiss" size={13} onClick={() => setUndo(null)} />
     </div>
   );
 }

@@ -1,8 +1,12 @@
-<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="12" y="12" width="72" height="72" fill="#050607"/>
-  <path d="M18 18H34M18 18V34M78 18H62M78 18V34M18 78H34M18 78V62M78 78H62M78 78V62" stroke="#F4F1EA" stroke-width="4" stroke-linecap="square"/>
-  <circle cx="48" cy="48" r="9" fill="#F4F1EA"/>
-  <path d="M48 9V32M48 64V87M9 48H32M64 48H87" stroke="#F4F1EA" stroke-width="3"/>
-  <path d="M27 48C34 36 41 31 48 31C55 31 62 36 69 48C62 60 55 65 48 65C41 65 34 60 27 48Z" stroke="#F4F1EA" stroke-width="3"/>
-  <rect x="46" y="46" width="6" height="6" fill="#00D0C4"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Lucide "bird" mark on the app's dark tile with the brand green stroke. -->
+  <rect width="32" height="32" rx="7" fill="#0e1014"/>
+  <g transform="translate(4 4)" fill="none" stroke="#3ddc84" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 7h.01"/>
+    <path d="M3.4 18H12a8 8 0 0 0 8-8V7a4 4 0 0 0-7.28-2.3L2 20"/>
+    <path d="m20 7 2 .5-2 .5"/>
+    <path d="M10 18v3"/>
+    <path d="M14 17.75V21"/>
+    <path d="M7 18a6 6 0 0 0 3.84-10.61"/>
+  </g>
 </svg>

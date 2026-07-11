@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useWorkspace } from "../state/workspaceStore";
+import { STAGE_VIEWS } from "../lib/viewRegistry";
 import { TitleBar } from "./TitleBar";
 import { CommandSpine } from "./CommandSpine";
 import { ActivityRail } from "./ActivityRail";
@@ -11,15 +12,17 @@ import { ScanOverlay } from "./ScanOverlay";
 import { MiscOverlay } from "./MiscOverlay";
 import { SettingsOverlay } from "./SettingsOverlay";
 import { LibraryOverlay } from "./LibraryOverlay";
-import { ScanQueueOverlay } from "./ScanQueueOverlay";
-import { DuplicatesOverlay } from "./DuplicatesOverlay";
 import { ReviewModal } from "./ReviewModal";
 import { UndoToast } from "./UndoToast";
 import { EnableIntelligence } from "./EnableIntelligence";
+import { SidePanel, usePanelState } from "./ui/SidePanel";
 
 export function WorkspaceShell() {
-  const { setLens, setOverlay, openReview, review, overlay, closeReview, lens, scopePath, popScopeTo } =
+  const { setView, setOverlay, openReview, review, overlay, closeReview, view, scopePath, popScopeTo } =
     useWorkspace();
+
+  const scope = usePanelState("be.ws.panel.scope", 230);
+  const inspector = usePanelState("be.ws.panel.inspector", 316);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -49,17 +52,27 @@ export function WorkspaceShell() {
         setOverlay("library");
         return;
       }
+      if (mod && e.key.toLowerCase() === "i") {
+        e.preventDefault();
+        inspector.setCollapsed((c) => !c);
+        return;
+      }
       if (mod && e.key === ",") {
         e.preventDefault();
         setOverlay("settings");
         return;
       }
       if (!mod && !e.altKey) {
-        if (e.key === "?") setOverlay("shortcuts");
-        else if (e.key === "1") setLens("treemap");
-        else if (e.key === "2") setLens("board");
-        else if (e.key === "3") setLens("results");
-        else if (e.key === "Backspace" && lens === "treemap" && scopePath.length) {
+        if (e.key === "?") {
+          setOverlay("shortcuts");
+          return;
+        }
+        const stageView = STAGE_VIEWS.find((r) => r.key === e.key);
+        if (stageView) {
+          setView(stageView.view);
+          return;
+        }
+        if (e.key === "Backspace" && view === "treemap" && scopePath.length) {
           e.preventDefault();
           popScopeTo(scopePath.length - 1);
         }
@@ -67,7 +80,7 @@ export function WorkspaceShell() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [review, overlay, setLens, setOverlay, openReview, closeReview, lens, scopePath, popScopeTo]);
+  }, [review, overlay, setView, setOverlay, openReview, closeReview, view, scopePath, popScopeTo, inspector]);
 
   return (
     <div className="relative flex h-screen flex-col overflow-hidden bg-base text-ink">
@@ -75,9 +88,28 @@ export function WorkspaceShell() {
       <CommandSpine />
       <div className="flex min-h-0 flex-1">
         <ActivityRail />
-        <ScopeTree />
+        <SidePanel
+          side="left"
+          label="scope tree"
+          width={scope.width}
+          onWidth={scope.setWidth}
+          collapsed={scope.collapsed}
+          onToggle={() => scope.setCollapsed((c) => !c)}
+        >
+          <ScopeTree />
+        </SidePanel>
         <CenterStage />
-        <Inspector />
+        <SidePanel
+          side="right"
+          label="inspector"
+          width={inspector.width}
+          onWidth={inspector.setWidth}
+          collapsed={inspector.collapsed}
+          onToggle={() => inspector.setCollapsed((c) => !c)}
+          max={520}
+        >
+          <Inspector />
+        </SidePanel>
       </div>
       <CleanupTray />
 
@@ -85,8 +117,6 @@ export function WorkspaceShell() {
       <MiscOverlay />
       <SettingsOverlay />
       <LibraryOverlay />
-      <ScanQueueOverlay />
-      <DuplicatesOverlay />
       <ReviewModal />
       <UndoToast />
       <EnableIntelligence />

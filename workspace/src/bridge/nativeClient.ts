@@ -1,7 +1,17 @@
-import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { convertFileSrc, invoke as tauriInvoke, isTauri } from "@tauri-apps/api/core";
+import { listen as tauriListen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ScanStrategy } from "./domain";
+import { mockInvoke, mockListen, mockPreviewSrc } from "../dev/mockBackend";
+
+/**
+ * Outside the Tauri shell (plain `vite` in a browser) every command routes to
+ * the in-memory mock backend so the whole workspace stays designable and
+ * testable. Inside Tauri this resolves to the real IPC at module load.
+ */
+const native = isTauri();
+const invoke: typeof tauriInvoke = native ? tauriInvoke : (mockInvoke as typeof tauriInvoke);
+const listen: typeof tauriListen = native ? tauriListen : (mockListen as typeof tauriListen);
 
 export type NativeJobStatus = "Running" | "Completed" | "Cancelled" | "Failed";
 
@@ -32,9 +42,23 @@ export type NativeJobEvent = {
   phase_timings?: NativePhaseTimingEntry[];
 };
 
+export type NativeOverviewFile = {
+  path: string;
+  size: number;
+  extension: string | null;
+  media_kind: string;
+  modified_at: number | null;
+};
+
+/** One month of modified-time activity (`bucket` = `YYYY-MM`). */
+export type NativeTimelineBucket = { bucket: string; file_count: number; total_bytes: number };
+
+/** Staleness band: lt1mo · 1to3mo · 3to6mo · 6to12mo · 1to2yr · gt2yr · unknown. */
+export type NativeAgeBucket = { bucket: string; file_count: number; total_bytes: number };
+
 export type NativeIndexOverview = {
   folders: Array<{ path: string; total_files: number; total_bytes: number }>;
-  files: Array<{ path: string; size: number; extension: string | null; media_kind: string }>;
+  files: NativeOverviewFile[];
   extensions: Array<{ extension: string; file_count: number; total_bytes: number }>;
   duplicate_groups: Array<{
     id: number;
@@ -42,9 +66,13 @@ export type NativeIndexOverview = {
     file_count: number;
     reclaimable_bytes: number;
     confidence: number;
+    /** up to 8 member paths, largest first — relates groups to folders/findings */
+    sample_paths: string[];
   }>;
   media: Array<{ media_kind: string; file_count: number; total_bytes: number }>;
   folder_media: Array<{ folder_path: string; media_kind: string; total_bytes: number }>;
+  timeline: NativeTimelineBucket[];
+  age_buckets: NativeAgeBucket[];
 };
 
 export type NativeSearchResult = {
@@ -79,6 +107,7 @@ export async function isNativeRuntime() {
 }
 
 export async function chooseNativeFolder() {
+  if (!native) return "C:\\Users\\alex";
   const selected = await open({
     directory: true,
     multiple: false,
@@ -169,7 +198,7 @@ export async function allowPreviewRoot(indexPath: string) {
 
 /** Webview-loadable URL for a local file (valid only under a root allowed above). */
 export function previewSrc(path: string) {
-  return convertFileSrc(path);
+  return native ? convertFileSrc(path) : mockPreviewSrc(path);
 }
 
 export async function listNativeIndexes() {
@@ -182,6 +211,31 @@ export async function deleteNativeIndex(indexPath: string) {
 
 export async function revealInExplorer(path: string): Promise<void> {
   await invoke("reveal_in_explorer", { path });
+}
+
+export type NativeTrashFailure = { path: string; reason: string };
+
+/**
+ * User-override removal to the recycle bin, bypassing the cleanup predicate.
+ * Only called from the Review gate's explicit consent flow — never silently.
+ */
+export async function trashFiles(paths: string[], indexPath?: string | null) {
+  return invoke<{ failed: NativeTrashFailure[] }>("trash_files", {
+    request: { paths, index_path: indexPath ?? null },
+  });
+}
+
+export type NativeMoveFailure = { path: string; reason: string };
+export type NativeMoveResult = { moved: number; failed: NativeMoveFailure[] };
+
+/** Move files to a new folder (rename, or copy+remove across volumes). */
+export async function moveFiles(
+  moves: Array<{ from: string; to: string }>,
+  indexPath?: string | null
+) {
+  return invoke<NativeMoveResult>("move_files", {
+    request: { moves, index_path: indexPath ?? null },
+  });
 }
 
 // ---- Ontology: cleanup ----
