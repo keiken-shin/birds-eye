@@ -72,6 +72,7 @@ pub struct FileSummary {
     pub size: i64,
     pub extension: Option<String>,
     pub media_kind: String,
+    pub modified_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,6 +92,10 @@ pub struct ExtensionSummary {
     pub total_bytes: i64,
 }
 
+/// How many member paths ride along on each duplicate-group summary — enough
+/// for relating groups to folders/findings without a per-group query.
+pub const SAMPLE_PATHS_PER_GROUP: i64 = 8;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DuplicateGroupSummary {
     pub id: i64,
@@ -98,6 +103,8 @@ pub struct DuplicateGroupSummary {
     pub file_count: i64,
     pub reclaimable_bytes: i64,
     pub confidence: f64,
+    /// Up to [`SAMPLE_PATHS_PER_GROUP`] member paths, largest first.
+    pub sample_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -119,6 +126,23 @@ pub struct MediaSummary {
 pub struct FolderMediaSummary {
     pub folder_path: String,
     pub media_kind: String,
+    pub total_bytes: i64,
+}
+
+/// One month of modified-time activity (`bucket` = `YYYY-MM`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimelineBucket {
+    pub bucket: String,
+    pub file_count: i64,
+    pub total_bytes: i64,
+}
+
+/// One fixed staleness band keyed by a stable id
+/// (`lt1mo` · `1to3mo` · `3to6mo` · `6to12mo` · `1to2yr` · `gt2yr` · `unknown`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgeBucket {
+    pub bucket: String,
+    pub file_count: i64,
     pub total_bytes: i64,
 }
 
@@ -145,7 +169,7 @@ impl IndexWriter {
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, IndexError> {
-        let connection = Connection::open(path)?;
+        let connection = crate::index::open_index_connection(path)?;
         let writer = Self {
             connection,
             session_id: None,
@@ -292,7 +316,7 @@ impl IndexWriter {
 
     pub fn largest_files(&self, limit: usize) -> Result<Vec<FileSummary>, IndexError> {
         let mut statement = self.connection.prepare(
-            "SELECT path, size, extension, media_kind
+            "SELECT path, size, extension, media_kind, modified_at
              FROM files
              WHERE deleted_at IS NULL
              ORDER BY size DESC
@@ -304,6 +328,67 @@ impl IndexWriter {
                 size: row.get(1)?,
                 extension: row.get(2)?,
                 media_kind: row.get(3)?,
+                modified_at: row.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Monthly modified-time activity buckets (`YYYY-MM`) over the last `months`
+    /// months, oldest first. Files with no modified timestamp are excluded.
+    pub fn timeline_summaries(&self, months: usize) -> Result<Vec<TimelineBucket>, IndexError> {
+        let mut statement = self.connection.prepare(
+            "SELECT strftime('%Y-%m', modified_at, 'unixepoch') AS bucket,
+                    COUNT(*) AS file_count,
+                    SUM(size) AS total_bytes
+             FROM files
+             WHERE deleted_at IS NULL
+               AND modified_at IS NOT NULL
+               AND modified_at >= strftime('%s', 'now', ?1)
+               AND modified_at <= strftime('%s', 'now', '+1 day')
+             GROUP BY bucket
+             ORDER BY bucket ASC",
+        )?;
+        let horizon = format!("-{months} months");
+        let rows = statement.query_map(params![horizon], |row| {
+            Ok(TimelineBucket {
+                bucket: row.get(0)?,
+                file_count: row.get(1)?,
+                total_bytes: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Staleness distribution: how many files (and bytes) were last modified
+    /// within each fixed age band. Files with no modified timestamp land in `unknown`.
+    pub fn age_summaries(&self) -> Result<Vec<AgeBucket>, IndexError> {
+        let mut statement = self.connection.prepare(
+            "SELECT CASE
+                      WHEN modified_at IS NULL THEN 'unknown'
+                      WHEN age < 2592000 THEN 'lt1mo'
+                      WHEN age < 7776000 THEN '1to3mo'
+                      WHEN age < 15552000 THEN '3to6mo'
+                      WHEN age < 31536000 THEN '6to12mo'
+                      WHEN age < 63072000 THEN '1to2yr'
+                      ELSE 'gt2yr'
+                    END AS bucket,
+                    COUNT(*) AS file_count,
+                    SUM(size) AS total_bytes
+             FROM (
+               SELECT modified_at,
+                      size,
+                      CAST(strftime('%s', 'now') AS INTEGER) - modified_at AS age
+               FROM files
+               WHERE deleted_at IS NULL
+             )
+             GROUP BY bucket",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(AgeBucket {
+                bucket: row.get(0)?,
+                file_count: row.get(1)?,
+                total_bytes: row.get(2)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -495,9 +580,51 @@ impl IndexWriter {
                 file_count: row.get(2)?,
                 reclaimable_bytes: row.get(3)?,
                 confidence: row.get(4)?,
+                sample_paths: Vec::new(),
             })
         })?;
-        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        let mut groups = rows.collect::<Result<Vec<_>, _>>().map_err(IndexError::from)?;
+
+        // A few member paths per group, in one pass — enough for the Board to
+        // relate duplicate groups to findings without a per-group fetch.
+        let mut sample_statement = self.connection.prepare(
+            "WITH top_groups AS (
+               SELECT dg.id
+               FROM duplicate_groups dg
+               JOIN duplicate_group_files dgf ON dgf.group_id = dg.id
+               GROUP BY dg.id
+               ORDER BY dg.reclaimable_bytes DESC
+               LIMIT ?1
+             ),
+             ranked AS (
+               SELECT dgf.group_id AS group_id,
+                      files.path AS path,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY dgf.group_id
+                        ORDER BY files.size DESC, files.path ASC
+                      ) AS rank
+               FROM duplicate_group_files dgf
+               JOIN files ON files.id = dgf.file_id
+               WHERE files.deleted_at IS NULL
+                 AND dgf.group_id IN (SELECT id FROM top_groups)
+             )
+             SELECT group_id, path FROM ranked WHERE rank <= ?2 ORDER BY group_id, rank",
+        )?;
+        let sample_rows = sample_statement
+            .query_map(params![limit as i64, SAMPLE_PATHS_PER_GROUP], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut paths_by_group: HashMap<i64, Vec<String>> = HashMap::new();
+        for (group_id, path) in sample_rows {
+            paths_by_group.entry(group_id).or_default().push(path);
+        }
+        for group in &mut groups {
+            if let Some(paths) = paths_by_group.remove(&group.id) {
+                group.sample_paths = paths;
+            }
+        }
+        Ok(groups)
     }
 
     pub fn duplicate_group_files(
@@ -1666,6 +1793,16 @@ mod tests {
         assert_eq!(completed_sample_jobs, 2);
         assert_eq!(completed_full_jobs, 2);
         assert_eq!(completed_candidates, 1);
+
+        // The group summary carries member sample paths (largest first).
+        let summaries = writer.duplicate_groups(10).expect("group summaries");
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].sample_paths.len(), 2);
+        assert!(summaries[0]
+            .sample_paths
+            .iter()
+            .all(|path| path.ends_with("one.bin") || path.ends_with("two.bin")));
+
         cleanup(&root);
     }
 
@@ -1703,6 +1840,45 @@ mod tests {
         assert!(folder_media
             .iter()
             .any(|summary| summary.media_kind == "video"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn exposes_timeline_and_age_summaries() {
+        let root = test_root("timeline");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("fresh.txt"), &[1; 64]);
+        write_file(&root.join("also-fresh.bin"), &[2; 32]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut writer);
+
+        // Freshly written files land in the current month's bucket…
+        let timeline = writer.timeline_summaries(24).expect("timeline summaries");
+        assert_eq!(timeline.len(), 1);
+        assert_eq!(timeline[0].file_count, 2);
+        assert_eq!(timeline[0].total_bytes, 96);
+
+        // …and in the youngest age band.
+        let ages = writer.age_summaries().expect("age summaries");
+        assert_eq!(ages.len(), 1);
+        assert_eq!(ages[0].bucket, "lt1mo");
+        assert_eq!(ages[0].file_count, 2);
+
+        // A file backdated two years lands in the oldest band and off the 24-month timeline.
+        writer
+            .connection()
+            .execute(
+                "UPDATE files SET modified_at = strftime('%s', 'now', '-30 months')
+                 WHERE name = 'fresh.txt'",
+                [],
+            )
+            .expect("failed to backdate file");
+        let ages = writer.age_summaries().expect("age summaries");
+        assert!(ages.iter().any(|bucket| bucket.bucket == "gt2yr" && bucket.file_count == 1));
+        let timeline = writer.timeline_summaries(24).expect("timeline summaries");
+        assert_eq!(timeline.iter().map(|bucket| bucket.file_count).sum::<i64>(), 1);
+
         cleanup(&root);
     }
 

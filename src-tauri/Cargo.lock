@@ -114,6 +114,7 @@ dependencies = [
  "regex",
  "rusqlite",
  "serde",
+ "serde_json",
  "trash",
  "xxhash-rust",
 ]

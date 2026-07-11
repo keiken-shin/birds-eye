@@ -1,7 +1,7 @@
 /target/
 /src-tauri/target/
-/frontend/node_modules/
-/frontend/dist/
+/workspace/dist/
+/workspace/node_modules/
 
 *.log
 *.tmp
@@ -9,6 +9,10 @@
 *.sqlite3
 *.db
 
+.playwright*
+.remember
+.vscode/
 .DS_Store
 Thumbs.db
 .superpowers/
+.worktrees/

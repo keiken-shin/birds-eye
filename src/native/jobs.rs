@@ -1,13 +1,14 @@
 use crate::index::writer::ScanMode;
 use crate::index::IndexWriter;
 use crate::native::phase_timer::{PhaseTimer, PhaseTimingEntry};
+use crate::ontology::populators::BudgetTier;
 use crate::scanner::{ScanController, ScanEvent, ScanOptions, Scanner};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -76,6 +77,7 @@ pub struct ScanJobManager {
 struct JobState {
     status: JobStatusDto,
     controller: ScanController,
+    enrichment_pause: Arc<AtomicBool>,
     events: Vec<JobEventDto>,
 }
 
@@ -103,19 +105,33 @@ impl ScanJobManager {
         let root_display = request.root.display().to_string();
         let scanner = Scanner::new(ScanOptions::new(request.root));
         let controller = scanner.controller();
+        let enrichment_pause = Arc::new(AtomicBool::new(false));
         let events = scanner.scan();
         let jobs = Arc::clone(&self.jobs);
+        let worker_enrichment_pause = Arc::clone(&enrichment_pause);
 
         {
             let mut jobs = self
                 .jobs
                 .lock()
                 .map_err(|_| "job lock poisoned".to_owned())?;
+            // Evict all but the most recent finished jobs so the map (and their event
+            // buffers) doesn't grow for the lifetime of the process. Ids are monotonic.
+            let mut terminal: Vec<u64> = jobs
+                .iter()
+                .filter(|(_, j)| j.status != JobStatusDto::Running)
+                .map(|(id, _)| *id)
+                .collect();
+            terminal.sort_unstable_by(|a, b| b.cmp(a));
+            for id in terminal.into_iter().skip(3) {
+                jobs.remove(&id);
+            }
             jobs.insert(
                 job_id,
                 JobState {
                     status: JobStatusDto::Running,
                     controller: controller.clone(),
+                    enrichment_pause: Arc::clone(&enrichment_pause),
                     events: Vec::new(),
                 },
             );
@@ -136,9 +152,8 @@ impl ScanJobManager {
             let log_path = request
                 .index_path
                 .with_file_name(format!("{log_stem}-{ts}-{job_id}.log"));
-            let log_file: RefCell<Option<BufWriter<std::fs::File>>> = RefCell::new(
-                std::fs::File::create(&log_path).ok().map(BufWriter::new),
-            );
+            let log_file: RefCell<Option<BufWriter<std::fs::File>>> =
+                RefCell::new(std::fs::File::create(&log_path).ok().map(BufWriter::new));
             let mut timer = PhaseTimer::new();
             let mut phase_watcher = PhaseWatcher::new();
 
@@ -171,7 +186,10 @@ impl ScanJobManager {
                 format!(
                     "job started id={job_id} root={} strategy={}",
                     root_display,
-                    request.scan_strategy.as_deref().unwrap_or(ScanMode::default().as_id())
+                    request
+                        .scan_strategy
+                        .as_deref()
+                        .unwrap_or(ScanMode::default().as_id())
                 ),
             );
 
@@ -184,7 +202,15 @@ impl ScanJobManager {
             for event in events {
                 // Route Verbose events from workers to the log only — skip all other processing.
                 if let ScanEvent::Verbose { phase, message } = &event {
-                    emit_log(&jobs, listener.as_ref(), &log_file, job_id, job_start, phase, message.clone());
+                    emit_log(
+                        &jobs,
+                        listener.as_ref(),
+                        &log_file,
+                        job_id,
+                        job_start,
+                        phase,
+                        message.clone(),
+                    );
                     continue;
                 }
 
@@ -202,7 +228,10 @@ impl ScanJobManager {
                             job_id,
                             job_start,
                             "index_write",
-                            format!("batch committed files_so_far={files_indexed} elapsed_ms={}", job_start.elapsed().as_millis()),
+                            format!(
+                                "batch committed files_so_far={files_indexed} elapsed_ms={}",
+                                job_start.elapsed().as_millis()
+                            ),
                         );
                     }
                 }
@@ -250,7 +279,12 @@ impl ScanJobManager {
                 let mut progress_listener =
                     |progress: crate::index::writer::FinalizationProgress| {
                         if let Some(stats) = &final_stats {
-                            phase_watcher.on_progress(&progress.message, progress.progress_current, progress.progress_total, &mut timer);
+                            phase_watcher.on_progress(
+                                &progress.message,
+                                progress.progress_current,
+                                progress.progress_total,
+                                &mut timer,
+                            );
                             emit_log(
                                 &jobs,
                                 listener.as_ref(),
@@ -260,7 +294,9 @@ impl ScanJobManager {
                                 "finalize",
                                 format!(
                                     "{} ({}/{})",
-                                    progress.message, progress.progress_current, progress.progress_total
+                                    progress.message,
+                                    progress.progress_current,
+                                    progress.progress_total
                                 ),
                             );
                             push_event(
@@ -312,6 +348,10 @@ impl ScanJobManager {
 
                 if !was_completed {
                     // Cancelled or Failed: emit immediately, no refinement.
+                    // Close our file handles first — a terminal event promises the
+                    // index (and its directory) is free for others to open or remove.
+                    log_file.borrow_mut().take();
+                    drop(writer);
                     push_event(&jobs, job_id, event, listener.as_ref());
                 } else if let Some(stats) = completed_stats {
                     // Run refinement first with Running-status progress events, then emit
@@ -319,7 +359,12 @@ impl ScanJobManager {
                     // refinement is done.
                     let mut progress_listener =
                         |progress: crate::index::writer::FinalizationProgress| {
-                            phase_watcher.on_progress(&progress.message, progress.progress_current, progress.progress_total, &mut timer);
+                            phase_watcher.on_progress(
+                                &progress.message,
+                                progress.progress_current,
+                                progress.progress_total,
+                                &mut timer,
+                            );
                             emit_log(
                                 &jobs,
                                 listener.as_ref(),
@@ -329,7 +374,9 @@ impl ScanJobManager {
                                 "finalize",
                                 format!(
                                     "{} ({}/{})",
-                                    progress.message, progress.progress_current, progress.progress_total
+                                    progress.message,
+                                    progress.progress_current,
+                                    progress.progress_total
                                 ),
                             );
                             push_event(
@@ -380,14 +427,106 @@ impl ScanJobManager {
                                 stats.files_scanned,
                             );
                             completed.phase_timings = Some(phase_timings);
-                            push_event(
+
+                            // ---- Phase 2: ontology enrichment (best-effort, never fails the job). ----
+                            emit_log(
                                 &jobs,
-                                job_id,
-                                completed,
                                 listener.as_ref(),
+                                &log_file,
+                                job_id,
+                                job_start,
+                                "enrichment",
+                                "phase 2 starting".to_owned(),
                             );
+                            // Live enrichment progress: emit Running events the scan UI already
+                            // renders, and best-effort-mirror the count into the populator state
+                            // row so ontology_status (the Board's chip) shows it too.
+                            let progress_jobs = Arc::clone(&jobs);
+                            let progress_listener_arc = listener.clone();
+                            let progress_stats = stats.clone();
+                            let state_conn = crate::index::open_index_connection(&request.index_path)
+                                .ok()
+                                .map(Mutex::new);
+                            // A row still claiming 'running' is a leftover from a killed run —
+                            // flip to 'paused' so status reads reflect reality; the orchestrator
+                            // re-marks each populator Running as this pass reaches it.
+                            if let Some(conn) = &state_conn {
+                                if let Ok(conn) = conn.lock() {
+                                    let _ = conn.execute(
+                                        "UPDATE ontology_populator_state SET status='paused' WHERE status='running'",
+                                        [],
+                                    );
+                                }
+                            }
+                            let total_files = stats.files_scanned;
+                            let enrichment_progress: crate::ontology::populators::PopulatorProgress =
+                                Arc::new(move |name: &str, visited: u64| {
+                                    push_event(
+                                        &progress_jobs,
+                                        job_id,
+                                        JobEventDto::running_with_progress(
+                                            job_id,
+                                            format!("Enrichment · {name}"),
+                                            &progress_stats,
+                                            visited.min(total_files),
+                                            total_files.max(1),
+                                        ),
+                                        progress_listener_arc.as_ref(),
+                                    );
+                                    if let Some(conn) = &state_conn {
+                                        if let Ok(conn) = conn.lock() {
+                                            let _ = conn.execute(
+                                                "UPDATE ontology_populator_state
+                                                 SET files_visited = ?2 WHERE populator_name = ?1",
+                                                rusqlite::params![name, visited as i64],
+                                            );
+                                        }
+                                    }
+                                });
+                            match crate::ontology::orchestrator::run_phase2_with_progress(
+                                &request.index_path,
+                                BudgetTier::CheapOnly,
+                                Arc::clone(&worker_enrichment_pause),
+                                Some(enrichment_progress),
+                            ) {
+                                Ok(true) => emit_log(
+                                    &jobs,
+                                    listener.as_ref(),
+                                    &log_file,
+                                    job_id,
+                                    job_start,
+                                    "enrichment",
+                                    "phase 2 completed".to_owned(),
+                                ),
+                                Ok(false) => emit_log(
+                                    &jobs,
+                                    listener.as_ref(),
+                                    &log_file,
+                                    job_id,
+                                    job_start,
+                                    "enrichment",
+                                    "phase 2 skipped (ontology disabled for this index)".to_owned(),
+                                ),
+                                Err(e) => emit_log(
+                                    &jobs,
+                                    listener.as_ref(),
+                                    &log_file,
+                                    job_id,
+                                    job_start,
+                                    "enrichment",
+                                    format!("phase 2 failed (non-fatal): {e}"),
+                                ),
+                            }
+                            let completed =
+                                terminal_after_enrichment(completed, &worker_enrichment_pause);
+                            // Terminal event = "index is free": close handles first.
+                            log_file.borrow_mut().take();
+                            drop(writer);
+                            push_event(&jobs, job_id, completed, listener.as_ref());
                         }
                         Err(error) => {
+                            log_file.borrow_mut().take();
+                            drop(writer);
                             push_event(
                                 &jobs,
                                 job_id,
@@ -401,6 +540,8 @@ impl ScanJobManager {
                     }
                 } else {
                     // Completed but no stats (unexpected) — emit as-is.
+                    log_file.borrow_mut().take();
+                    drop(writer);
                     push_event(&jobs, job_id, event, listener.as_ref());
                 }
             }
@@ -418,6 +559,7 @@ impl ScanJobManager {
             .get(&job_id)
             .ok_or_else(|| format!("unknown scan job {job_id}"))?;
         job.controller.cancel();
+        job.enrichment_pause.store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -607,7 +749,9 @@ impl JobEventDto {
                 log_line: None,
                 phase_timings: None,
             }),
-            ScanEvent::FileIndexed(_) | ScanEvent::FolderIndexed(_) | ScanEvent::Verbose { .. } => None,
+            ScanEvent::FileIndexed(_) | ScanEvent::FolderIndexed(_) | ScanEvent::Verbose { .. } => {
+                None
+            }
         }
     }
 
@@ -652,22 +796,42 @@ impl JobEventDto {
     }
 }
 
+/// Per-job event history cap. The UI renders only the last ~200 log lines and
+/// backfills tolerate gaps, so an unbounded Vec would just leak for the session.
+const MAX_EVENTS_PER_JOB: usize = 1_000;
+
 fn push_event(
     jobs: &Arc<Mutex<HashMap<u64, JobState>>>,
     job_id: u64,
     event: JobEventDto,
     listener: Option<&JobEventListener>,
 ) {
-    if let Ok(mut jobs) = jobs.lock() {
-        if let Some(job) = jobs.get_mut(&job_id) {
-            job.status = event.status.clone();
-            job.events.push(event.clone());
+    // A poisoned lock only means a worker panicked mid-update; the event buffer is
+    // still valid data — recover it rather than silently dropping events forever.
+    let mut jobs = jobs.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(job) = jobs.get_mut(&job_id) {
+        job.status = event.status.clone();
+        if job.events.len() >= MAX_EVENTS_PER_JOB {
+            job.events.remove(0);
         }
+        job.events.push(event.clone());
     }
+    drop(jobs);
 
     if let Some(listener) = listener {
         listener(event);
     }
+}
+
+fn terminal_after_enrichment(
+    mut completed: JobEventDto,
+    enrichment_pause: &Arc<AtomicBool>,
+) -> JobEventDto {
+    if enrichment_pause.load(Ordering::Relaxed) {
+        completed.status = JobStatusDto::Cancelled;
+        completed.message = "cancelled during enrichment".to_owned();
+    }
+    completed
 }
 
 fn emit_log(
@@ -724,15 +888,11 @@ fn write_timing_summary(
 struct PhaseWatcher;
 
 impl PhaseWatcher {
-    fn new() -> Self { Self }
+    fn new() -> Self {
+        Self
+    }
 
-    fn on_progress(
-        &mut self,
-        message: &str,
-        current: u64,
-        total: u64,
-        timer: &mut PhaseTimer,
-    ) {
+    fn on_progress(&mut self, message: &str, current: u64, total: u64, timer: &mut PhaseTimer) {
         let phase: Option<&'static str> = match message {
             "Marking missing files" => Some("mark_deleted"),
             "Computing folder totals" => Some("folder_rollups"),
@@ -755,6 +915,7 @@ impl PhaseWatcher {
 mod tests {
     use super::*;
     use crate::native::api::{index_metadata, query_index_overview, IndexQueryRequest};
+    use rusqlite::Connection;
     use std::fs::{self, File};
     use std::io::Write;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -822,10 +983,13 @@ mod tests {
         assert_eq!(metadata.scan_strategy, "metadata");
 
         {
-            let verify_writer = IndexWriter::open(&index_path).expect("open writer for verification");
+            let verify_writer =
+                IndexWriter::open(&index_path).expect("open writer for verification");
             let candidate_count: i64 = verify_writer
                 .connection()
-                .query_row("SELECT COUNT(*) FROM duplicate_candidates", [], |r| r.get(0))
+                .query_row("SELECT COUNT(*) FROM duplicate_candidates", [], |r| {
+                    r.get(0)
+                })
                 .expect("count candidates");
             let group_count: i64 = verify_writer
                 .connection()
@@ -871,6 +1035,91 @@ mod tests {
             status,
             JobStatusDto::Cancelled | JobStatusDto::Completed
         ));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn cancelled_enrichment_replaces_completed_terminal_event() {
+        let pause = Arc::new(AtomicBool::new(true));
+        let stats = crate::scanner::ScanStats {
+            files_scanned: 7,
+            folders_scanned: 2,
+            bytes_scanned: 99,
+            inaccessible_entries: 0,
+            queue_depth: 0,
+            active_workers: 0,
+            elapsed: Duration::ZERO,
+            files_per_sec: 0.0,
+            bytes_per_sec: 0.0,
+            current_path: None,
+        };
+        let completed = JobEventDto::completed_with_progress(42, "done".to_owned(), &stats, 7, 7);
+
+        let terminal = terminal_after_enrichment(completed, &pause);
+
+        assert_eq!(terminal.status, JobStatusDto::Cancelled);
+        assert_eq!(terminal.message, "cancelled during enrichment");
+        assert_eq!(terminal.files_scanned, 7);
+    }
+
+    #[test]
+    fn cancel_during_phase2_reports_cancelled() {
+        let root = test_root("cancel-during-phase2");
+        let data_root = root.join("data");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(&data_root).expect("failed to create folder");
+        write_file(&data_root.join("logo.psd"), b"photoshop source");
+
+        let manager = ScanJobManager::new();
+        let initial = manager
+            .start_scan_job(StartScanJobRequest {
+                root: data_root.clone(),
+                index_path: index_path.clone(),
+                scan_strategy: None,
+            })
+            .expect("failed to start initial job");
+        wait_for_terminal(&manager, initial.job_id);
+
+        {
+            let conn = Connection::open(&index_path).expect("open index");
+            crate::ontology::enabled::enable(&conn).expect("enable ontology");
+        }
+
+        let manager_for_listener = manager.clone();
+        let rerun = manager
+            .start_scan_job_with_listener(
+                StartScanJobRequest {
+                    root: data_root,
+                    index_path,
+                    scan_strategy: None,
+                },
+                Some(Arc::new(move |event| {
+                    if event
+                        .log_line
+                        .as_ref()
+                        .map(|line| {
+                            line.phase == "enrichment" && line.message == "phase 2 starting"
+                        })
+                        .unwrap_or(false)
+                    {
+                        manager_for_listener
+                            .cancel_job(event.job_id)
+                            .expect("cancel job during phase 2");
+                    }
+                })),
+            )
+            .expect("failed to start rerun job");
+        wait_for_terminal(&manager, rerun.job_id);
+
+        let status = manager.job_status(rerun.job_id).expect("missing status");
+        assert_eq!(status, JobStatusDto::Cancelled);
+
+        let events = manager
+            .job_events_since(rerun.job_id, 0)
+            .expect("failed to fetch events");
+        assert!(events
+            .iter()
+            .any(|event| event.message == "cancelled during enrichment"));
         cleanup(&root);
     }
 
@@ -956,6 +1205,109 @@ mod tests {
                 && event.progress_current <= event.progress_total
         }));
 
+        cleanup(&root);
+    }
+
+    #[test]
+    fn phase2_runs_after_scan_when_ontology_enabled() {
+        let root = test_root("phase2-enabled");
+        let data_root = root.join("data");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(&data_root).expect("failed to create folder");
+        write_file(&data_root.join("logo.psd"), b"photoshop source");
+
+        let manager = ScanJobManager::new();
+        let initial = manager
+            .start_scan_job(StartScanJobRequest {
+                root: data_root.clone(),
+                index_path: index_path.clone(),
+                scan_strategy: None,
+            })
+            .expect("failed to start initial job");
+        wait_for_terminal(&manager, initial.job_id);
+
+        {
+            let conn = Connection::open(&index_path).expect("open index");
+            crate::ontology::enabled::enable(&conn).expect("enable ontology");
+        }
+
+        let rerun = manager
+            .start_scan_job(StartScanJobRequest {
+                root: data_root,
+                index_path: index_path.clone(),
+                scan_strategy: None,
+            })
+            .expect("failed to start rerun job");
+        wait_for_terminal(&manager, rerun.job_id);
+
+        let conn = Connection::open(&index_path).expect("open index for verification");
+        let role_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ontology_attrs WHERE key = 'role' AND value = 'source'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count ontology role attrs");
+        assert!(role_count > 0, "expected PSD source role attr");
+
+        let events = manager
+            .job_events_since(rerun.job_id, 0)
+            .expect("failed to fetch events");
+        assert!(
+            events.iter().any(|event| {
+                event
+                    .log_line
+                    .as_ref()
+                    .map(|line| line.phase == "enrichment")
+                    .unwrap_or(false)
+            }),
+            "expected enrichment log line"
+        );
+
+        drop(conn);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn phase2_is_noop_when_ontology_disabled() {
+        let root = test_root("phase2-disabled");
+        let data_root = root.join("data");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(&data_root).expect("failed to create folder");
+        write_file(&data_root.join("logo.psd"), b"photoshop source");
+
+        let manager = ScanJobManager::new();
+        let response = manager
+            .start_scan_job(StartScanJobRequest {
+                root: data_root,
+                index_path: index_path.clone(),
+                scan_strategy: None,
+            })
+            .expect("failed to start job");
+        wait_for_terminal(&manager, response.job_id);
+
+        let conn = Connection::open(&index_path).expect("open index for verification");
+        let role_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ontology_attrs WHERE key = 'role' AND value = 'source'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count ontology role attrs");
+        assert_eq!(role_count, 0, "ontology should remain disabled");
+
+        let events = manager
+            .job_events_since(response.job_id, 0)
+            .expect("failed to fetch events");
+        assert!(
+            events
+                .iter()
+                .filter_map(|event| event.log_line.as_ref())
+                .any(|line| line.message.contains("phase 2 skipped")),
+            "expected phase 2 skipped log line"
+        );
+
+        drop(conn);
         cleanup(&root);
     }
 
@@ -1051,7 +1403,12 @@ mod tests {
         let completed = events.iter().find(|e| e.status == JobStatusDto::Completed);
         assert!(completed.is_some(), "no Completed event");
         assert!(
-            completed.unwrap().phase_timings.as_ref().map(|v| !v.is_empty()).unwrap_or(false),
+            completed
+                .unwrap()
+                .phase_timings
+                .as_ref()
+                .map(|v| !v.is_empty())
+                .unwrap_or(false),
             "Completed event missing phase_timings"
         );
 

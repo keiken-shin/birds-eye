@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "dev.birdseye.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev -- --host 127.0.0.1",
-    "beforeBuildCommand": "npm run build",
-    "devUrl": "http://127.0.0.1:5173",
-    "frontendDist": "../frontend/dist"
+    "beforeDevCommand": { "script": "npm run dev", "cwd": "../workspace" },
+    "beforeBuildCommand": { "script": "npm run build", "cwd": "../workspace" },
+    "devUrl": "http://127.0.0.1:5174",
+    "frontendDist": "../workspace/dist"
   },
   "app": {
     "windows": [
@@ -20,10 +20,10 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: http://asset.localhost; media-src 'self' asset: http://asset.localhost; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:5174",
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": []
       }
     }
   },

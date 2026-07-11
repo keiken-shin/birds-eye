@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "workspace",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "workspace",
+      "port": 5174
+    },
+    {
+      "name": "design-comps",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "http-server", "docs/goal", "-p", "5199", "-c-1", "--silent"],
+      "port": 5199
+    }
+  ]
+}
