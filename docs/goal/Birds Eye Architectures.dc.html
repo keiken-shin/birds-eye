@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Architects+Daughter&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:#e7e5df;}
+  ::selection{background:#cdeedb;}
+</style>
+</helmet>
+
+<div style="width:max-content;min-width:100%;min-height:100vh;box-sizing:border-box;padding:40px 48px 80px;background:#e7e5df;font-family:'JetBrains Mono',monospace;color:#23241f;">
+
+  <!-- ===== Masthead ===== -->
+  <div style="max-width:1320px;margin:0 auto 26px;">
+    <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;">
+      <div style="font-family:'Architects Daughter',cursive;font-size:34px;line-height:1;">Bird's Eye</div>
+      <div style="font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#8a8b80;border:1.5px solid #c4c3ba;border-radius:5px;padding:4px 9px;">Storage Intelligence · Architecture Study</div>
+    </div>
+    <div style="margin-top:10px;font-size:13.5px;line-height:1.6;color:#55564d;max-width:760px;">Three fundamentally different application shells for the same product — a platform for <em>investigating</em> a storage ecosystem, not browsing folders. Low-fidelity wireframes to compare the information architecture and navigation model before committing one to high fidelity.</div>
+  </div>
+
+  <!-- ===== Tab bar ===== -->
+  <div style="max-width:1320px;margin:0 auto 22px;display:flex;align-items:center;gap:6px;border-bottom:1.5px solid #c9c8bf;padding-bottom:12px;flex-wrap:wrap;">
+    <div onClick="{{ tabUnified }}" style="{{ tabStyleUnified }}">◆ The Synthesis</div>
+    <div onClick="{{ tabOverview }}" style="{{ tabStyleOverview }}">◇ The 3 lenses</div>
+    <div onClick="{{ tabA }}" style="{{ tabStyleA }}">A · Workspace</div>
+    <div onClick="{{ tabB }}" style="{{ tabStyleB }}">B · Investigation Board</div>
+    <div onClick="{{ tabC }}" style="{{ tabStyleC }}">C · Command-Centric</div>
+    <div onClick="{{ tabScan }}" style="{{ tabStyleScan }}">◎ Scan &amp; System</div>
+    <div style="margin-left:auto;font-size:11px;color:#9a9b90;letter-spacing:.06em;">click a tab · all share the same data + workflow</div>
+  </div>
+
+  <!-- ===== UNIFIED / SYNTHESIS PANEL ===== -->
+  <div style="{{ showUnified }}">
+    <div style="max-width:1320px;margin:0 auto;" data-screen-label="Synthesis">
+
+      <!-- header -->
+      <div style="margin-bottom:16px;">
+        <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;">
+          <div style="font-size:11px;color:#1f9d5c;letter-spacing:.1em;">RECOMMENDED DIRECTION</div>
+          <div style="font-family:'Architects Daughter',cursive;font-size:32px;">One workspace · three lenses · a command spine</div>
+        </div>
+        <div style="font-size:13px;line-height:1.65;color:#55564d;max-width:880px;margin-top:8px;">The three architectures aren't rivals — they're the same workspace seen three ways. The <b>shell</b> (A) is the frame that never reloads. The <b>command bar</b> (C) is the spine that drives it. The <b>stage</b> is a lens you flip between Treemap, Board, and Results — and a shared Inspector + Cleanup Tray collect from every lens, so you change <em>how you look</em>, never <em>where you are</em>.</div>
+      </div>
+
+      <!-- provenance legend -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;font-size:11.5px;">
+        <span style="display:flex;align-items:center;gap:7px;border:1.5px solid #c9c8bf;border-radius:7px;padding:5px 11px;background:#fbfbf8;"><span style="width:18px;height:18px;border-radius:50%;background:#23241f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;">A</span> Shell — persistent panels, tree, inspector, tray</span>
+        <span style="display:flex;align-items:center;gap:7px;border:1.5px solid #c9c8bf;border-radius:7px;padding:5px 11px;background:#fbfbf8;"><span style="width:18px;height:18px;border-radius:50%;background:#1f9d5c;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;">B</span> Board — spatial canvas of linked findings</span>
+        <span style="display:flex;align-items:center;gap:7px;border:1.5px solid #c9c8bf;border-radius:7px;padding:5px 11px;background:#fbfbf8;"><span style="width:18px;height:18px;border-radius:50%;background:#3a6df0;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;">C</span> Command — query spine + actionable results</span>
+      </div>
+
+      <!-- ===== UNIFIED WIREFRAME ===== -->
+      <div style="border:2px solid #3a3b35;border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 2px 0 #cfcec5;">
+        <!-- title bar -->
+        <div style="height:34px;background:#f0efe9;border-bottom:1.5px solid #c9c8bf;display:flex;align-items:center;padding:0 12px;gap:7px;">
+          <span style="width:11px;height:11px;border-radius:50%;border:1.5px solid #b9b8af;"></span>
+          <span style="width:11px;height:11px;border-radius:50%;border:1.5px solid #b9b8af;"></span>
+          <span style="width:11px;height:11px;border-radius:50%;border:1.5px solid #b9b8af;"></span>
+          <span style="margin-left:14px;font-size:12px;color:#8a8b80;">Bird's Eye — Q2 Reclaim sweep · 1.82 TB</span>
+        </div>
+
+        <!-- COMMAND SPINE (C) spanning full width above the stage -->
+        <div style="border-bottom:1.5px solid #d7d6cd;background:#f7f6f1;padding:11px 14px;display:flex;align-items:center;gap:12px;position:relative;">
+          <span style="position:absolute;left:-1px;top:-1px;bottom:-1px;width:5px;background:#3a6df0;"></span>
+          <span style="width:19px;height:19px;border-radius:50%;background:#3a6df0;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;flex:none;">C</span>
+          <div style="flex:1;border:2px solid #3a3b35;border-radius:9px;background:#fff;padding:9px 13px;display:flex;align-items:center;gap:10px;">
+            <span style="color:#3a6df0;">▸</span><span style="font-size:13.5px;">what relates to Docker — and what's safe to delete</span><span style="width:1.5px;height:15px;background:#3a6df0;"></span><span style="margin-left:auto;font-size:10.5px;color:#9a9b90;">⌥⌘K · ↵ run · ⇧↵ stage</span>
+          </div>
+          <!-- lens switcher -->
+          <div style="display:flex;border:1.5px solid #c9c8bf;border-radius:9px;overflow:hidden;flex:none;font-size:12px;">
+            <span style="padding:8px 12px;color:#6b6c63;border-right:1.5px solid #d7d6cd;">▦ Treemap</span>
+            <span style="padding:8px 12px;background:#e1f1e7;color:#1f7a48;border-right:1.5px solid #1f9d5c;">⬡ Board</span>
+            <span style="padding:8px 12px;color:#6b6c63;">▸ Results</span>
+          </div>
+        </div>
+
+        <!-- BODY -->
+        <div style="display:flex;height:520px;">
+          <!-- activity rail (A) -->
+          <div style="width:60px;flex:none;background:#f0efe9;border-right:1.5px solid #d7d6cd;display:flex;flex-direction:column;align-items:center;padding-top:12px;gap:6px;position:relative;">
+            <span style="position:absolute;left:0;top:0;bottom:0;width:5px;background:#23241f;"></span>
+            <div style="width:40px;height:40px;border-radius:9px;background:#e1f1e7;border:1.5px solid #1f9d5c;display:flex;align-items:center;justify-content:center;font-size:13px;color:#1f7a48;">▦</div>
+            <div style="width:40px;height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#8a8b80;">◎</div>
+            <div style="width:40px;height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#8a8b80;">✦</div>
+            <div style="width:40px;height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#8a8b80;">◷</div>
+            <div style="margin-top:auto;margin-bottom:12px;font-size:14px;color:#8a8b80;">⚙</div>
+          </div>
+
+          <!-- scope tree + history (A + C) -->
+          <div style="width:198px;flex:none;border-right:1.5px solid #d7d6cd;background:#fbfbf8;padding:11px 11px 0;overflow:hidden;">
+            <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;margin-bottom:8px;">SCOPE</div>
+            <div style="display:flex;flex-direction:column;gap:2px;font-size:11px;">
+              <div style="display:flex;justify-content:space-between;padding:3px 6px;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:5px;color:#1f7a48;"><span>▾ dev</span><span>486 GB</span></div>
+              <div style="display:flex;justify-content:space-between;padding:3px 6px 3px 18px;color:#6b6c63;"><span>Docker</span><span>121 GB</span></div>
+              <div style="display:flex;justify-content:space-between;padding:3px 6px 3px 18px;color:#6b6c63;"><span>node_modules</span><span>198 GB</span></div>
+              <div style="display:flex;justify-content:space-between;padding:3px 6px;color:#9a9b90;"><span>▸ Movies</span><span>642 GB</span></div>
+              <div style="display:flex;justify-content:space-between;padding:3px 6px;color:#9a9b90;"><span>▸ Backups</span><span>288 GB</span></div>
+            </div>
+            <div style="margin-top:13px;font-size:9.5px;letter-spacing:.14em;color:#3a6df0;margin-bottom:7px;">⌘ HISTORY</div>
+            <div style="display:flex;flex-direction:column;gap:4px;font-size:10.5px;">
+              <div style="border:1.5px solid #c3d2fb;background:#eef2fe;border-radius:5px;padding:5px 7px;color:#3a6df0;">▸ what relates to Docker</div>
+              <div style="border:1.5px solid #e0ded5;border-radius:5px;padding:5px 7px;color:#6b6c63;">▸ files &gt;1GB stale 12mo</div>
+              <div style="border:1.5px dashed #c9c8bf;border-radius:5px;padding:5px 7px;color:#8a8b80;">★ weekly reclaim audit</div>
+            </div>
+          </div>
+
+          <!-- STAGE: Board lens hosting all viz types -->
+          <div style="flex:1;min-width:0;position:relative;background-color:#fbfbf8;background-image:radial-gradient(#dcdbd2 1.3px,transparent 1.3px);background-size:22px 22px;overflow:hidden;">
+            <div style="position:absolute;top:10px;left:12px;font-size:9.5px;letter-spacing:.14em;color:#1f7a48;z-index:3;display:flex;align-items:center;gap:6px;"><span style="width:15px;height:15px;border-radius:50%;background:#1f9d5c;color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;">B</span> BOARD LENS — every answer lands here as a card</div>
+
+            <!-- edges -->
+            <svg viewBox="0 0 760 486" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;">
+              <line x1="190" y1="150" x2="330" y2="120" stroke="#3a6df0" stroke-width="2.5"/>
+              <line x1="470" y1="170" x2="560" y2="300" stroke="#1f9d5c" stroke-width="2.5"/>
+              <line x1="210" y1="200" x2="540" y2="320" stroke="#b9b8af" stroke-width="2" stroke-dasharray="5 5"/>
+            </svg>
+
+            <!-- treemap card (A inside the board) -->
+            <div style="position:absolute;top:54px;left:26px;width:200px;background:#fff;border:1.5px solid #b9b8af;border-radius:9px;padding:9px;box-shadow:0 2px 0 #e0ded5;">
+              <div style="font-size:8.5px;letter-spacing:.12em;color:#9a9b90;margin-bottom:6px;display:flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:50%;background:#23241f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:8px;">A</span>▦ TREEMAP CARD · /dev</div>
+              <div style="display:flex;gap:4px;height:84px;">
+                <div style="flex:2;background:#eceae2;border:1.5px solid #b9b8af;border-radius:4px;padding:5px;font-size:9px;">node_modules<br><span style="color:#9a9b90;">198 GB</span></div>
+                <div style="flex:1.2;display:flex;flex-direction:column;gap:4px;"><div style="flex:1.4;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:4px;padding:4px;font-size:9px;color:#1f7a48;">Docker</div><div style="flex:1;background:#eceae2;border:1.5px solid #b9b8af;border-radius:4px;"></div></div>
+              </div>
+              <div style="margin-top:6px;font-size:9px;color:#3a6df0;">↳ "send node to Board" ·  "open as treemap"</div>
+            </div>
+
+            <!-- command-result card (C inside the board) -->
+            <div style="position:absolute;top:64px;left:330px;width:226px;background:#fff;border:2px solid #3a6df0;border-radius:9px;padding:9px;box-shadow:0 2px 0 #c3d2fb;">
+              <div style="font-size:8.5px;letter-spacing:.12em;color:#3a6df0;margin-bottom:6px;display:flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:50%;background:#3a6df0;color:#fff;display:flex;align-items:center;justify-content:center;font-size:8px;">C</span>RESULT CARD · pinned from command</div>
+              <div style="font-size:10.5px;color:#23241f;margin-bottom:7px;">relates-to: Docker</div>
+              <div style="display:flex;flex-direction:column;gap:4px;font-size:10px;">
+                <div style="display:flex;justify-content:space-between;border:1.5px solid #1f9d5c;background:#e1f1e7;border-radius:4px;padding:4px 7px;color:#1f7a48;"><span>dangling layers</span><span>96 GB</span></div>
+                <div style="display:flex;justify-content:space-between;border:1.5px solid #e0ded5;border-radius:4px;padding:4px 7px;color:#6b6c63;"><span>build-cache (shared)</span><span>70 GB</span></div>
+                <div style="display:flex;justify-content:space-between;border:1.5px solid #e0ded5;border-radius:4px;padding:4px 7px;color:#6b6c63;"><span>base images</span><span>38 GB</span></div>
+              </div>
+            </div>
+
+            <!-- finding card -->
+            <div style="position:absolute;top:300px;left:470px;width:218px;background:#e1f1e7;border:2px solid #1f9d5c;border-radius:9px;padding:10px;box-shadow:0 2px 0 #b6dcc4;">
+              <div style="font-size:8.5px;letter-spacing:.12em;color:#1f7a48;margin-bottom:5px;display:flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:50%;background:#1f9d5c;color:#fff;display:flex;align-items:center;justify-content:center;font-size:8px;">B</span>✦ FINDING</div>
+              <div style="font-size:11px;line-height:1.5;color:#1f7a48;">Docker + build-cache share 38 GB of base layers → 166 GB safely reclaimable.</div>
+              <div style="margin-top:8px;display:flex;gap:6px;"><span style="background:#1f9d5c;color:#fff;border-radius:5px;padding:5px 9px;font-size:10.5px;">→ Inspector</span><span style="background:#1f9d5c;color:#fff;border-radius:5px;padding:5px 9px;font-size:10.5px;">⇧↵ stage</span></div>
+            </div>
+
+            <!-- note -->
+            <div style="position:absolute;top:300px;left:60px;width:184px;background:#fff;border:1.5px dashed #c9c8bf;border-radius:9px;padding:9px;">
+              <div style="font-size:8.5px;letter-spacing:.12em;color:#9a9b90;margin-bottom:5px;">✎ NOTE</div>
+              <div style="height:7px;background:#e6e5dd;border-radius:3px;margin-bottom:4px;"></div><div style="height:7px;width:72%;background:#e6e5dd;border-radius:3px;"></div>
+            </div>
+
+            <!-- minimap -->
+            <div style="position:absolute;bottom:12px;right:12px;width:104px;height:64px;background:#fff;border:1.5px solid #c9c8bf;border-radius:6px;padding:5px;">
+              <div style="font-size:7.5px;color:#9a9b90;margin-bottom:3px;">minimap</div>
+              <div style="position:relative;height:38px;"><span style="position:absolute;left:5px;top:2px;width:16px;height:9px;background:#dcdbd2;border-radius:2px;"></span><span style="position:absolute;left:36px;top:3px;width:20px;height:11px;background:#c3d2fb;border-radius:2px;"></span><span style="position:absolute;left:50px;top:22px;width:18px;height:10px;background:#cdeedb;border-radius:2px;"></span><span style="position:absolute;left:3px;top:5px;width:52px;height:26px;border:1.5px solid #1f9d5c;border-radius:2px;"></span></div>
+            </div>
+          </div>
+
+          <!-- shared inspector (A) -->
+          <div style="width:248px;flex:none;border-left:1.5px solid #d7d6cd;background:#fff;padding:13px;overflow:hidden;position:relative;">
+            <span style="position:absolute;right:0;top:0;bottom:0;width:5px;background:#23241f;"></span>
+            <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;margin-bottom:6px;display:flex;align-items:center;gap:6px;"><span style="width:15px;height:15px;border-radius:50%;background:#23241f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;">A</span>INSPECTOR · shared by every lens</div>
+            <div style="font-size:13.5px;margin-bottom:2px;">Docker</div>
+            <div style="font-size:10.5px;color:#9a9b90;margin-bottom:11px;">121 GB · selected on Board</div>
+            <div style="font-size:9.5px;letter-spacing:.1em;color:#9a9b90;margin-bottom:5px;">WHY IT EXISTS</div>
+            <div style="height:8px;background:#e6e5dd;border-radius:3px;margin-bottom:4px;"></div><div style="height:8px;width:76%;background:#e6e5dd;border-radius:3px;margin-bottom:11px;"></div>
+            <div style="font-size:9.5px;letter-spacing:.1em;color:#9a9b90;margin-bottom:5px;">RELATED (live graph)</div>
+            <div style="display:flex;flex-direction:column;gap:4px;font-size:10.5px;color:#6b6c63;margin-bottom:11px;">
+              <div style="border:1.5px solid #e0ded5;border-radius:5px;padding:4px 7px;display:flex;justify-content:space-between;"><span>↳ build-cache</span><span>shared</span></div>
+              <div style="border:1.5px solid #e0ded5;border-radius:5px;padding:4px 7px;display:flex;justify-content:space-between;"><span>↳ stopped containers</span><span>4</span></div>
+            </div>
+            <div style="font-size:9.5px;letter-spacing:.1em;color:#9a9b90;margin-bottom:5px;">SAFE TO REMOVE</div>
+            <div style="border:1.5px solid #1f9d5c;background:#e1f1e7;border-radius:6px;padding:7px 9px;font-size:10.5px;color:#1f7a48;margin-bottom:9px;">96 GB reclaimable · last used 5 mo · not referenced by running services</div>
+            <div style="display:flex;gap:6px;"><div style="flex:1;background:#1f9d5c;color:#fff;border-radius:6px;padding:7px;text-align:center;font-size:11.5px;">Add to tray</div><div style="border:1.5px solid #c9c8bf;border-radius:6px;padding:7px 9px;font-size:11.5px;color:#6b6c63;">⋯</div></div>
+          </div>
+        </div>
+
+        <!-- shared cleanup tray (A) -->
+        <div style="height:42px;border-top:1.5px solid #c9c8bf;background:#f0efe9;display:flex;align-items:center;padding:0 14px;gap:12px;font-size:11.5px;color:#6b6c63;position:relative;">
+          <span style="position:absolute;left:0;right:0;bottom:0;height:5px;background:#23241f;"></span>
+          <span style="display:flex;align-items:center;gap:6px;"><span style="width:15px;height:15px;border-radius:50%;background:#23241f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;">A</span>Cleanup tray — collects from <em>every</em> lens</span>
+          <span style="background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:5px;padding:3px 8px;color:#1f7a48;">Docker · 96 GB</span>
+          <span style="border:1.5px dashed #c9c8bf;border-radius:5px;padding:3px 8px;">build-cache · 70 GB</span>
+          <span style="margin-left:auto;color:#1f7a48;">166 GB staged</span>
+          <span style="background:#1f9d5c;color:#fff;border-radius:6px;padding:5px 12px;">Review &amp; clean →</span>
+        </div>
+      </div>
+
+      <!-- ===== ANNOTATIONS ===== -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:20px;">
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">What each contributes</div>
+          <div style="font-size:12px;line-height:1.6;color:#55564d;display:flex;flex-direction:column;gap:7px;">
+            <div><span style="display:inline-flex;width:16px;height:16px;border-radius:50%;background:#23241f;color:#fff;align-items:center;justify-content:center;font-size:9px;vertical-align:middle;margin-right:5px;">A</span><b>Shell</b> — the permanent frame: rail, tree, inspector, tray. Nothing reloads.</div>
+            <div><span style="display:inline-flex;width:16px;height:16px;border-radius:50%;background:#1f9d5c;color:#fff;align-items:center;justify-content:center;font-size:9px;vertical-align:middle;margin-right:5px;">B</span><b>Board</b> — the stage's most powerful lens; every answer can persist as a linked card.</div>
+            <div><span style="display:inline-flex;width:16px;height:16px;border-radius:50%;background:#3a6df0;color:#fff;align-items:center;justify-content:center;font-size:9px;vertical-align:middle;margin-right:5px;">C</span><b>Command</b> — the spine that issues verbs &amp; questions to whatever lens is open.</div>
+          </div>
+        </div>
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">The glue — why no context-switching</div>
+          <div style="font-size:12px;line-height:1.7;color:#55564d;">Two things are <em>global</em> and shared by all three lenses: <b>selection</b> (drives the one Inspector) and the <b>cleanup tray</b> (collects staged items from anywhere). So flipping Treemap → Board → Results never loses your place — the right rail and bottom tray stay put while only the stage changes how it draws.</div>
+        </div>
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Workflow — one continuous loop</div>
+          <div style="font-size:11.5px;line-height:1.55;color:#55564d;display:flex;flex-direction:column;gap:5px;">
+            <div><b>Scan</b> — pick scope in tree, or type a command.</div>
+            <div><b>Explore</b> — Treemap lens for size-first browsing.</div>
+            <div><b>Discover</b> — command "relate" → result pins to Board.</div>
+            <div><b>Evaluate</b> — shared Inspector judges safety.</div>
+            <div><b>Clean</b> — shared tray, from any lens.</div>
+            <div><b>Learn</b> — Board + history keep the reasoning.</div>
+          </div>
+        </div>
+        <div style="grid-column:1 / 3;border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Navigation model — lenses, not pages</div>
+          <div style="font-size:12px;line-height:1.7;color:#55564d;">The stage has exactly one switcher: <b>Treemap · Board · Results</b>. It changes the <em>representation</em> of the current scope — not the location. Cross-lens verbs stitch them together: <em>send to Board</em>, <em>open as Treemap</em>, <em>pin result</em>, <em>focus inspector</em>. The command bar (⌥⌘K) and history stack are the universal "address bar" + back button; the minimap handles long-range board moves. You never load a page — you change how you're looking or what you're asking.</div>
+        </div>
+        <div style="border:1.5px solid #1f9d5c;border-radius:10px;background:#fff;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Why this beats picking one</div>
+          <div style="font-size:12px;line-height:1.55;color:#1f7a48;margin-bottom:8px;">＋ Browsers get the Treemap, investigators get the Board, experts get the Command bar — same product, no compromise. Findings persist; cleanup is one shared tray.</div>
+          <div style="font-size:12px;line-height:1.55;color:#a85a3c;">－ More to build &amp; more to teach — needs a clear default lens per scope and restrained cross-lens verbs so it doesn't feel like three apps bolted together.</div>
+        </div>
+      </div>
+
+      <!-- ===== RESOLVING TEAMMATE QUESTIONS ===== -->
+      <div style="margin-top:34px;border-top:1.5px dashed #c4c3ba;padding-top:24px;">
+        <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+          <span style="font-family:'Architects Daughter',cursive;font-size:24px;">Resolving the open questions</span>
+          <span style="font-size:11px;color:#9a9b90;letter-spacing:.06em;">three behaviours that were implied but not drawn — now specified</span>
+        </div>
+      </div>
+
+      <!-- Q1 — review system -->
+      <div style="margin-top:18px;border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:18px 20px;">
+        <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:16px;">
+          <span style="flex:none;background:#23241f;color:#fff;font-size:10px;letter-spacing:.08em;border-radius:5px;padding:4px 8px;margin-top:2px;">Q · “Review &amp; clean”</span>
+          <span style="font-size:13px;line-height:1.55;color:#55564d;">“How is the review system going to be?” — Cleaning is never one click. <b>Review &amp; clean</b> opens a gate: every staged item is re-checked at that moment, protected items are surfaced, and disposal defaults to recoverable <b>Quarantine</b>. Nothing leaves disk until you confirm here.</span>
+        </div>
+
+        <!-- Review & Clean drawer wireframe -->
+        <div style="display:flex;justify-content:center;">
+        <div style="width:560px;max-width:100%;border:2px solid #3a3b35;border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 3px 0 #cfcec5;">
+          <div style="background:#f0efe9;border-bottom:1.5px solid #c9c8bf;padding:13px 16px;display:flex;align-items:center;gap:10px;">
+            <span style="font-size:14px;">Review before cleaning</span>
+            <span style="font-size:11px;color:#8a8b80;">3 items · 166 GB to reclaim</span>
+            <span style="margin-left:auto;font-size:14px;color:#9a9b90;">✕</span>
+          </div>
+          <div style="padding:10px 16px;border-bottom:1.5px solid #e0ded5;background:#e1f1e7;font-size:11.5px;color:#1f7a48;display:flex;align-items:center;gap:8px;">⟳ Re-verified just now — no item is referenced by a running service.</div>
+
+          <!-- staged items -->
+          <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;">
+            <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;">STAGED — WILL BE REMOVED</div>
+            <div style="border:1.5px solid #1f9d5c;background:#fff;border-radius:8px;padding:10px 11px;display:flex;align-items:center;gap:11px;">
+              <span style="width:17px;height:17px;border-radius:4px;background:#1f9d5c;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;flex:none;">✓</span>
+              <div style="flex:1;min-width:0;"><div style="font-size:12.5px;">Docker · dangling layers</div><div style="font-size:10.5px;color:#9a9b90;">unused 5 mo · regenerated on next build</div></div>
+              <span style="font-size:10px;color:#1f7a48;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:5px;padding:3px 7px;flex:none;">SAFE</span>
+              <span style="font-size:12px;color:#23241f;width:54px;text-align:right;flex:none;">96 GB</span>
+            </div>
+            <div style="border:1.5px solid #1f9d5c;background:#fff;border-radius:8px;padding:10px 11px;display:flex;align-items:center;gap:11px;">
+              <span style="width:17px;height:17px;border-radius:4px;background:#1f9d5c;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;flex:none;">✓</span>
+              <div style="flex:1;min-width:0;"><div style="font-size:12.5px;">build-cache</div><div style="font-size:10.5px;color:#9a9b90;">regenerable · safe to clear</div></div>
+              <span style="font-size:10px;color:#1f7a48;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:5px;padding:3px 7px;flex:none;">SAFE</span>
+              <span style="font-size:12px;color:#23241f;width:54px;text-align:right;flex:none;">70 GB</span>
+            </div>
+          </div>
+
+          <!-- protected -->
+          <div style="padding:0 16px 12px;display:flex;flex-direction:column;gap:8px;">
+            <div style="font-size:9.5px;letter-spacing:.14em;color:#a85a3c;">HELD BACK BY SAFETY — WON'T DELETE</div>
+            <div style="border:1.5px solid #e6c8b8;background:#faf2ec;border-radius:8px;padding:10px 11px;display:flex;align-items:center;gap:11px;">
+              <span style="width:17px;height:17px;border-radius:4px;border:1.5px solid #d9a98f;display:flex;align-items:center;justify-content:center;font-size:10px;color:#a85a3c;flex:none;">🔒</span>
+              <div style="flex:1;min-width:0;"><div style="font-size:12.5px;color:#8a6a55;">postgres-data volume</div><div style="font-size:10.5px;color:#b08a72;">referenced by a running container — protected</div></div>
+              <span style="font-size:10px;color:#a85a3c;border:1.5px solid #e6c8b8;border-radius:5px;padding:3px 7px;flex:none;">BLOCKED</span>
+              <span style="font-size:12px;color:#b08a72;width:54px;text-align:right;flex:none;">12 GB</span>
+            </div>
+          </div>
+
+          <!-- disposal mode -->
+          <div style="padding:0 16px 14px;">
+            <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;margin-bottom:7px;">DISPOSAL MODE</div>
+            <div style="display:flex;gap:8px;">
+              <div style="flex:1;border:1.5px solid #1f9d5c;background:#e1f1e7;border-radius:8px;padding:9px 11px;"><div style="font-size:11.5px;color:#1f7a48;">⦿ Quarantine</div><div style="font-size:10px;color:#1f7a48;opacity:.8;">recoverable 30 days · default</div></div>
+              <div style="flex:1;border:1.5px solid #c9c8bf;border-radius:8px;padding:9px 11px;"><div style="font-size:11.5px;color:#6b6c63;">◯ Delete permanently</div><div style="font-size:10px;color:#9a9b90;">frees space immediately</div></div>
+            </div>
+          </div>
+
+          <!-- footer -->
+          <div style="border-top:1.5px solid #c9c8bf;background:#f0efe9;padding:12px 16px;display:flex;align-items:center;gap:10px;">
+            <span style="font-size:10.5px;color:#8a8b80;">↩ reversible for 30 days via Timeline</span>
+            <span style="margin-left:auto;border:1.5px solid #c9c8bf;border-radius:7px;padding:7px 13px;font-size:12px;color:#6b6c63;">Cancel</span>
+            <span style="background:#1f9d5c;color:#fff;border-radius:7px;padding:7px 14px;font-size:12px;">Quarantine 166 GB →</span>
+          </div>
+        </div>
+        </div>
+      </div>
+
+      <!-- Q2 + Q3 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <span style="display:inline-block;background:#3a6df0;color:#fff;font-size:10px;letter-spacing:.08em;border-radius:5px;padding:4px 8px;margin-bottom:10px;">Q · the command bar</span>
+          <div style="font-family:'Architects Daughter',cursive;font-size:18px;margin-bottom:8px;">Does a command change the board, or just link to it?</div>
+          <div style="font-size:12px;line-height:1.7;color:#55564d;"><b>Visually linked — never a mutation.</b> Running a command renders its answer as a <em>result card pinned to the Board</em> and draws edges to the cards it relates to. It's a live, re-runnable query view, not an edit to your files. The only thing that ever touches disk is staging an item into the tray and clearing the Review gate above. Commands explore; the gate acts.</div>
+        </div>
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <span style="display:inline-block;background:#1f9d5c;color:#fff;font-size:10px;letter-spacing:.08em;border-radius:5px;padding:4px 8px;margin-bottom:10px;">Q · the lens switcher</span>
+          <div style="font-family:'Architects Daughter',cursive;font-size:18px;margin-bottom:8px;">So the treemap and board are switchable?</div>
+          <div style="font-size:12px;line-height:1.7;color:#55564d;"><b>Yes — they're two lenses on the same scope.</b> The switcher (Treemap · Board · Results) only changes how the stage <em>draws</em> the current selection; it doesn't navigate anywhere. Your selection, the Inspector, and the Cleanup Tray all persist across the flip — so you can browse sizes in Treemap, hit one key, and the same data becomes a board you can annotate and link.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===== OVERVIEW PANEL ===== -->
+  <div style="{{ showOverview }}">
+    <div style="max-width:1320px;margin:0 auto;">
+
+      <!-- Workflow loop -->
+      <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:20px 22px;margin-bottom:22px;">
+        <div style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#9a9b90;margin-bottom:14px;">The workflow every architecture must serve</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-family:'Architects Daughter',cursive;font-size:18px;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:7px;padding:6px 14px;">Scan</span>
+          <span style="color:#b3b4a8;">→</span>
+          <span style="font-family:'Architects Daughter',cursive;font-size:18px;background:#f0efe9;border:1.5px solid #c4c3ba;border-radius:7px;padding:6px 14px;">Explore</span>
+          <span style="color:#b3b4a8;">→</span>
+          <span style="font-family:'Architects Daughter',cursive;font-size:18px;background:#f0efe9;border:1.5px solid #c4c3ba;border-radius:7px;padding:6px 14px;">Discover</span>
+          <span style="color:#b3b4a8;">→</span>
+          <span style="font-family:'Architects Daughter',cursive;font-size:18px;background:#f0efe9;border:1.5px solid #c4c3ba;border-radius:7px;padding:6px 14px;">Evaluate</span>
+          <span style="color:#b3b4a8;">→</span>
+          <span style="font-family:'Architects Daughter',cursive;font-size:18px;background:#f0efe9;border:1.5px solid #c4c3ba;border-radius:7px;padding:6px 14px;">Clean</span>
+          <span style="color:#b3b4a8;">→</span>
+          <span style="font-family:'Architects Daughter',cursive;font-size:18px;background:#f0efe9;border:1.5px solid #c4c3ba;border-radius:7px;padding:6px 14px;">Learn</span>
+          <span style="color:#b3b4a8;">↻</span>
+          <span style="font-size:12px;color:#8a8b80;margin-left:4px;">a continuous loop — never a linear funnel that ends</span>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 22px;margin-bottom:22px;display:flex;gap:32px;flex-wrap:wrap;align-items:center;">
+        <div style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#9a9b90;">Wireframe legend</div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#55564d;"><span style="width:26px;height:16px;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:4px;display:inline-block;"></span> active / safe-to-act</div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#55564d;"><span style="width:26px;height:16px;background:#f0efe9;border:1.5px solid #c4c3ba;border-radius:4px;display:inline-block;"></span> panel / surface</div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#55564d;"><span style="width:40px;height:8px;background:#dcdbd2;border-radius:3px;display:inline-block;"></span> placeholder content</div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#55564d;"><span style="font-family:'Architects Daughter',cursive;font-size:15px;color:#1f9d5c;">①②③</span> workflow step annotations</div>
+      </div>
+
+      <!-- Comparison cards -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;">
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fff;padding:18px 18px 20px;">
+          <div style="font-size:11px;color:#9a9b90;letter-spacing:.1em;">ARCHITECTURE A</div>
+          <div style="font-family:'Architects Daughter',cursive;font-size:24px;margin:4px 0 2px;">Workspace</div>
+          <div style="font-size:12px;color:#8a8b80;margin-bottom:14px;">IDE-like · panels + dockable inspector</div>
+          <div style="font-size:12.5px;line-height:1.65;color:#4a4b42;">One persistent shell. A treemap is the center of gravity; everything else docks around it and never replaces it. You drill in place.</div>
+          <div style="margin-top:14px;display:flex;flex-direction:column;gap:7px;font-size:12px;">
+            <div><span style="color:#9a9b90;">Hero viz</span> &nbsp;Treemap</div>
+            <div><span style="color:#9a9b90;">Nav model</span> &nbsp;Spatial panels, no page loads</div>
+            <div><span style="color:#9a9b90;">Best for</span> &nbsp;Methodical drill-down sessions</div>
+          </div>
+          <div onClick="{{ tabA }}" style="margin-top:16px;font-family:'Architects Daughter',cursive;font-size:15px;color:#1f9d5c;cursor:pointer;">open wireframe →</div>
+        </div>
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fff;padding:18px 18px 20px;">
+          <div style="font-size:11px;color:#9a9b90;letter-spacing:.1em;">ARCHITECTURE B</div>
+          <div style="font-family:'Architects Daughter',cursive;font-size:24px;margin:4px 0 2px;">Investigation Board</div>
+          <div style="font-size:12px;color:#8a8b80;margin-bottom:14px;">spatial canvas · Obsidian-graph-like</div>
+          <div style="font-size:12.5px;line-height:1.65;color:#4a4b42;">An infinite board where findings, treemaps and relationship graphs live as cards you arrange. The investigation itself is the document.</div>
+          <div style="margin-top:14px;display:flex;flex-direction:column;gap:7px;font-size:12px;">
+            <div><span style="color:#9a9b90;">Hero viz</span> &nbsp;Relationship graph</div>
+            <div><span style="color:#9a9b90;">Nav model</span> &nbsp;Pan/zoom canvas, spatial memory</div>
+            <div><span style="color:#9a9b90;">Best for</span> &nbsp;Open-ended "why & how related"</div>
+          </div>
+          <div onClick="{{ tabB }}" style="margin-top:16px;font-family:'Architects Daughter',cursive;font-size:15px;color:#1f9d5c;cursor:pointer;">open wireframe →</div>
+        </div>
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fff;padding:18px 18px 20px;">
+          <div style="font-size:11px;color:#9a9b90;letter-spacing:.1em;">ARCHITECTURE C</div>
+          <div style="font-family:'Architects Daughter',cursive;font-size:24px;margin:4px 0 2px;">Command-Centric</div>
+          <div style="font-size:12px;color:#8a8b80;margin-bottom:14px;">keyboard-first · palette drives all</div>
+          <div style="font-size:12.5px;line-height:1.65;color:#4a4b42;">A query bar is the primary interface. You ask questions of your storage; results render below as ranked lists and icicle charts. Minimal chrome.</div>
+          <div style="margin-top:14px;display:flex;flex-direction:column;gap:7px;font-size:12px;">
+            <div><span style="color:#9a9b90;">Hero viz</span> &nbsp;Icicle / ranked results</div>
+            <div><span style="color:#9a9b90;">Nav model</span> &nbsp;Command palette + history stack</div>
+            <div><span style="color:#9a9b90;">Best for</span> &nbsp;Fast experts who know what they want</div>
+          </div>
+          <div onClick="{{ tabC }}" style="margin-top:16px;font-family:'Architects Daughter',cursive;font-size:15px;color:#1f9d5c;cursor:pointer;">open wireframe →</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===== PANEL A ===== -->
+  <div style="{{ showA }}"><div style="max-width:1320px;margin:0 auto;" data-screen-label="Arch A"><!-- header -->
+      <div style="margin-bottom:18px;">
+        <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;">
+          <div style="font-size:11px;color:#9a9b90;letter-spacing:.1em;">ARCHITECTURE A</div>
+          <div style="font-family:'Architects Daughter',cursive;font-size:30px;">The Workspace</div>
+          <div style="font-size:12px;color:#8a8b80;">IDE-like · persistent panels + dockable inspector</div>
+        </div>
+        <div style="font-size:13px;line-height:1.65;color:#55564d;max-width:840px;margin-top:8px;">A single shell that never reloads. The treemap is the immovable center of gravity; the scope tree, inspector, and cleanup tray dock around it. You answer "why is this huge → what relates → what's safe to delete" by moving your eyes, not by navigating away.</div>
+      </div>
+
+      <!-- ===== APP WIREFRAME ===== -->
+      <div style="border:2px solid #3a3b35;border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 2px 0 #cfcec5;">
+        <!-- title bar -->
+        <div style="height:34px;background:#f0efe9;border-bottom:1.5px solid #c9c8bf;display:flex;align-items:center;padding:0 12px;gap:7px;">
+          <span style="width:11px;height:11px;border-radius:50%;border:1.5px solid #b9b8af;display:inline-block;"></span>
+          <span style="width:11px;height:11px;border-radius:50%;border:1.5px solid #b9b8af;display:inline-block;"></span>
+          <span style="width:11px;height:11px;border-radius:50%;border:1.5px solid #b9b8af;display:inline-block;"></span>
+          <span style="margin-left:14px;font-size:12px;color:#8a8b80;">Bird's Eye — Macintosh HD · 1.82 TB scanned</span>
+        </div>
+        <!-- toolbar / breadcrumb -->
+        <div style="height:40px;border-bottom:1.5px solid #d7d6cd;display:flex;align-items:center;padding:0 12px;gap:10px;font-size:12px;color:#6b6c63;">
+          <span style="color:#1f9d5c;">⌂</span><span style="color:#b3b4a8;">/</span><span>Macintosh HD</span><span style="color:#b3b4a8;">/</span><span>Users</span><span style="color:#b3b4a8;">/</span><span style="color:#23241f;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:4px;padding:2px 7px;">dev</span>
+          <span style="margin-left:auto;display:flex;gap:6px;"><span style="border:1.5px solid #c9c8bf;border-radius:5px;padding:3px 9px;">size ▾</span><span style="border:1.5px solid #c9c8bf;border-radius:5px;padding:3px 9px;">last opened ▾</span><span style="border:1.5px solid #c9c8bf;border-radius:5px;padding:3px 9px;">⟳ rescan</span></span>
+        </div>
+
+        <div style="display:flex;height:560px;">
+          <!-- activity rail -->
+          <div style="width:64px;flex:none;background:#f0efe9;border-right:1.5px solid #d7d6cd;display:flex;flex-direction:column;align-items:center;padding-top:12px;gap:4px;">
+            <div style="width:44px;height:44px;border-radius:9px;background:#e1f1e7;border:1.5px solid #1f9d5c;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;color:#1f7a48;gap:2px;">▦<span>map</span></div>
+            <div style="width:44px;height:44px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;color:#8a8b80;gap:2px;">◎<span>scan</span></div>
+            <div style="width:44px;height:44px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;color:#8a8b80;gap:2px;">✦<span>finds</span></div>
+            <div style="width:44px;height:44px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;color:#8a8b80;gap:2px;">★<span>views</span></div>
+            <div style="width:44px;height:44px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;color:#8a8b80;gap:2px;">◷<span>time</span></div>
+            <div style="margin-top:auto;margin-bottom:12px;width:44px;height:44px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;color:#8a8b80;">⚙</div>
+          </div>
+
+          <!-- scope tree -->
+          <div style="width:212px;flex:none;border-right:1.5px solid #d7d6cd;background:#fbfbf8;padding:12px 12px 0;overflow:hidden;">
+            <div style="font-size:10px;letter-spacing:.14em;color:#9a9b90;margin-bottom:9px;">SCOPE</div>
+            <div style="display:flex;flex-direction:column;gap:3px;font-size:12px;">
+              <div style="display:flex;justify-content:space-between;padding:4px 6px;"><span>▸ Applications</span><span style="color:#9a9b90;">112 GB</span></div>
+              <div style="display:flex;justify-content:space-between;padding:4px 6px;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:5px;"><span>▾ dev</span><span style="color:#1f7a48;">486 GB</span></div>
+              <div style="display:flex;justify-content:space-between;padding:4px 6px 4px 20px;color:#6b6c63;"><span>▸ node_modules</span><span>198 GB</span></div>
+              <div style="display:flex;justify-content:space-between;padding:4px 6px 4px 20px;color:#6b6c63;"><span>▸ Docker</span><span>121 GB</span></div>
+              <div style="display:flex;justify-content:space-between;padding:4px 6px 4px 20px;color:#6b6c63;"><span>▸ repos</span><span>97 GB</span></div>
+              <div style="display:flex;justify-content:space-between;padding:4px 6px 4px 20px;color:#6b6c63;"><span>▸ build-cache</span><span>70 GB</span></div>
+              <div style="display:flex;justify-content:space-between;padding:4px 6px;"><span>▸ Movies</span><span style="color:#9a9b90;">642 GB</span></div>
+              <div style="display:flex;justify-content:space-between;padding:4px 6px;"><span>▸ Pictures</span><span style="color:#9a9b90;">301 GB</span></div>
+              <div style="display:flex;justify-content:space-between;padding:4px 6px;"><span>▸ Backups</span><span style="color:#9a9b90;">288 GB</span></div>
+            </div>
+            <div style="margin-top:14px;font-size:10px;letter-spacing:.14em;color:#9a9b90;margin-bottom:8px;">SAVED VIEWS</div>
+            <div style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:#6b6c63;">
+              <div style="border:1.5px dashed #c9c8bf;border-radius:5px;padding:5px 7px;">★ Reclaimable &gt; 1 GB</div>
+              <div style="border:1.5px dashed #c9c8bf;border-radius:5px;padding:5px 7px;">★ Untouched 12 mo+</div>
+            </div>
+          </div>
+
+          <!-- treemap center -->
+          <div style="flex:1;min-width:0;background:#fbfbf8;padding:14px;position:relative;">
+            <div style="position:absolute;top:14px;left:14px;font-size:10px;letter-spacing:.14em;color:#9a9b90;z-index:2;">TREEMAP · /Users/dev · 486 GB</div>
+            <div style="display:flex;gap:6px;height:100%;padding-top:22px;">
+              <!-- col 1 node_modules -->
+              <div style="flex:2.0;display:flex;flex-direction:column;gap:6px;">
+                <div style="flex:3;background:#eceae2;border:1.5px solid #b9b8af;border-radius:5px;padding:9px 10px;position:relative;">
+                  <div style="font-size:12px;">node_modules</div><div style="font-size:11px;color:#9a9b90;">198 GB · 41%</div>
+                  <div style="position:absolute;top:8px;right:8px;width:22px;height:22px;border-radius:50%;background:#1f9d5c;color:#fff;font-family:'Architects Daughter',cursive;font-size:13px;display:flex;align-items:center;justify-content:center;">2</div>
+                  <div style="position:absolute;left:9px;bottom:9px;right:9px;display:flex;gap:4px;"><span style="flex:2;height:18px;background:#e0ded5;border:1px solid #c9c8bf;border-radius:3px;"></span><span style="flex:1;height:18px;background:#e0ded5;border:1px solid #c9c8bf;border-radius:3px;"></span></div>
+                </div>
+                <div style="flex:1.4;background:#eceae2;border:1.5px solid #b9b8af;border-radius:5px;padding:9px 10px;"><div style="font-size:12px;">build-cache</div><div style="font-size:11px;color:#9a9b90;">70 GB</div></div>
+              </div>
+              <!-- col 2 docker + repos -->
+              <div style="flex:1.4;display:flex;flex-direction:column;gap:6px;">
+                <div style="flex:1.6;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:5px;padding:9px 10px;position:relative;"><div style="font-size:12px;">Docker</div><div style="font-size:11px;color:#1f7a48;">121 GB · 13 images</div>
+                  <div style="position:absolute;top:8px;right:8px;width:22px;height:22px;border-radius:50%;background:#1f9d5c;color:#fff;font-family:'Architects Daughter',cursive;font-size:13px;display:flex;align-items:center;justify-content:center;">1</div>
+                </div>
+                <div style="flex:1.3;background:#eceae2;border:1.5px solid #b9b8af;border-radius:5px;padding:9px 10px;"><div style="font-size:12px;">repos</div><div style="font-size:11px;color:#9a9b90;">97 GB</div>
+                  <div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:3px;"><span style="width:30%;height:14px;background:#e0ded5;border:1px solid #c9c8bf;border-radius:2px;"></span><span style="width:22%;height:14px;background:#e0ded5;border:1px solid #c9c8bf;border-radius:2px;"></span><span style="width:18%;height:14px;background:#e0ded5;border:1px solid #c9c8bf;border-radius:2px;"></span></div>
+                </div>
+              </div>
+              <!-- col 3 small -->
+              <div style="flex:0.8;display:flex;flex-direction:column;gap:6px;">
+                <div style="flex:1;background:#eceae2;border:1.5px solid #b9b8af;border-radius:5px;padding:8px 9px;"><div style="font-size:11px;">.cache</div><div style="font-size:10px;color:#9a9b90;">41 GB</div></div>
+                <div style="flex:1;background:#eceae2;border:1.5px solid #b9b8af;border-radius:5px;padding:8px 9px;"><div style="font-size:11px;">venvs</div><div style="font-size:10px;color:#9a9b90;">19 GB</div></div>
+                <div style="flex:0.7;background:#f0efe9;border:1.5px solid #c9c8bf;border-radius:5px;padding:8px 9px;"><div style="font-size:10px;color:#9a9b90;">+ 340 smaller</div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- inspector -->
+          <div style="width:260px;flex:none;border-left:1.5px solid #d7d6cd;background:#fff;padding:14px;overflow:hidden;position:relative;">
+            <div style="position:absolute;top:-1px;right:-1px;width:26px;height:22px;border:1.5px solid #1f9d5c;border-top:none;border-right:none;border-radius:0 0 0 6px;background:#e1f1e7;color:#1f7a48;font-family:'Architects Daughter',cursive;font-size:13px;display:flex;align-items:center;justify-content:center;">3</div>
+            <div style="font-size:10px;letter-spacing:.14em;color:#9a9b90;margin-bottom:6px;">INSPECTOR</div>
+            <div style="font-size:14px;margin-bottom:2px;">Docker</div>
+            <div style="font-size:11px;color:#9a9b90;margin-bottom:12px;">121 GB · /Users/dev/Library/Containers</div>
+            <div style="font-size:10px;letter-spacing:.1em;color:#9a9b90;margin-bottom:5px;">WHY IT EXISTS</div>
+            <div style="height:9px;background:#e6e5dd;border-radius:3px;margin-bottom:4px;"></div><div style="height:9px;width:78%;background:#e6e5dd;border-radius:3px;margin-bottom:12px;"></div>
+            <div style="font-size:10px;letter-spacing:.1em;color:#9a9b90;margin-bottom:5px;">RELATED</div>
+            <div style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:#6b6c63;margin-bottom:12px;">
+              <div style="border:1.5px solid #e0ded5;border-radius:5px;padding:5px 7px;display:flex;justify-content:space-between;"><span>↳ 4 stopped containers</span><span>83 GB</span></div>
+              <div style="border:1.5px solid #e0ded5;border-radius:5px;padding:5px 7px;display:flex;justify-content:space-between;"><span>↳ dangling layers</span><span>38 GB</span></div>
+            </div>
+            <div style="font-size:10px;letter-spacing:.1em;color:#9a9b90;margin-bottom:5px;">SAFE TO REMOVE</div>
+            <div style="border:1.5px solid #1f9d5c;background:#e1f1e7;border-radius:6px;padding:8px 9px;font-size:11px;color:#1f7a48;margin-bottom:10px;">96 GB reclaimable · last used 5 mo ago · not referenced by running services</div>
+            <div style="display:flex;gap:7px;"><div style="flex:1;background:#1f9d5c;color:#fff;border-radius:6px;padding:8px;text-align:center;font-size:12px;">Add to tray</div><div style="border:1.5px solid #c9c8bf;border-radius:6px;padding:8px 10px;font-size:12px;color:#6b6c63;">⋯</div></div>
+          </div>
+        </div>
+
+        <!-- status bar / cleanup tray -->
+        <div style="height:42px;border-top:1.5px solid #c9c8bf;background:#f0efe9;display:flex;align-items:center;padding:0 14px;gap:14px;font-size:12px;color:#6b6c63;">
+          <span style="position:relative;padding-left:26px;"><span style="position:absolute;left:0;top:-13px;width:20px;height:20px;border-radius:50%;background:#1f9d5c;color:#fff;font-family:'Architects Daughter',cursive;font-size:12px;display:flex;align-items:center;justify-content:center;">4</span>Cleanup tray</span>
+          <span style="background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:5px;padding:3px 9px;color:#1f7a48;">Docker · 96 GB</span>
+          <span style="border:1.5px dashed #c9c8bf;border-radius:5px;padding:3px 9px;">build-cache · 70 GB</span>
+          <span style="margin-left:auto;color:#1f7a48;">166 GB staged</span>
+          <span style="background:#1f9d5c;color:#fff;border-radius:6px;padding:5px 12px;">Review &amp; clean →</span>
+        </div>
+      </div>
+
+      <!-- ===== ANNOTATIONS ===== -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:20px;">
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Information architecture</div>
+          <div style="font-size:11.5px;line-height:1.6;color:#55564d;white-space:pre;font-family:'JetBrains Mono',monospace;">Workspace (single)
+├ Activity rail (modes)
+│  ├ Treemap   ├ Scan
+│  ├ Findings  ├ Saved views
+│  └ Timeline
+├ Scope tree (left)
+├ Visualization (center)
+├ Inspector (right, dock)
+└ Cleanup tray (bottom)</div>
+        </div>
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Navigation model</div>
+          <div style="font-size:12px;line-height:1.7;color:#55564d;">No page loads. The shell is permanent; the rail swaps the <em>center</em> mode while tree + inspector persist. Drill-down zooms the treemap in place; breadcrumb tracks depth. Panels are dockable, collapsible, and resizable — like an IDE. Everything is one keystroke or one click away from everything else.</div>
+        </div>
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Workflow walkthrough</div>
+          <div style="font-size:12px;line-height:1.6;color:#55564d;display:flex;flex-direction:column;gap:6px;">
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">①</span> Rescan from toolbar — tree + map repaint.</div>
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">②</span> A big rectangle catches the eye → click to drill.</div>
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">③</span> Inspector explains why it exists + relations.</div>
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">④</span> Stage reclaimable items into the tray.</div>
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">⑤</span> Review &amp; clean → loop repeats, map shrinks.</div>
+          </div>
+        </div>
+        <div style="grid-column:1 / 3;border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Component hierarchy</div>
+          <div style="font-size:11.5px;line-height:1.7;color:#55564d;">&lt;Workspace&gt; → &lt;ActivityRail&gt; · &lt;ScopeTree&gt; · &lt;CenterStage mode="treemap|scan|findings|timeline"&gt; → &lt;TreemapNode&gt;* · &lt;Inspector&gt; → {&lt;WhatPanel&gt;, &lt;WhyPanel&gt;, &lt;RelationsList&gt;, &lt;SafetyVerdict&gt;, &lt;ActionBar&gt;} · &lt;CleanupTray&gt; → &lt;StagedItem&gt;*. The Inspector is a single component bound to "current selection" — selection is global workspace state, so any surface can drive it.</div>
+        </div>
+        <div style="border:1.5px solid #1f9d5c;border-radius:10px;background:#fff;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Trade-offs</div>
+          <div style="font-size:12px;line-height:1.55;color:#1f7a48;margin-bottom:8px;">＋ Zero context-switching; familiar to devs; dense.</div>
+          <div style="font-size:12px;line-height:1.55;color:#a85a3c;">－ Panel-heavy can feel busy; weaker for non-linear "how does this relate" exploration; treemap-first biases toward size over meaning.</div>
+        </div>
+      </div></div></div>
+
+  <!-- ===== PANEL B ===== -->
+  <div style="{{ showB }}"><div style="max-width:1320px;margin:0 auto;" data-screen-label="Arch B"><!-- header -->
+      <div style="margin-bottom:18px;">
+        <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;">
+          <div style="font-size:11px;color:#9a9b90;letter-spacing:.1em;">ARCHITECTURE B</div>
+          <div style="font-family:'Architects Daughter',cursive;font-size:30px;">The Investigation Board</div>
+          <div style="font-size:12px;color:#8a8b80;">infinite spatial canvas · Obsidian-graph-like</div>
+        </div>
+        <div style="font-size:13px;line-height:1.65;color:#55564d;max-width:840px;margin-top:8px;">Each investigation is a board you can pan and zoom. Treemaps, relationship graphs, findings and notes live as cards you drag and connect — so the <em>reasoning</em> is spatial and persistent. You don't switch pages; you wire evidence together until the board itself answers "why & how related," then act from any card.</div>
+      </div>
+
+      <!-- ===== APP WIREFRAME ===== -->
+      <div style="border:2px solid #3a3b35;border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 2px 0 #cfcec5;">
+        <!-- top bar -->
+        <div style="height:40px;background:#f0efe9;border-bottom:1.5px solid #c9c8bf;display:flex;align-items:center;padding:0 12px;gap:10px;font-size:12px;color:#6b6c63;">
+          <span style="color:#1f9d5c;">▦</span><span style="color:#23241f;">Boards</span><span style="color:#b3b4a8;">/</span><span style="color:#23241f;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:4px;padding:2px 8px;">Q2 Reclaim sweep</span>
+          <span style="margin-left:14px;border:1.5px solid #c9c8bf;border-radius:6px;padding:4px 12px;width:300px;color:#9a9b90;">⌕ find files, patterns, relations…</span>
+          <span style="margin-left:auto;display:flex;gap:6px;align-items:center;"><span style="border:1.5px solid #c9c8bf;border-radius:5px;padding:3px 9px;">＋ card</span><span style="border:1.5px solid #c9c8bf;border-radius:5px;padding:3px 9px;">62%</span></span>
+        </div>
+
+        <div style="display:flex;height:562px;">
+          <!-- boards rail -->
+          <div style="width:172px;flex:none;background:#fbfbf8;border-right:1.5px solid #d7d6cd;padding:12px 11px;">
+            <div style="font-size:10px;letter-spacing:.14em;color:#9a9b90;margin-bottom:9px;">BOARDS</div>
+            <div style="display:flex;flex-direction:column;gap:5px;font-size:11.5px;">
+              <div style="background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:6px;padding:7px 9px;color:#1f7a48;">Q2 Reclaim sweep</div>
+              <div style="border:1.5px solid #e0ded5;border-radius:6px;padding:7px 9px;color:#6b6c63;">Docker hygiene</div>
+              <div style="border:1.5px solid #e0ded5;border-radius:6px;padding:7px 9px;color:#6b6c63;">Footage archive plan</div>
+              <div style="border:1.5px solid #e0ded5;border-radius:6px;padding:7px 9px;color:#6b6c63;">Duplicate hunt</div>
+            </div>
+            <div style="margin-top:16px;font-size:10px;letter-spacing:.14em;color:#9a9b90;margin-bottom:9px;">PALETTE</div>
+            <div style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:#6b6c63;">
+              <div style="border:1.5px dashed #c9c8bf;border-radius:6px;padding:6px 8px;">▦ Treemap card</div>
+              <div style="border:1.5px dashed #c9c8bf;border-radius:6px;padding:6px 8px;">⬡ Relation graph</div>
+              <div style="border:1.5px dashed #c9c8bf;border-radius:6px;padding:6px 8px;">✎ Note / finding</div>
+              <div style="border:1.5px dashed #c9c8bf;border-radius:6px;padding:6px 8px;">▤ File list</div>
+            </div>
+          </div>
+
+          <!-- canvas -->
+          <div style="flex:1;min-width:0;position:relative;background-color:#fbfbf8;background-image:radial-gradient(#dcdbd2 1.3px,transparent 1.3px);background-size:22px 22px;overflow:hidden;">
+            <!-- connector edges between cards -->
+            <svg viewBox="0 0 900 562" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;">
+              <line x1="210" y1="92" x2="300" y2="250" stroke="#b9b8af" stroke-width="2" stroke-dasharray="5 5"/>
+              <line x1="470" y1="250" x2="600" y2="150" stroke="#1f9d5c" stroke-width="2.5"/>
+              <line x1="470" y1="300" x2="610" y2="380" stroke="#1f9d5c" stroke-width="2.5"/>
+              <line x1="720" y1="200" x2="720" y2="350" stroke="#b9b8af" stroke-width="2" stroke-dasharray="5 5"/>
+            </svg>
+
+            <!-- question card -->
+            <div style="position:absolute;top:24px;left:24px;width:188px;background:#fff;border:2px solid #3a3b35;border-radius:9px;padding:12px;box-shadow:0 2px 0 #d7d6cd;">
+              <div style="font-size:9px;letter-spacing:.14em;color:#9a9b90;margin-bottom:5px;">QUESTION ①</div>
+              <div style="font-family:'Architects Daughter',cursive;font-size:18px;line-height:1.2;">Why is /dev eating 486 GB?</div>
+            </div>
+
+            <!-- treemap card -->
+            <div style="position:absolute;top:160px;left:60px;width:230px;background:#fff;border:1.5px solid #b9b8af;border-radius:9px;padding:10px;box-shadow:0 2px 0 #e0ded5;">
+              <div style="font-size:9px;letter-spacing:.14em;color:#9a9b90;margin-bottom:6px;">▦ TREEMAP · /dev ②</div>
+              <div style="display:flex;gap:4px;height:96px;">
+                <div style="flex:2;background:#eceae2;border:1.5px solid #b9b8af;border-radius:4px;padding:5px;font-size:9px;">node_modules<br><span style="color:#9a9b90;">198 GB</span></div>
+                <div style="flex:1.2;display:flex;flex-direction:column;gap:4px;"><div style="flex:1.4;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:4px;padding:4px;font-size:9px;color:#1f7a48;">Docker<br>121 GB</div><div style="flex:1;background:#eceae2;border:1.5px solid #b9b8af;border-radius:4px;padding:4px;font-size:9px;">repos</div></div>
+              </div>
+            </div>
+
+            <!-- relationship graph card -->
+            <div style="position:absolute;top:70px;left:560px;width:290px;background:#fff;border:2px solid #1f9d5c;border-radius:9px;padding:10px;box-shadow:0 2px 0 #cdeedb;">
+              <div style="font-size:9px;letter-spacing:.14em;color:#1f7a48;margin-bottom:6px;">⬡ RELATION GRAPH ③ — hero view</div>
+              <div style="position:relative;height:150px;">
+                <svg viewBox="0 0 268 150" style="position:absolute;inset:0;width:100%;height:100%;">
+                  <line x1="60" y1="40" x2="150" y2="30" stroke="#b9b8af" stroke-width="2"/>
+                  <line x1="150" y1="30" x2="210" y2="80" stroke="#1f9d5c" stroke-width="2.5"/>
+                  <line x1="60" y1="40" x2="110" y2="110" stroke="#b9b8af" stroke-width="2"/>
+                  <line x1="210" y1="80" x2="110" y2="110" stroke="#1f9d5c" stroke-width="2.5"/>
+                  <line x1="150" y1="30" x2="110" y2="110" stroke="#b9b8af" stroke-width="2" stroke-dasharray="4 4"/>
+                </svg>
+                <div style="position:absolute;left:24px;top:26px;background:#eceae2;border:1.5px solid #b9b8af;border-radius:20px;padding:4px 9px;font-size:9px;">node_modules</div>
+                <div style="position:absolute;left:120px;top:16px;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:20px;padding:4px 9px;font-size:9px;color:#1f7a48;">Docker</div>
+                <div style="position:absolute;left:182px;top:66px;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:20px;padding:4px 9px;font-size:9px;color:#1f7a48;">build-cache</div>
+                <div style="position:absolute;left:78px;top:98px;background:#eceae2;border:1.5px solid #b9b8af;border-radius:20px;padding:4px 9px;font-size:9px;">repos</div>
+              </div>
+            </div>
+
+            <!-- finding sticky -->
+            <div style="position:absolute;top:360px;left:570px;width:236px;background:#e1f1e7;border:2px solid #1f9d5c;border-radius:9px;padding:11px;box-shadow:0 2px 0 #b6dcc4;">
+              <div style="font-size:9px;letter-spacing:.14em;color:#1f7a48;margin-bottom:5px;">✦ FINDING ④</div>
+              <div style="font-size:11.5px;line-height:1.5;color:#1f7a48;">Docker dangling layers &amp; build-cache reference the <em>same</em> base images — 96 GB reclaimable with no impact on running services.</div>
+              <div style="margin-top:9px;display:flex;gap:6px;"><span style="background:#1f9d5c;color:#fff;border-radius:5px;padding:5px 10px;font-size:11px;">Stage 96 GB ⑤</span><span style="border:1.5px solid #1f9d5c;border-radius:5px;padding:5px 8px;font-size:11px;color:#1f7a48;">⋯</span></div>
+            </div>
+
+            <!-- note card -->
+            <div style="position:absolute;top:330px;left:80px;width:200px;background:#fff;border:1.5px dashed #c9c8bf;border-radius:9px;padding:10px;">
+              <div style="font-size:9px;letter-spacing:.14em;color:#9a9b90;margin-bottom:5px;">✎ NOTE</div>
+              <div style="height:8px;background:#e6e5dd;border-radius:3px;margin-bottom:4px;"></div><div style="height:8px;width:70%;background:#e6e5dd;border-radius:3px;margin-bottom:4px;"></div><div style="height:8px;width:85%;background:#e6e5dd;border-radius:3px;"></div>
+            </div>
+
+            <!-- minimap -->
+            <div style="position:absolute;bottom:14px;right:14px;width:120px;height:78px;background:#fff;border:1.5px solid #c9c8bf;border-radius:6px;padding:6px;">
+              <div style="font-size:8px;color:#9a9b90;margin-bottom:3px;">minimap</div>
+              <div style="position:relative;height:50px;"><span style="position:absolute;left:6px;top:2px;width:18px;height:10px;background:#dcdbd2;border-radius:2px;"></span><span style="position:absolute;left:30px;top:14px;width:22px;height:14px;background:#cdeedb;border-radius:2px;"></span><span style="position:absolute;left:62px;top:6px;width:24px;height:12px;background:#dcdbd2;border-radius:2px;"></span><span style="position:absolute;left:60px;top:30px;width:20px;height:12px;background:#cdeedb;border-radius:2px;"></span><span style="position:absolute;left:4px;top:6px;width:60px;height:30px;border:1.5px solid #1f9d5c;border-radius:2px;"></span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- bottom bar -->
+        <div style="height:40px;border-top:1.5px solid #c9c8bf;background:#f0efe9;display:flex;align-items:center;padding:0 14px;gap:14px;font-size:12px;color:#6b6c63;">
+          <span>8 cards · 5 links</span><span style="color:#b3b4a8;">|</span><span>2 findings open</span>
+          <span style="margin-left:auto;color:#1f7a48;">96 GB staged on this board</span>
+          <span style="background:#1f9d5c;color:#fff;border-radius:6px;padding:5px 12px;">Clean staged →</span>
+        </div>
+      </div>
+
+      <!-- ===== ANNOTATIONS ===== -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:20px;">
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Information architecture</div>
+          <div style="font-size:11.5px;line-height:1.6;color:#55564d;white-space:pre;font-family:'JetBrains Mono',monospace;">Boards (many)
+└ Board = investigation
+   ├ Cards (free-placed)
+   │  ├ Treemap
+   │  ├ Relation graph
+   │  ├ Finding / note
+   │  └ File list
+   ├ Links between cards
+   └ Staged items
+Palette · Search · Minimap</div>
+        </div>
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Navigation model</div>
+          <div style="font-size:12px;line-height:1.7;color:#55564d;">Pan &amp; zoom replace pages — spatial memory <em>is</em> the navigation. Drag from the palette to spawn cards; drag between cards to link evidence. Search drops a result card onto the board. The minimap and board switcher handle long-range jumps. Nothing is ever "closed" — you zoom away and it persists.</div>
+        </div>
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Workflow walkthrough</div>
+          <div style="font-size:12px;line-height:1.6;color:#55564d;display:flex;flex-direction:column;gap:6px;">
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">①</span> Drop a question card to frame the scan.</div>
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">②</span> Pull in a treemap of the suspect scope.</div>
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">③</span> Expand a relation graph — links reveal shared data.</div>
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">④</span> Capture the conclusion as a finding card.</div>
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">⑤</span> Stage &amp; clean straight from the finding.</div>
+          </div>
+        </div>
+        <div style="grid-column:1 / 3;border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Component hierarchy</div>
+          <div style="font-size:11.5px;line-height:1.7;color:#55564d;">&lt;BoardCanvas pan zoom&gt; → &lt;Card kind="treemap|graph|finding|note|list"&gt;* · &lt;Link from to&gt;* · &lt;Palette&gt; · &lt;Search&gt; · &lt;Minimap&gt; · &lt;BoardRail&gt;. Every card exposes the same &lt;ActionBar&gt; (stage / dismiss / link), so cleanup is available wherever attention already is. Cards are self-contained queries — re-running a scan repaints them in place.</div>
+        </div>
+        <div style="border:1.5px solid #1f9d5c;border-radius:10px;background:#fff;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Trade-offs</div>
+          <div style="font-size:12px;line-height:1.55;color:#1f7a48;margin-bottom:8px;">＋ Best-in-class for "how things relate"; reasoning persists; delightful.</div>
+          <div style="font-size:12px;line-height:1.55;color:#a85a3c;">－ Freeform = a blank-canvas cold start; spatial sprawl needs discipline; less efficient for a quick "just delete the obvious".</div>
+        </div>
+      </div></div></div>
+
+  <!-- ===== PANEL C ===== -->
+  <div style="{{ showC }}"><div style="max-width:1320px;margin:0 auto;" data-screen-label="Arch C"><!-- header -->
+      <div style="margin-bottom:18px;">
+        <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;">
+          <div style="font-size:11px;color:#9a9b90;letter-spacing:.1em;">ARCHITECTURE C</div>
+          <div style="font-family:'Architects Daughter',cursive;font-size:30px;">Command-Centric</div>
+          <div style="font-size:12px;color:#8a8b80;">keyboard-first · a query bar drives everything</div>
+        </div>
+        <div style="font-size:13px;line-height:1.65;color:#55564d;max-width:840px;margin-top:8px;">There is almost no chrome. You <em>ask</em> your storage questions in plain language; results render below as an icicle chart and a ranked list, each row actionable inline. Past commands stack into a notebook you can rerun. Built for experts who already know the question and want the answer in two keystrokes.</div>
+      </div>
+
+      <!-- ===== APP WIREFRAME ===== -->
+      <div style="border:2px solid #3a3b35;border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 2px 0 #cfcec5;">
+        <!-- thin top bar -->
+        <div style="height:34px;background:#f0efe9;border-bottom:1.5px solid #c9c8bf;display:flex;align-items:center;padding:0 12px;gap:10px;font-size:12px;color:#8a8b80;">
+          <span style="color:#1f9d5c;">⌘</span><span>Bird's Eye</span><span style="color:#b3b4a8;">·</span><span>1.82 TB · 4 volumes</span>
+          <span style="margin-left:auto;">⌥⌘K to focus</span>
+        </div>
+
+        <div style="display:flex;height:568px;">
+          <!-- history rail -->
+          <div style="width:188px;flex:none;background:#fbfbf8;border-right:1.5px solid #d7d6cd;padding:12px 11px;">
+            <div style="font-size:10px;letter-spacing:.14em;color:#9a9b90;margin-bottom:9px;">COMMAND HISTORY</div>
+            <div style="display:flex;flex-direction:column;gap:5px;font-size:11px;">
+              <div style="background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:6px;padding:6px 8px;color:#1f7a48;">▸ safe to delete in /dev</div>
+              <div style="border:1.5px solid #e0ded5;border-radius:6px;padding:6px 8px;color:#6b6c63;">▸ files &gt;1GB untouched 12mo</div>
+              <div style="border:1.5px solid #e0ded5;border-radius:6px;padding:6px 8px;color:#6b6c63;">▸ what relates to Docker</div>
+              <div style="border:1.5px solid #e0ded5;border-radius:6px;padding:6px 8px;color:#6b6c63;">▸ duplicates in Movies</div>
+              <div style="border:1.5px solid #e0ded5;border-radius:6px;padding:6px 8px;color:#6b6c63;">▸ growth since last month</div>
+            </div>
+            <div style="margin-top:16px;font-size:10px;letter-spacing:.14em;color:#9a9b90;margin-bottom:9px;">PINNED</div>
+            <div style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:#6b6c63;">
+              <div style="border:1.5px dashed #c9c8bf;border-radius:6px;padding:6px 8px;">★ weekly reclaim audit</div>
+              <div style="border:1.5px dashed #c9c8bf;border-radius:6px;padding:6px 8px;">★ cache sweep</div>
+            </div>
+          </div>
+
+          <!-- main: palette + results -->
+          <div style="flex:1;min-width:0;background:#fbfbf8;display:flex;flex-direction:column;">
+            <!-- command bar -->
+            <div style="padding:22px 26px 14px;position:relative;">
+              <span style="position:absolute;left:8px;top:18px;width:22px;height:22px;border-radius:50%;background:#1f9d5c;color:#fff;font-family:'Architects Daughter',cursive;font-size:13px;display:flex;align-items:center;justify-content:center;">1</span>
+              <div style="border:2px solid #3a3b35;border-radius:10px;background:#fff;padding:13px 16px;display:flex;align-items:center;gap:11px;box-shadow:0 2px 0 #d7d6cd;">
+                <span style="color:#1f9d5c;font-size:15px;">▸</span>
+                <span style="font-size:15px;color:#23241f;">safe to delete in /dev</span>
+                <span style="width:1.5px;height:18px;background:#1f9d5c;display:inline-block;"></span>
+                <span style="margin-left:auto;font-size:11px;color:#9a9b90;">↵ run</span>
+              </div>
+              <!-- suggestion dropdown -->
+              <div style="margin-top:6px;border:1.5px solid #c9c8bf;border-radius:9px;background:#fff;padding:6px;font-size:12px;color:#6b6c63;box-shadow:0 4px 0 #e0ded5;position:relative;z-index:2;">
+                <div style="position:absolute;right:-11px;top:8px;width:22px;height:22px;border-radius:50%;background:#1f9d5c;color:#fff;font-family:'Architects Daughter',cursive;font-size:13px;display:flex;align-items:center;justify-content:center;">2</div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 9px;background:#e1f1e7;border-radius:6px;color:#1f7a48;"><span style="font-size:10px;letter-spacing:.1em;width:54px;">VERB</span><span>safe-to-delete</span><span style="color:#1f9d5c;">· scope /dev · ranks by reclaimable × staleness</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 9px;"><span style="font-size:10px;letter-spacing:.1em;width:54px;color:#9a9b90;">TRY</span><span>explain ·</span><span>relate ·</span><span>find ·</span><span>compare ·</span><span>stage ·</span><span>clean</span></div>
+              </div>
+            </div>
+
+            <!-- results -->
+            <div style="flex:1;display:flex;gap:14px;padding:4px 26px 16px;min-height:0;">
+              <!-- icicle -->
+              <div style="flex:1.1;display:flex;flex-direction:column;min-width:0;">
+                <div style="font-size:10px;letter-spacing:.14em;color:#9a9b90;margin-bottom:8px;position:relative;">ICICLE · WHAT THE QUERY SEES <span style="position:absolute;right:0;top:-3px;width:20px;height:20px;border-radius:50%;background:#1f9d5c;color:#fff;font-family:'Architects Daughter',cursive;font-size:12px;display:flex;align-items:center;justify-content:center;">3</span></div>
+                <div style="display:flex;flex-direction:column;gap:5px;">
+                  <div style="height:30px;background:#eceae2;border:1.5px solid #b9b8af;border-radius:4px;display:flex;align-items:center;padding:0 10px;font-size:11px;">/dev · 486 GB</div>
+                  <div style="display:flex;gap:5px;height:30px;">
+                    <div style="flex:198;background:#eceae2;border:1.5px solid #b9b8af;border-radius:4px;display:flex;align-items:center;padding:0 8px;font-size:10px;">node_modules</div>
+                    <div style="flex:121;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:4px;display:flex;align-items:center;padding:0 8px;font-size:10px;color:#1f7a48;">Docker</div>
+                    <div style="flex:97;background:#eceae2;border:1.5px solid #b9b8af;border-radius:4px;display:flex;align-items:center;padding:0 6px;font-size:10px;">repos</div>
+                    <div style="flex:70;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:4px;"></div>
+                  </div>
+                  <div style="display:flex;gap:5px;height:26px;">
+                    <div style="flex:120;background:#e6e5dd;border:1px solid #c9c8bf;border-radius:4px;"></div>
+                    <div style="flex:78;background:#e6e5dd;border:1px solid #c9c8bf;border-radius:4px;"></div>
+                    <div style="flex:83;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:4px;"></div>
+                    <div style="flex:38;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:4px;"></div>
+                    <div style="flex:97;background:#e6e5dd;border:1px solid #c9c8bf;border-radius:4px;"></div>
+                    <div style="flex:70;background:#e6e5dd;border:1px solid #c9c8bf;border-radius:4px;"></div>
+                  </div>
+                  <div style="font-size:10px;color:#9a9b90;margin-top:2px;">green = matched the "safe to delete" predicate</div>
+                </div>
+              </div>
+              <!-- ranked list -->
+              <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
+                <div style="font-size:10px;letter-spacing:.14em;color:#9a9b90;margin-bottom:8px;">RANKED RESULTS · 6 · 224 GB reclaimable</div>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  <div style="border:1.5px solid #1f9d5c;background:#e1f1e7;border-radius:7px;padding:8px 10px;">
+                    <div style="display:flex;justify-content:space-between;font-size:12px;color:#1f7a48;"><span>Docker · dangling layers</span><span>96 GB</span></div>
+                    <div style="font-size:10.5px;color:#1f7a48;opacity:.8;margin-top:2px;">unused 5 mo · no running service</div>
+                  </div>
+                  <div style="border:1.5px solid #1f9d5c;background:#e1f1e7;border-radius:7px;padding:8px 10px;">
+                    <div style="display:flex;justify-content:space-between;font-size:12px;color:#1f7a48;"><span>build-cache</span><span>70 GB</span></div>
+                    <div style="font-size:10.5px;color:#1f7a48;opacity:.8;margin-top:2px;">regenerable · safe</div>
+                  </div>
+                  <div style="border:1.5px solid #e0ded5;border-radius:7px;padding:8px 10px;">
+                    <div style="display:flex;justify-content:space-between;font-size:12px;color:#6b6c63;"><span>node_modules (stale)</span><span>41 GB</span></div>
+                    <div style="font-size:10.5px;color:#9a9b90;margin-top:2px;">7 projects untouched 12 mo+ · review</div>
+                  </div>
+                  <div style="border:1.5px solid #e0ded5;border-radius:7px;padding:8px 10px;display:flex;justify-content:space-between;font-size:12px;color:#6b6c63;"><span>.cache / venvs</span><span>17 GB</span></div>
+                  <div style="font-size:11px;color:#9a9b90;padding:2px 2px;">+ 2 more rows…</div>
+                </div>
+                <div style="margin-top:auto;padding-top:10px;display:flex;gap:8px;position:relative;">
+                  <span style="position:absolute;left:-12px;top:6px;width:20px;height:20px;border-radius:50%;background:#1f9d5c;color:#fff;font-family:'Architects Daughter',cursive;font-size:12px;display:flex;align-items:center;justify-content:center;">4</span>
+                  <span style="background:#1f9d5c;color:#fff;border-radius:7px;padding:7px 13px;font-size:12px;">⇧↵ stage all safe · 166 GB</span>
+                  <span style="border:1.5px solid #c9c8bf;border-radius:7px;padding:7px 11px;font-size:12px;color:#6b6c63;">explain row</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- status -->
+        <div style="height:40px;border-top:1.5px solid #c9c8bf;background:#f0efe9;display:flex;align-items:center;padding:0 14px;gap:14px;font-size:12px;color:#6b6c63;">
+          <span style="position:relative;padding-left:24px;"><span style="position:absolute;left:0;top:-12px;width:20px;height:20px;border-radius:50%;background:#1f9d5c;color:#fff;font-family:'Architects Daughter',cursive;font-size:12px;display:flex;align-items:center;justify-content:center;">5</span>166 GB staged</span>
+          <span style="color:#b3b4a8;">|</span><span>ran in 0.4s</span>
+          <span style="margin-left:auto;background:#1f9d5c;color:#fff;border-radius:6px;padding:5px 12px;">⌘↵ clean staged →</span>
+        </div>
+      </div>
+
+      <!-- ===== ANNOTATIONS ===== -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:20px;">
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Information architecture</div>
+          <div style="font-size:11.5px;line-height:1.6;color:#55564d;white-space:pre;font-family:'JetBrains Mono',monospace;">Command bar (always primary)
+├ Verbs
+│  scan · find · explain
+│  relate · compare
+│  stage · clean
+├ Result surfaces
+│  ├ Icicle chart
+│  └ Ranked list (actionable)
+├ History stack (notebook)
+└ Pinned commands</div>
+        </div>
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Navigation model</div>
+          <div style="font-size:12px;line-height:1.7;color:#55564d;">There are no pages to navigate — you compose queries. ⌥⌘K focuses the bar from anywhere; ↵ runs, ⇧↵ stages, ⌘↵ cleans. The history stack is the back button: every command is a permalink you can rerun or pin. Results are ephemeral views generated on demand, never destinations you "go to".</div>
+        </div>
+        <div style="border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Workflow walkthrough</div>
+          <div style="font-size:12px;line-height:1.6;color:#55564d;display:flex;flex-direction:column;gap:6px;">
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">①</span> Focus the bar, type a plain-language ask.</div>
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">②</span> Autocomplete resolves it to a verb + scope.</div>
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">③</span> Icicle + ranked list render the answer.</div>
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">④</span> Stage safe rows without leaving results.</div>
+            <div><span style="color:#1f9d5c;font-family:'Architects Daughter',cursive;">⑤</span> Clean; the command joins history to rerun.</div>
+          </div>
+        </div>
+        <div style="grid-column:1 / 3;border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Component hierarchy</div>
+          <div style="font-size:11.5px;line-height:1.7;color:#55564d;">&lt;CommandBar&gt; → &lt;VerbResolver&gt; · &lt;SuggestionList&gt; · &lt;ResultView&gt; → {&lt;IcicleChart&gt;, &lt;RankedList&gt; → &lt;ResultRow safety stageable&gt;*} · &lt;HistoryStack&gt; → &lt;CommandChip rerun pin&gt;* · &lt;StatusBar stage clean&gt;. Every query is a serializable object {verb, scope, predicate, sort} — which makes commands pinnable, rerunnable, and scriptable.</div>
+        </div>
+        <div style="border:1.5px solid #1f9d5c;border-radius:10px;background:#fff;padding:16px 18px;">
+          <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:10px;">Trade-offs</div>
+          <div style="font-size:12px;line-height:1.55;color:#1f7a48;margin-bottom:8px;">＋ Fastest for experts; near-zero chrome; fully keyboard; scriptable.</div>
+          <div style="font-size:12px;line-height:1.55;color:#a85a3c;">－ Steep cold start; weak for serendipitous browse &amp; spatial reasoning; relies on a strong query language to feel magical.</div>
+        </div>
+      </div></div></div>
+
+  <!-- ===== SCAN & SYSTEM PANEL ===== -->
+  <div style="{{ showScan }}"><div style="max-width:1320px;margin:0 auto;" data-screen-label="Scan & System"><!-- header -->
+      <div style="margin-bottom:16px;">
+        <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;">
+          <div style="font-size:11px;color:#9a9b90;letter-spacing:.1em;">SYSTEM LAYER</div>
+          <div style="font-family:'Architects Daughter',cursive;font-size:32px;">Scanning, Library &amp; preferences</div>
+        </div>
+        <div style="font-size:13px;line-height:1.65;color:#55564d;max-width:880px;margin-top:8px;">The plumbing behind the workspace. None of this is a separate app — the <b>◎ Scan</b>, <b>◷ Library</b> and <b>⚙ Settings</b> rail modes open <em>over</em> the same shell, so configuring a scan or comparing last month's snapshot never tears you out of an investigation.</div>
+      </div>
+
+      <!-- ====== 1 · TRIGGER + CONFIG ====== -->
+      <div style="display:flex;align-items:baseline;gap:10px;margin:26px 0 12px;">
+        <span style="font-family:'Architects Daughter',cursive;font-size:23px;">1 · Starting a scan</span>
+        <span style="font-size:11.5px;color:#9a9b90;">source · algorithm · options — all in one sheet</span>
+      </div>
+
+      <div style="border:2px solid #3a3b35;border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 2px 0 #cfcec5;">
+        <div style="background:#f0efe9;border-bottom:1.5px solid #c9c8bf;padding:12px 16px;display:flex;align-items:center;gap:10px;">
+          <span style="font-size:14px;">New scan</span><span style="font-size:11px;color:#8a8b80;">configure a source &amp; method</span>
+          <span style="margin-left:auto;font-size:14px;color:#9a9b90;">✕</span>
+        </div>
+        <div style="display:flex;min-height:430px;">
+          <!-- source picker -->
+          <div style="width:248px;flex:none;border-right:1.5px solid #d7d6cd;background:#fbfbf8;padding:14px;">
+            <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;margin-bottom:9px;">SOURCE</div>
+            <div style="display:flex;flex-direction:column;gap:7px;">
+              <div style="border:1.5px solid #1f9d5c;background:#e1f1e7;border-radius:8px;padding:9px 11px;"><div style="font-size:12.5px;color:#1f7a48;">▣ Local filesystem</div><div style="font-size:10px;color:#1f7a48;opacity:.75;font-family:'JetBrains Mono',monospace;">/Volumes · APFS · HFS+</div></div>
+              <div style="border:1.5px solid #e0ded5;border-radius:8px;padding:9px 11px;"><div style="font-size:12.5px;color:#6b6c63;">⏏ External / removable</div><div style="font-size:10px;color:#9a9b90;font-family:'JetBrains Mono',monospace;">USB · Thunderbolt · SD</div></div>
+              <div style="border:1.5px solid #e0ded5;border-radius:8px;padding:9px 11px;"><div style="font-size:12.5px;color:#6b6c63;">⇄ Network share</div><div style="font-size:10px;color:#9a9b90;font-family:'JetBrains Mono',monospace;">SMB · NFS · AFP</div></div>
+              <div style="border:1.5px solid #e0ded5;border-radius:8px;padding:9px 11px;"><div style="font-size:12.5px;color:#6b6c63;">☁ Object storage</div><div style="font-size:10px;color:#9a9b90;font-family:'JetBrains Mono',monospace;">S3 · R2 · GCS · B2</div></div>
+              <div style="border:1.5px solid #e0ded5;border-radius:8px;padding:9px 11px;"><div style="font-size:12.5px;color:#6b6c63;">⌗ SFTP / SSH</div><div style="font-size:10px;color:#9a9b90;font-family:'JetBrains Mono',monospace;">remote host</div></div>
+            </div>
+            <div style="margin-top:13px;border:1.5px dashed #c3d2fb;background:#eef2fe;border-radius:8px;padding:9px 10px;font-size:10px;line-height:1.5;color:#3a6df0;">Remote sources swap the path field for credentials → endpoint · bucket/host · region · access key · secret (kept in the OS keychain).</div>
+          </div>
+
+          <!-- config for selected source -->
+          <div style="flex:1;min-width:0;padding:16px 18px;">
+            <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;margin-bottom:7px;">PATH / SCOPE</div>
+            <div style="display:flex;gap:8px;margin-bottom:7px;">
+              <div style="flex:1;border:1.5px solid #b9b8af;border-radius:7px;padding:9px 11px;font-family:'JetBrains Mono',monospace;font-size:12px;color:#23241f;">/Volumes/Macintosh HD/Users/dev</div>
+              <div style="border:1.5px solid #c9c8bf;border-radius:7px;padding:9px 12px;font-size:12px;color:#6b6c63;">Browse…</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;font-size:10.5px;color:#6b6c63;"><span style="border:1.5px dashed #c9c8bf;border-radius:20px;padding:3px 10px;">recent: ~/Movies</span><span style="border:1.5px dashed #c9c8bf;border-radius:20px;padding:3px 10px;">~ whole home</span><span style="border:1.5px dashed #c9c8bf;border-radius:20px;padding:3px 10px;">/ whole disk</span></div>
+
+            <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;margin-bottom:8px;">ALGORITHM</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px;">
+              <div style="border:1.5px solid #1f9d5c;background:#e1f1e7;border-radius:8px;padding:10px 12px;"><div style="font-size:12px;color:#1f7a48;">⦿ Deep scan</div><div style="font-size:10px;color:#1f7a48;opacity:.78;margin-top:2px;">full walk + stat every file · most accurate</div></div>
+              <div style="border:1.5px solid #c9c8bf;border-radius:8px;padding:10px 12px;"><div style="font-size:12px;color:#6b6c63;">◯ Incremental</div><div style="font-size:10px;color:#9a9b90;margin-top:2px;">only what changed since last snapshot · fast</div></div>
+              <div style="border:1.5px solid #c9c8bf;border-radius:8px;padding:10px 12px;"><div style="font-size:12px;color:#6b6c63;">◯ Quick estimate</div><div style="font-size:10px;color:#9a9b90;margin-top:2px;">sampled + heuristic sizes · seconds</div></div>
+              <div style="border:1.5px solid #c9c8bf;border-radius:8px;padding:10px 12px;"><div style="font-size:12px;color:#6b6c63;">◯ Dedup pass</div><div style="font-size:10px;color:#9a9b90;margin-top:2px;">content-hash to find duplicates · slowest</div></div>
+            </div>
+
+            <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;margin-bottom:8px;">OPTIONS</div>
+            <div style="display:flex;flex-wrap:wrap;gap:7px;">
+              <span style="border:1.5px solid #1f9d5c;background:#e1f1e7;color:#1f7a48;border-radius:20px;padding:5px 11px;font-size:11px;">☑ compute checksums</span>
+              <span style="border:1.5px solid #1f9d5c;background:#e1f1e7;color:#1f7a48;border-radius:20px;padding:5px 11px;font-size:11px;">☑ stay on one filesystem</span>
+              <span style="border:1.5px solid #c9c8bf;color:#6b6c63;border-radius:20px;padding:5px 11px;font-size:11px;">☐ follow symlinks</span>
+              <span style="border:1.5px solid #c9c8bf;color:#6b6c63;border-radius:20px;padding:5px 11px;font-size:11px;">☐ include hidden / system</span>
+              <span style="border:1.5px solid #c9c8bf;color:#6b6c63;border-radius:20px;padding:5px 11px;font-size:11px;">☐ cloud: metadata-only</span>
+            </div>
+          </div>
+        </div>
+        <!-- footer -->
+        <div style="border-top:1.5px solid #c9c8bf;background:#f0efe9;padding:12px 16px;display:flex;align-items:center;gap:10px;font-size:12px;">
+          <span style="border:1.5px solid #c9c8bf;border-radius:7px;padding:7px 12px;color:#6b6c63;">◷ Schedule ▾</span>
+          <span style="font-size:11px;color:#8a8b80;">est. ~2.4M files · ~6 min</span>
+          <span style="margin-left:auto;border:1.5px solid #c9c8bf;border-radius:7px;padding:7px 12px;color:#6b6c63;">+ Add to queue</span>
+          <span style="background:#1f9d5c;color:#fff;border-radius:7px;padding:7px 15px;">Scan now →</span>
+        </div>
+      </div>
+
+      <div style="font-size:11.5px;color:#8a8b80;line-height:1.6;margin-top:10px;max-width:880px;">Triggered three ways, all landing on this sheet: the <b>◎ Scan</b> rail button, the command bar (<span style="font-family:'JetBrains Mono',monospace;">scan ~/Movies --deep</span>), or a <b>schedule</b> (e.g. every Sunday 3am). Remote sources only differ by the credential block; everything downstream — progress, library, cleanup — is identical.</div>
+
+      <!-- ====== 2 · SCAN IN PROGRESS ====== -->
+      <div style="display:flex;align-items:baseline;gap:10px;margin:30px 0 12px;">
+        <span style="font-family:'Architects Daughter',cursive;font-size:23px;">2 · While it scans</span>
+        <span style="font-size:11.5px;color:#9a9b90;">full visibility — a live terminal log, plus glanceable indicators</span>
+      </div>
+
+      <div style="border:2px solid #3a3b35;border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 2px 0 #cfcec5;">
+        <!-- indicator band -->
+        <div style="display:flex;align-items:center;gap:18px;padding:14px 18px;border-bottom:1.5px solid #d7d6cd;background:#f7f6f1;flex-wrap:wrap;">
+          <div style="display:flex;flex-direction:column;gap:5px;min-width:230px;flex:1;">
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:#6b6c63;"><span>Scanning /Users/dev · deep</span><span style="color:#1f7a48;">63%</span></div>
+            <div style="height:9px;background:#e0ded5;border-radius:5px;overflow:hidden;"><div style="width:63%;height:100%;background:#1f9d5c;"></div></div>
+            <!-- phase stepper -->
+            <div style="display:flex;align-items:center;gap:5px;font-size:9.5px;margin-top:2px;">
+              <span style="color:#1f7a48;">✓ Walk</span><span style="color:#c4c3ba;">·</span>
+              <span style="color:#1f7a48;">✓ Stat</span><span style="color:#c4c3ba;">·</span>
+              <span style="background:#e1f1e7;border:1.5px solid #1f9d5c;color:#1f7a48;border-radius:5px;padding:1px 7px;">● Hashing</span><span style="color:#c4c3ba;">·</span>
+              <span style="color:#9a9b90;">Index</span>
+            </div>
+          </div>
+          <!-- counts -->
+          <div style="display:flex;gap:20px;font-size:11px;">
+            <div><div style="color:#9a9b90;font-size:9.5px;letter-spacing:.1em;">FILES</div><div style="font-size:15px;font-family:'JetBrains Mono',monospace;">1,284,402</div></div>
+            <div><div style="color:#9a9b90;font-size:9.5px;letter-spacing:.1em;">HASHED</div><div style="font-size:15px;font-family:'JetBrains Mono',monospace;">612 GB</div></div>
+            <div><div style="color:#9a9b90;font-size:9.5px;letter-spacing:.1em;">RATE</div><div style="font-size:15px;font-family:'JetBrains Mono',monospace;color:#1f7a48;">41k/s</div></div>
+            <div><div style="color:#9a9b90;font-size:9.5px;letter-spacing:.1em;">ERRORS</div><div style="font-size:15px;font-family:'JetBrains Mono',monospace;color:#a85a3c;">14</div></div>
+            <div><div style="color:#9a9b90;font-size:9.5px;letter-spacing:.1em;">ETA</div><div style="font-size:15px;font-family:'JetBrains Mono',monospace;">2:48</div></div>
+          </div>
+          <!-- sparkline -->
+          <div style="display:flex;align-items:flex-end;gap:2px;height:34px;">
+            <span style="width:4px;height:40%;background:#cdeedb;"></span><span style="width:4px;height:62%;background:#cdeedb;"></span><span style="width:4px;height:55%;background:#cdeedb;"></span><span style="width:4px;height:78%;background:#9fdcb8;"></span><span style="width:4px;height:70%;background:#9fdcb8;"></span><span style="width:4px;height:88%;background:#1f9d5c;"></span><span style="width:4px;height:64%;background:#1f9d5c;"></span><span style="width:4px;height:92%;background:#1f9d5c;"></span><span style="width:4px;height:74%;background:#1f9d5c;"></span>
+          </div>
+        </div>
+
+        <div style="display:flex;height:300px;">
+          <!-- terminal log -->
+          <div style="flex:1;min-width:0;background:#15171a;padding:12px 14px;overflow:hidden;font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.62;">
+            <div style="color:#6b6c63;margin-bottom:6px;">── live scan log ── tail -f ── <span style="color:#9aa0a6;">verbosity: file</span></div>
+            <div><span style="color:#5a6068;">12:04:17.221</span> <span style="color:#6ea8fe;">walk </span> <span style="color:#c5c8cc;">/Users/dev/repos/api/node_modules</span></div>
+            <div><span style="color:#5a6068;">12:04:17.223</span> <span style="color:#6ea8fe;">stat </span> <span style="color:#c5c8cc;">4,182 entries · 3.1 GB</span></div>
+            <div><span style="color:#5a6068;">12:04:17.241</span> <span style="color:#5fcf80;">hash </span> <span style="color:#c5c8cc;">bundle.js</span> <span style="color:#7e848c;">2.1 MB</span> <span style="color:#5a6068;">sha256:9f3a1c…</span></div>
+            <div><span style="color:#5a6068;">12:04:17.252</span> <span style="color:#e0a44a;">skip </span> <span style="color:#c5c8cc;">symlink → ../shared</span> <span style="color:#7e848c;">(follow off)</span></div>
+            <div><span style="color:#5a6068;">12:04:17.260</span> <span style="color:#e06a5a;">warn </span> <span style="color:#c5c8cc;">EACCES /Library/Caches/com.apple.bird</span> <span style="color:#7e848c;">permission denied</span></div>
+            <div><span style="color:#5a6068;">12:04:17.271</span> <span style="color:#5fcf80;">index</span> <span style="color:#c5c8cc;">/Users/dev/Docker/overlay2</span> <span style="color:#5fcf80;">+121 GB</span></div>
+            <div><span style="color:#5a6068;">12:04:17.288</span> <span style="color:#6ea8fe;">walk </span> <span style="color:#c5c8cc;">/Users/dev/Movies/raw_footage</span></div>
+            <div><span style="color:#5a6068;">12:04:17.301</span> <span style="color:#5fcf80;">hash </span> <span style="color:#c5c8cc;">A001_C012.braw</span> <span style="color:#7e848c;">8.4 GB</span> <span style="color:#5a6068;">sha256:b71e…</span></div>
+            <div><span style="color:#5a6068;">12:04:17.349</span> <span style="color:#5fcf80;">dup! </span> <span style="color:#c5c8cc;">A001_C012.braw ≡ /Backups/2024/A001_C012.braw</span></div>
+            <div style="color:#5fcf80;">12:04:17.353 <span style="background:#1f9d5c;color:#0c0d0f;padding:0 4px;border-radius:2px;">▌</span></div>
+          </div>
+          <!-- live treemap building -->
+          <div style="width:230px;flex:none;border-left:1.5px solid #2a2d31;background:#1a1c20;padding:12px;">
+            <div style="font-size:9.5px;letter-spacing:.12em;color:#7e848c;font-family:'JetBrains Mono',monospace;margin-bottom:8px;">MAP · building live</div>
+            <div style="display:flex;gap:4px;height:200px;">
+              <div style="flex:2;display:flex;flex-direction:column;gap:4px;">
+                <div style="flex:3;background:#2a2d31;border:1.5px solid #3a3d42;border-radius:4px;"></div>
+                <div style="flex:1.5;background:#243a2c;border:1.5px solid #2f6b45;border-radius:4px;"></div>
+              </div>
+              <div style="flex:1.2;display:flex;flex-direction:column;gap:4px;">
+                <div style="flex:1.4;background:#243a2c;border:1.5px solid #2f6b45;border-radius:4px;"></div>
+                <div style="flex:1;background:#2a2d31;border:1.5px solid #3a3d42;border-radius:4px;"></div>
+                <div style="flex:.8;background:#1f2226;border:1.5px dashed #3a3d42;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#5a6068;">…</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- controls -->
+        <div style="border-top:1.5px solid #c9c8bf;background:#f0efe9;padding:11px 16px;display:flex;align-items:center;gap:10px;font-size:12px;color:#6b6c63;">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:11px;">log: file ▾</span>
+          <span style="border:1.5px solid #c9c8bf;border-radius:6px;padding:5px 11px;">Copy log</span>
+          <span style="margin-left:auto;border:1.5px solid #c9c8bf;border-radius:6px;padding:5px 12px;">⏸ Pause</span>
+          <span style="border:1.5px solid #d9a98f;color:#a85a3c;border-radius:6px;padding:5px 12px;">Cancel</span>
+          <span style="font-size:11px;color:#8a8b80;">runs in background — you can keep working in any lens</span>
+        </div>
+      </div>
+
+      <!-- ====== 3 · QUEUE ====== -->
+      <div style="display:flex;align-items:baseline;gap:10px;margin:30px 0 12px;">
+        <span style="font-family:'Architects Daughter',cursive;font-size:23px;">3 · The scan queue</span>
+        <span style="font-size:11.5px;color:#9a9b90;">stack jobs, reorder, throttle parallelism, schedule recurring runs</span>
+      </div>
+
+      <div style="border:2px solid #3a3b35;border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 2px 0 #cfcec5;">
+        <div style="background:#f0efe9;border-bottom:1.5px solid #c9c8bf;padding:11px 16px;display:flex;align-items:center;gap:10px;font-size:12px;color:#6b6c63;">
+          <span style="font-size:14px;color:#23241f;">Queue</span><span style="font-size:11px;color:#8a8b80;">1 running · 2 queued · 1 scheduled</span>
+          <span style="margin-left:auto;border:1.5px solid #c9c8bf;border-radius:6px;padding:5px 11px;">Run 1 at a time ▾</span>
+          <span style="border:1.5px solid #c9c8bf;border-radius:6px;padding:5px 11px;">⏸ Pause all</span>
+        </div>
+        <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;">
+          <div style="border:1.5px solid #1f9d5c;background:#fff;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:12px;">
+            <span style="color:#c4c3ba;cursor:grab;">⠿</span>
+            <span style="font-size:11px;color:#1f7a48;">▣ local</span>
+            <div style="flex:1;min-width:0;"><div style="font-size:12.5px;">/Users/dev</div><div style="font-size:10px;color:#9a9b90;">deep · checksums</div></div>
+            <div style="width:140px;flex:none;"><div style="height:7px;background:#e0ded5;border-radius:4px;overflow:hidden;"><div style="width:63%;height:100%;background:#1f9d5c;"></div></div></div>
+            <span style="font-size:10px;color:#1f7a48;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:5px;padding:3px 8px;flex:none;">running 63%</span>
+            <span style="color:#9a9b90;flex:none;">⏸ ✕</span>
+          </div>
+          <div style="border:1.5px solid #e0ded5;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:12px;">
+            <span style="color:#c4c3ba;cursor:grab;">⠿</span>
+            <span style="font-size:11px;color:#6b6c63;">☁ s3</span>
+            <div style="flex:1;min-width:0;"><div style="font-size:12.5px;color:#6b6c63;">s3://media-archive</div><div style="font-size:10px;color:#9a9b90;">incremental · metadata-only</div></div>
+            <span style="font-size:10px;color:#6b6c63;border:1.5px solid #c9c8bf;border-radius:5px;padding:3px 8px;flex:none;">queued · #1</span>
+            <span style="color:#9a9b90;flex:none;">▲ ▼ ✕</span>
+          </div>
+          <div style="border:1.5px solid #e0ded5;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:12px;">
+            <span style="color:#c4c3ba;cursor:grab;">⠿</span>
+            <span style="font-size:11px;color:#6b6c63;">⇄ smb</span>
+            <div style="flex:1;min-width:0;"><div style="font-size:12.5px;color:#6b6c63;">//nas/Backups</div><div style="font-size:10px;color:#9a9b90;">dedup pass</div></div>
+            <span style="font-size:10px;color:#6b6c63;border:1.5px solid #c9c8bf;border-radius:5px;padding:3px 8px;flex:none;">queued · #2</span>
+            <span style="color:#9a9b90;flex:none;">▲ ▼ ✕</span>
+          </div>
+          <div style="border:1.5px dashed #c3d2fb;background:#eef2fe;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:12px;">
+            <span style="color:#9bb6f5;">◷</span>
+            <span style="font-size:11px;color:#3a6df0;">▣ local</span>
+            <div style="flex:1;min-width:0;"><div style="font-size:12.5px;color:#3a6df0;">~ whole home</div><div style="font-size:10px;color:#7e9bf0;">incremental</div></div>
+            <span style="font-size:10px;color:#3a6df0;border:1.5px solid #c3d2fb;border-radius:5px;padding:3px 8px;flex:none;">scheduled · Sun 3:00am</span>
+            <span style="color:#9bb6f5;flex:none;">✎ ✕</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====== 4 · LIBRARY ====== -->
+      <div style="display:flex;align-items:baseline;gap:10px;margin:30px 0 12px;">
+        <span style="font-family:'Architects Daughter',cursive;font-size:23px;">4 · The Library</span>
+        <span style="font-size:11.5px;color:#9a9b90;">where every past scan lives — snapshots you reopen, compare &amp; watch evolve (the ◷ rail mode)</span>
+      </div>
+
+      <div style="border:2px solid #3a3b35;border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 2px 0 #cfcec5;">
+        <div style="background:#f0efe9;border-bottom:1.5px solid #c9c8bf;padding:11px 16px;display:flex;align-items:center;gap:10px;font-size:12px;color:#6b6c63;">
+          <span style="font-size:14px;color:#23241f;">Library</span><span style="font-size:11px;color:#8a8b80;">18 snapshots · 4 sources</span>
+          <span style="margin-left:auto;border:1.5px solid #c9c8bf;border-radius:6px;padding:5px 11px;">scope: /Users/dev ▾</span>
+          <span style="border:1.5px solid #1f9d5c;background:#e1f1e7;color:#1f7a48;border-radius:6px;padding:5px 11px;">⇄ Compare two</span>
+        </div>
+
+        <!-- growth chart -->
+        <div style="padding:16px 18px;border-bottom:1.5px solid #e0ded5;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+            <span style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;">/Users/dev · TOTAL SIZE OVER TIME</span>
+            <span style="font-size:11.5px;color:#a85a3c;">▲ +65 GB in 30 days</span>
+          </div>
+          <div style="position:relative;height:96px;border-left:1.5px solid #d7d6cd;border-bottom:1.5px solid #d7d6cd;">
+            <svg viewBox="0 0 600 96" preserveAspectRatio="none" style="width:100%;height:100%;">
+              <polyline points="0,70 100,66 200,58 300,60 400,44 500,30 600,18" fill="none" stroke="#1f9d5c" stroke-width="2.5"/>
+              <polyline points="0,70 100,66 200,58 300,60 400,44 500,30 600,18 600,96 0,96" fill="#e1f1e7" stroke="none" opacity="0.6"/>
+              <circle cx="400" cy="44" r="4" fill="#1f9d5c"/><circle cx="600" cy="18" r="4" fill="#1f9d5c"/>
+            </svg>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:9.5px;color:#9a9b90;font-family:'JetBrains Mono',monospace;margin-top:5px;"><span>Mar</span><span>Apr</span><span>May</span><span>Jun · 486 GB</span></div>
+        </div>
+
+        <!-- snapshot list -->
+        <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;">
+          <div style="border:1.5px solid #1f9d5c;background:#fff;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:12px;">
+            <span style="font-size:11px;color:#1f7a48;">▣</span>
+            <div style="flex:1;min-width:0;"><div style="font-size:12.5px;">/Users/dev <span style="font-size:10px;color:#1f7a48;background:#e1f1e7;border-radius:4px;padding:1px 6px;">latest</span></div><div style="font-size:10px;color:#9a9b90;font-family:'JetBrains Mono',monospace;">Jun 17 · deep · 2.4M files</div></div>
+            <span style="font-size:12px;width:64px;text-align:right;flex:none;">486 GB</span>
+            <span style="font-size:11px;color:#a85a3c;width:60px;text-align:right;flex:none;">+65 GB</span>
+            <span style="font-size:11px;color:#6b6c63;flex:none;">Open · ⋯</span>
+          </div>
+          <div style="border:1.5px solid #e0ded5;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:12px;">
+            <span style="font-size:11px;color:#9a9b90;">▣</span>
+            <div style="flex:1;min-width:0;"><div style="font-size:12.5px;color:#6b6c63;">/Users/dev</div><div style="font-size:10px;color:#9a9b90;font-family:'JetBrains Mono',monospace;">May 18 · deep · 2.3M files</div></div>
+            <span style="font-size:12px;color:#6b6c63;width:64px;text-align:right;flex:none;">421 GB</span>
+            <span style="font-size:11px;color:#a85a3c;width:60px;text-align:right;flex:none;">+12 GB</span>
+            <span style="font-size:11px;color:#6b6c63;flex:none;">Open · ⋯</span>
+          </div>
+          <div style="border:1.5px solid #e0ded5;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:12px;">
+            <span style="font-size:11px;color:#9a9b90;">☁</span>
+            <div style="flex:1;min-width:0;"><div style="font-size:12.5px;color:#6b6c63;">s3://media-archive</div><div style="font-size:10px;color:#9a9b90;font-family:'JetBrains Mono',monospace;">May 02 · incremental · 88k objects</div></div>
+            <span style="font-size:12px;color:#6b6c63;width:64px;text-align:right;flex:none;">3.1 TB</span>
+            <span style="font-size:11px;color:#1f7a48;width:60px;text-align:right;flex:none;">−40 GB</span>
+            <span style="font-size:11px;color:#6b6c63;flex:none;">Open · ⋯</span>
+          </div>
+          <div style="font-size:11px;color:#9a9b90;padding:2px;">+ 15 older snapshots · retention: keep 12 · auto-prune ▾</div>
+        </div>
+      </div>
+
+      <!-- ====== 5 · SETTINGS / THEMES / SHORTCUTS ====== -->
+      <div style="display:flex;align-items:baseline;gap:10px;margin:30px 0 12px;">
+        <span style="font-family:'Architects Daughter',cursive;font-size:23px;">5 · Settings, themes &amp; shortcuts</span>
+        <span style="font-size:11.5px;color:#9a9b90;">opens as an overlay (⌘,) — never a place you navigate away to</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.45fr 1fr;gap:16px;align-items:start;">
+        <!-- settings overlay -->
+        <div style="border:2px solid #3a3b35;border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 2px 0 #cfcec5;">
+          <div style="background:#f0efe9;border-bottom:1.5px solid #c9c8bf;padding:11px 16px;display:flex;align-items:center;gap:10px;"><span style="font-size:14px;">Settings</span><span style="margin-left:auto;font-size:14px;color:#9a9b90;">✕</span></div>
+          <div style="display:flex;min-height:330px;">
+            <div style="width:148px;flex:none;border-right:1.5px solid #d7d6cd;background:#fbfbf8;padding:11px 9px;font-size:11.5px;display:flex;flex-direction:column;gap:3px;">
+              <div style="padding:6px 9px;color:#6b6c63;">General</div>
+              <div style="padding:6px 9px;background:#e1f1e7;border:1.5px solid #1f9d5c;border-radius:6px;color:#1f7a48;">Appearance</div>
+              <div style="padding:6px 9px;color:#6b6c63;">Scanning</div>
+              <div style="padding:6px 9px;color:#6b6c63;">Sources</div>
+              <div style="padding:6px 9px;color:#6b6c63;">Safety &amp; cleanup</div>
+              <div style="padding:6px 9px;color:#6b6c63;">Shortcuts</div>
+              <div style="padding:6px 9px;color:#6b6c63;">About</div>
+            </div>
+            <div style="flex:1;min-width:0;padding:16px 18px;">
+              <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;margin-bottom:9px;">THEME — three, plus auto</div>
+              <div style="display:flex;gap:9px;margin-bottom:18px;">
+                <div style="flex:1;border:1.5px solid #c9c8bf;border-radius:8px;overflow:hidden;"><div style="height:42px;background:#fbfbf8;border-bottom:1px solid #e0ded5;display:flex;align-items:center;padding:0 7px;gap:4px;"><span style="width:10px;height:10px;background:#e1f1e7;border:1px solid #1f9d5c;border-radius:2px;"></span><span style="width:22px;height:6px;background:#dcdbd2;border-radius:2px;"></span></div><div style="font-size:11px;color:#6b6c63;padding:6px 8px;">Light</div></div>
+                <div style="flex:1;border:2px solid #1f9d5c;border-radius:8px;overflow:hidden;"><div style="height:42px;background:#15171a;border-bottom:1px solid #2a2d31;display:flex;align-items:center;padding:0 7px;gap:4px;"><span style="width:10px;height:10px;background:#243a2c;border:1px solid #2f6b45;border-radius:2px;"></span><span style="width:22px;height:6px;background:#2a2d31;border-radius:2px;"></span></div><div style="font-size:11px;color:#1f7a48;padding:6px 8px;">Dark · default ✓</div></div>
+                <div style="flex:1;border:1.5px solid #c9c8bf;border-radius:8px;overflow:hidden;"><div style="height:42px;background:linear-gradient(105deg,#fbfbf8 50%,#15171a 50%);"></div><div style="font-size:11px;color:#6b6c63;padding:6px 8px;">System auto</div></div>
+              </div>
+              <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;margin-bottom:9px;">ACCENT</div>
+              <div style="display:flex;gap:9px;align-items:center;margin-bottom:18px;">
+                <span style="width:26px;height:26px;border-radius:50%;background:#3ddc84;border:2px solid #1f9d5c;"></span>
+                <span style="width:26px;height:26px;border-radius:50%;background:#4f7cff;border:1.5px solid #c9c8bf;"></span>
+                <span style="width:26px;height:26px;border-radius:50%;background:#f0a23b;border:1.5px solid #c9c8bf;"></span>
+                <span style="width:26px;height:26px;border-radius:50%;background:#b46bff;border:1.5px solid #c9c8bf;"></span>
+                <span style="font-size:10.5px;color:#9a9b90;margin-left:4px;">tints highlights, active states, safe-to-act</span>
+              </div>
+              <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;margin-bottom:9px;">DENSITY</div>
+              <div style="display:flex;gap:8px;"><span style="border:1.5px solid #1f9d5c;background:#e1f1e7;color:#1f7a48;border-radius:7px;padding:6px 13px;font-size:11.5px;">Compact</span><span style="border:1.5px solid #c9c8bf;color:#6b6c63;border-radius:7px;padding:6px 13px;font-size:11.5px;">Comfortable</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- shortcuts cheat sheet -->
+        <div style="border:2px solid #3a3b35;border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 2px 0 #cfcec5;">
+          <div style="background:#f0efe9;border-bottom:1.5px solid #c9c8bf;padding:11px 16px;display:flex;align-items:center;gap:9px;"><span style="font-size:14px;">Keyboard shortcuts</span><span style="margin-left:auto;font-size:10.5px;color:#8a8b80;">press <span style="border:1.5px solid #c4c3ba;border-radius:4px;padding:1px 6px;font-family:'JetBrains Mono',monospace;">?</span> anywhere</span></div>
+          <div style="padding:14px 16px;display:flex;flex-direction:column;gap:13px;font-size:11.5px;">
+            <div>
+              <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;margin-bottom:7px;">GLOBAL</div>
+              <div style="display:flex;flex-direction:column;gap:6px;color:#55564d;">
+                <div style="display:flex;justify-content:space-between;"><span>Command bar</span><span style="font-family:'JetBrains Mono',monospace;color:#23241f;">⌥⌘K</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>New scan</span><span style="font-family:'JetBrains Mono',monospace;color:#23241f;">⌘N</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Library</span><span style="font-family:'JetBrains Mono',monospace;color:#23241f;">⌘L</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Settings</span><span style="font-family:'JetBrains Mono',monospace;color:#23241f;">⌘,</span></div>
+              </div>
+            </div>
+            <div>
+              <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;margin-bottom:7px;">LENSES</div>
+              <div style="display:flex;flex-direction:column;gap:6px;color:#55564d;">
+                <div style="display:flex;justify-content:space-between;"><span>Treemap · Board · Results</span><span style="font-family:'JetBrains Mono',monospace;color:#23241f;">1 · 2 · 3</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Toggle inspector</span><span style="font-family:'JetBrains Mono',monospace;color:#23241f;">⌘I</span></div>
+              </div>
+            </div>
+            <div>
+              <div style="font-size:9.5px;letter-spacing:.14em;color:#9a9b90;margin-bottom:7px;">CLEANUP</div>
+              <div style="display:flex;flex-direction:column;gap:6px;color:#55564d;">
+                <div style="display:flex;justify-content:space-between;"><span>Stage selection</span><span style="font-family:'JetBrains Mono',monospace;color:#23241f;">⇧↵</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Review &amp; clean</span><span style="font-family:'JetBrains Mono',monospace;color:#23241f;">⌘↵</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Undo last clean</span><span style="font-family:'JetBrains Mono',monospace;color:#23241f;">⌘Z</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- closing note -->
+      <div style="margin-top:18px;border:1.5px solid #c9c8bf;border-radius:10px;background:#fbfbf8;padding:16px 18px;">
+        <div style="font-family:'Architects Daughter',cursive;font-size:19px;margin-bottom:8px;">Where these live in the shell</div>
+        <div style="font-size:12px;line-height:1.7;color:#55564d;">All five sit on the activity rail you already saw: <b>◎ Scan</b> opens the config sheet → progress → queue; <b>◷ Library</b> holds every snapshot and the growth chart; <b>⚙ Settings</b> is a <code style="font-family:'JetBrains Mono',monospace;font-size:11px;">⌘,</code> overlay. Shortcuts are discoverable three ways — the persistent <span style="font-family:'JetBrains Mono',monospace;">?</span> hint, the Settings → Shortcuts pane, and inline hints on buttons (the <span style="font-family:'JetBrains Mono',monospace;">⇧↵ / ⌘↵</span> you've seen on tray actions). Themes ship as <b>three</b>: Light, Dark (default), and System-auto, each with a 4-way accent.</div>
+      </div></div></div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { tab: 'unified' };
+  renderVals() {
+    const t = this.state.tab;
+    const tabStyle = (k) => ({
+      padding: '7px 15px',
+      borderRadius: '8px',
+      cursor: 'pointer',
+      fontFamily: "'Architects Daughter', cursive",
+      fontSize: '16px',
+      whiteSpace: 'nowrap',
+      background: t === k ? '#23241f' : 'transparent',
+      color: t === k ? '#f4f3ee' : '#6b6c63',
+      border: t === k ? '1.5px solid #23241f' : '1.5px solid transparent',
+    });
+    return {
+      tabUnified: () => this.setState({ tab: 'unified' }),
+      tabOverview: () => this.setState({ tab: 'overview' }),
+      tabA: () => this.setState({ tab: 'a' }),
+      tabB: () => this.setState({ tab: 'b' }),
+      tabC: () => this.setState({ tab: 'c' }),
+      tabScan: () => this.setState({ tab: 'scan' }),
+      tabStyleUnified: tabStyle('unified'),
+      tabStyleOverview: tabStyle('overview'),
+      tabStyleA: tabStyle('a'),
+      tabStyleB: tabStyle('b'),
+      tabStyleC: tabStyle('c'),
+      tabStyleScan: tabStyle('scan'),
+      showUnified: { display: t === 'unified' ? 'block' : 'none' },
+      showOverview: { display: t === 'overview' ? 'block' : 'none' },
+      showA: { display: t === 'a' ? 'block' : 'none' },
+      showB: { display: t === 'b' ? 'block' : 'none' },
+      showC: { display: t === 'c' ? 'block' : 'none' },
+      showScan: { display: t === 'scan' ? 'block' : 'none' },
+    };
+  }
+}
+</script>
+</body>
+</html>
