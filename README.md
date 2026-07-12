@@ -10,8 +10,13 @@
 [![Rust](https://img.shields.io/badge/Rust-backend-orange)](./src)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB)](./src-tauri)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB)](./workspace)
+[![Docs](https://img.shields.io/badge/docs-birds--eye-3ddc84)](https://keiken-shin.github.io/birds-eye/)
 
-![Bird's Eye demo](./docs/demo.gif)
+[**Download for Windows**](https://github.com/keiken-shin/birds-eye/releases/latest) ·
+[**Documentation**](https://keiken-shin.github.io/birds-eye/) ·
+Microsoft Store — _coming soon_
+
+![Bird's Eye demo](./docs/assets/demo.gif)
 
 </div>
 
@@ -51,7 +56,14 @@ background rescan.
 - The intelligence layer is **opt-in per index**, heuristic (no ML, no cloud), and shows its
   reasoning; unclassified means unclassified, never invented data.
 
-## Getting started
+## Install
+
+Grab the latest signed build from
+[**GitHub Releases**](https://github.com/keiken-shin/birds-eye/releases/latest) (Windows 10
+& 11, x64). A one-click **Microsoft Store** listing is coming soon. Full walkthrough:
+[Getting started](https://keiken-shin.github.io/birds-eye/guide/getting-started/).
+
+## Build from source
 
 Prereqs: [Rust](https://rustup.rs/), [Node 20+](https://nodejs.org/), and on Windows the
 [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/).
@@ -92,8 +104,10 @@ npx vitest run                                    # frontend unit tests
 - `src-tauri/` — desktop shell and Tauri commands.
 - `workspace/` — the React 19 + Tailwind 4 frontend (`src/bridge/` is the typed Tauri bridge,
   `src/dev/` the browser-mode mock backend, `src/components/ui/` the design-system primitives).
-- `docs/` — architecture notes, design comps (`docs/goal/`), the redesign rationale
-  (`docs/reimagine.md`), and the ontology specs (`docs/superpowers/`).
+- `docs/` — the documentation site (MkDocs Material), published to
+  [keiken-shin.github.io/birds-eye](https://keiken-shin.github.io/birds-eye/). Start with
+  [Architecture](https://keiken-shin.github.io/birds-eye/develop/architecture/) for the
+  developer tour.
 
 ## Contributing
 

@@ -1,0 +1,201 @@
+/* ==========================================================================
+   Bird's Eye — brand layer over Material for MkDocs
+   Near-black neutral ramp + spring-green accent. Tokens mirror the app's
+   workspace/src/index.css so the docs and the product read as one system.
+   ========================================================================== */
+
+:root {
+  --be-base: #0a0b0d;   /* app backdrop            */
+  --be-window: #0e1014; /* center stage / cards    */
+  --be-panel: #0c0d10;  /* rails / inspector       */
+  --be-inset: #111317;  /* insets, code            */
+  --be-line: #1e2128;   /* hairlines               */
+  --be-line-strong: #3a3f48;
+  --be-ink: #e6e8ea;
+  --be-muted: #9aa0a8;
+  --be-faint: #7a818b;
+  --be-green: #3ddc84;
+  --be-green-ink: #7fe0a6;
+  --be-green-bright: #aef0c8;
+  --be-on-green: #06140c;
+  --be-warn: #e0a44a;
+}
+
+/* --- Dark scheme: force the app's exact near-black + green ---------------- */
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: var(--be-base);
+  --md-default-fg-color: var(--be-ink);
+  --md-default-fg-color--light: var(--be-muted);
+  --md-default-fg-color--lighter: var(--be-faint);
+  --md-primary-fg-color: var(--be-base);
+  --md-accent-fg-color: var(--be-green);
+  --md-typeset-a-color: var(--be-green-ink);
+  --md-code-bg-color: var(--be-inset);
+  --md-code-fg-color: #c4c9d2;
+  --md-footer-bg-color: var(--be-panel);
+  --md-footer-bg-color--dark: #08090b;
+}
+
+[data-md-color-scheme="slate"] .md-header,
+[data-md-color-scheme="slate"] .md-tabs {
+  background-color: var(--be-panel);
+  border-bottom: 1px solid var(--be-line);
+}
+
+/* Links / accents pick up the brand green regardless of scheme */
+.md-typeset a { color: var(--be-green-ink); }
+.md-nav__link--active,
+.md-typeset .md-nav__link--active { color: var(--be-green); }
+
+/* Headings in display face */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 { letter-spacing: -0.01em; }
+
+/* Numbers, sizes, and paths read as monospace even inline */
+.be-mono { font-family: var(--md-code-font-family); }
+
+/* --- Hero ---------------------------------------------------------------- */
+.be-hero {
+  text-align: center;
+  padding: 1.5rem 0 0.5rem;
+}
+.be-hero__logo {
+  width: 92px;
+  height: 92px;
+  margin: 0 auto 1rem;
+  display: block;
+  filter: drop-shadow(0 8px 24px rgba(61, 220, 132, 0.18));
+}
+.be-hero__title {
+  font-size: 3.1rem;
+  line-height: 1.02;
+  font-weight: 700;
+  margin: 0 0 0.35rem;
+  letter-spacing: -0.02em;
+}
+.be-hero__title .be-accent { color: var(--be-green); }
+.be-hero__tagline {
+  font-size: 1.15rem;
+  color: var(--be-muted);
+  max-width: 44rem;
+  margin: 0 auto 0.5rem;
+  line-height: 1.5;
+}
+.be-hero__sub {
+  font-size: 0.9rem;
+  color: var(--be-faint);
+  margin: 0 auto 1.4rem;
+}
+.be-hero__sub strong { color: var(--be-green-ink); font-weight: 600; }
+
+/* --- Call-to-action row -------------------------------------------------- */
+.be-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  justify-content: center;
+  align-items: center;
+  margin: 0.5rem 0 0.4rem;
+}
+.md-typeset .be-cta .md-button {
+  margin: 0;
+  border-radius: 10px;
+  font-weight: 600;
+  transition: transform 0.08s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+/* Primary = filled spring green */
+.md-typeset .be-cta .md-button--primary {
+  background: var(--be-green);
+  border-color: var(--be-green);
+  color: var(--be-on-green);
+  box-shadow: 0 6px 20px rgba(61, 220, 132, 0.22);
+}
+.md-typeset .be-cta .md-button--primary:hover {
+  background: var(--be-green-bright);
+  border-color: var(--be-green-bright);
+  color: var(--be-on-green);
+  transform: translateY(-1px);
+}
+/* Secondary = ghost with green hairline */
+.md-typeset .be-cta .md-button:not(.md-button--primary) {
+  border-color: var(--be-line-strong);
+  color: var(--be-ink);
+}
+.md-typeset .be-cta .md-button:not(.md-button--primary):hover {
+  border-color: var(--be-green);
+  color: var(--be-green);
+  background: transparent;
+}
+/* "Coming soon" — non-interactive, dimmed, with a pill */
+.md-typeset .be-cta .be-soon {
+  cursor: default;
+  opacity: 0.72;
+  border-style: dashed;
+  border-color: var(--be-line-strong);
+  color: var(--be-muted);
+  pointer-events: none;
+}
+.be-pill {
+  display: inline-block;
+  margin-left: 0.5ch;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.62em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  background: rgba(224, 164, 74, 0.14);
+  color: var(--be-warn);
+  border: 1px solid rgba(224, 164, 74, 0.35);
+}
+
+.be-platform {
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--be-faint);
+  margin: 0.1rem 0 1.6rem;
+}
+
+/* --- Demo frame ---------------------------------------------------------- */
+.be-demo {
+  margin: 1.2rem auto 0.5rem;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--be-line);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  max-width: 960px;
+}
+.be-demo img { display: block; width: 100%; height: auto; }
+
+/* --- Card grids (Material .grid.cards) polish ---------------------------- */
+.md-typeset .grid.cards > :is(ul, ol) > li,
+.md-typeset .grid > .card {
+  border-color: var(--be-line);
+  background: var(--be-window);
+  border-radius: 12px;
+}
+.md-typeset .grid.cards > :is(ul, ol) > li:hover {
+  border-color: var(--be-green);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+
+/* Verdict chips reused in the safety docs */
+.be-chip {
+  display: inline-block;
+  padding: 0.06rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.72em;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.be-chip--safe      { background: #15311f; border-color: #2f7d4e; color: #7fe0a6; }
+.be-chip--review    { background: #23262e; border-color: #3a4150; color: #cdd2da; }
+.be-chip--protected { background: #2a2417; border-color: #6b5630; color: #e0c489; }
+.be-chip--keep      { background: #191c22; border-color: #2a2f38; color: #aab0b8; }
+
+@media screen and (max-width: 44em) {
+  .be-hero__title { font-size: 2.3rem; }
+  .be-hero__tagline { font-size: 1rem; }
+}
