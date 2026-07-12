@@ -16,7 +16,7 @@ hide:
 <p class="be-hero__sub"><strong>Everything runs locally.</strong> Nothing ever leaves your machine.</p>
 
 <div class="be-cta" markdown>
-[:material-download: Download for Windows](https://github.com/keiken-shin/birds-eye/releases/latest){ .md-button .md-button--primary }
+[:material-download: Download for Windows](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-x64.exe){ .md-button .md-button--primary }
 [:material-microsoft-windows: Microsoft Store<span class="be-pill">Coming soon</span>](#windows-store){ .md-button .be-soon }
 [:fontawesome-brands-github: View source](https://github.com/keiken-shin/birds-eye){ .md-button }
 </div>
@@ -166,7 +166,7 @@ contents. Verify it yourself — [the source is MIT-licensed and public](https:/
 ## Get Bird's Eye
 
 <div class="be-cta" markdown>
-[:material-download: Download the latest release](https://github.com/keiken-shin/birds-eye/releases/latest){ .md-button .md-button--primary }
+[:material-download: Download the latest release](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-x64.exe){ .md-button .md-button--primary }
 [:material-hammer-wrench: Build from source](develop/building.md){ .md-button }
 </div>
 

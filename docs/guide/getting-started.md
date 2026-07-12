@@ -32,8 +32,20 @@ your machine, and helps you reclaim space without ever putting a file beyond rec
 3. Watch it work. The scanner streams progress live; you don't have to wait for it to
    finish before the **Overview** starts filling in.
 
+<figure markdown="span">
+  ![New scan — choosing a folder or drive to index](../assets/screenshots/new-scan.png){ .be-shot }
+  <figcaption>Starting a new scan — point Bird's Eye at a folder or drive.</figcaption>
+</figure>
+
 The scan writes to a persistent SQLite index, so it's there next time you open the app.
 Re-scanning is **incremental** — unchanged files are skipped, so a second look is quick.
+**Scans** is a stage of its own — the running scan, the queue, and index management all
+live there.
+
+<figure markdown="span">
+  ![Scans — the running scan, the queue, and index management](../assets/screenshots/scans.png){ .be-shot }
+  <figcaption>Scans — track the running scan and queue, and manage saved indexes.</figcaption>
+</figure>
 
 ## Read the Overview
 

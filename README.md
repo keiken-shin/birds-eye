@@ -12,7 +12,7 @@
 [![React 19](https://img.shields.io/badge/React-19-61DAFB)](./workspace)
 [![Docs](https://img.shields.io/badge/docs-birds--eye-3ddc84)](https://keiken-shin.github.io/birds-eye/)
 
-[**Download for Windows**](https://github.com/keiken-shin/birds-eye/releases/latest) ·
+[**Download for Windows**](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-x64.exe) ·
 [**Documentation**](https://keiken-shin.github.io/birds-eye/) ·
 Microsoft Store — _coming soon_
 
