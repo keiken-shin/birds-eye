@@ -593,7 +593,7 @@ const SCAN_ISSUES: Record<string, Array<{ phase: string; path: string; message: 
     { phase: "walk", path: `${ROOT}\\Documents\\Outlook Files`, message: "The process cannot access the file because it is being used by another process. (os error 32)" },
     { phase: "walk", path: `${ROOT}\\Videos\\.sync`, message: "Access is denied. (os error 5)" },
     { phase: "hash", path: `${ROOT}\\Documents\\ledger-2024.xlsx`, message: "The process cannot access the file because it is being used by another process. (os error 32)" },
-    { phase: "hash", path: `${ROOT}\\Photos\\OneDrive\\IMG_8841.heic`, message: "The cloud operation was not completed before the time-out period expired. (os error 362)" },
+    { phase: "hash", path: `${ROOT}\\Photos\\OneDrive\\IMG_8841.heic`, message: "online-only cloud file — make it available offline (e.g. OneDrive → 'Always keep on this device'), then retry verification" },
   ],
 };
 
@@ -816,6 +816,25 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       });
     case "scan_issues":
       return done(SCAN_ISSUES[String(request.index_path)] ?? []);
+    case "retry_scan_issues": {
+      // Simulate a retry where everything heals except the cloud placeholder
+      // (it stays online-only until the user hydrates it).
+      const key = String(request.index_path);
+      const remaining = (SCAN_ISSUES[key] ?? []).filter((i) => i.message.includes("cloud"));
+      SCAN_ISSUES[key] = remaining;
+      const walk = remaining.filter((i) => i.phase === "walk").length;
+      const hash = remaining.filter((i) => i.phase === "hash").length;
+      INDEXES = INDEXES.map((e) =>
+        e.index_path === key ? { ...e, walk_issues: walk, hash_issues: hash } : e
+      );
+      return done({ walk_issues: walk, hash_issues: hash });
+    }
+    case "file_lock_holders": {
+      const p = String(request.path).toLowerCase();
+      if (p.includes("outlook")) return done(["Microsoft Outlook"]);
+      if (p.includes("ledger")) return done(["Microsoft Excel"]);
+      return done([]);
+    }
     case "folder_children": {
       const parent = String(request.parent_path ?? "").replace(/[\\/]+$/, "");
       const children = FOLDERS.filter((f) => {

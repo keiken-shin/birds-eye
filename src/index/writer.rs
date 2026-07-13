@@ -377,6 +377,117 @@ impl IndexWriter {
         Ok((walk, hash))
     }
 
+    /// Re-walk just the given paths and fold what's found into the index — the
+    /// targeted fix for walk issues, without a full rescan. Each path's issue
+    /// slate is cleared first; whatever still fails re-records a fresh issue.
+    /// File paths (from per-entry metadata failures) probe their parent folder.
+    pub fn probe_folders(&mut self, paths: &[PathBuf]) -> Result<(), IndexError> {
+        let scan_id = self.current_scan_session_id()?;
+
+        // Dedup to directories: a file path retries via its parent.
+        let mut roots: Vec<PathBuf> = Vec::new();
+        for path in paths {
+            let dir = if std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(true) {
+                path.clone()
+            } else {
+                path.parent().map(Path::to_path_buf).unwrap_or_else(|| path.clone())
+            };
+            if !roots.iter().any(|r| dir.starts_with(r)) {
+                roots.retain(|r| !r.starts_with(&dir));
+                roots.push(dir);
+            }
+        }
+
+        for root in &roots {
+            self.connection.execute(
+                "DELETE FROM scan_issues
+                 WHERE scan_id = ?1 AND phase = 'walk' AND (path = ?2 OR path LIKE ?3 ESCAPE '\\')",
+                params![
+                    scan_id,
+                    path_to_string(root),
+                    format!("{}%", escape_like_pattern(&path_prefix(root)))
+                ],
+            )?;
+            self.probe_directory(root)?;
+        }
+
+        self.commit_scan_transaction()?; // flush any batched crawl commits
+        self.recompute_folder_rollups(&mut |_| {})?;
+        self.rebuild_extension_stats()?;
+        // The session's walk tally now reflects what is still unreadable.
+        self.connection.execute(
+            "UPDATE scan_sessions
+             SET inaccessible_entries =
+               (SELECT COUNT(*) FROM scan_issues WHERE scan_id = ?1 AND phase = 'walk')
+             WHERE id = ?1",
+            params![scan_id],
+        )?;
+        Ok(())
+    }
+
+    fn probe_directory(&mut self, dir: &Path) -> Result<(), IndexError> {
+        let read_dir = match std::fs::read_dir(dir) {
+            Ok(read_dir) => read_dir,
+            Err(error) => {
+                return self.record_scan_issue("walk", &path_to_string(dir), &error.to_string());
+            }
+        };
+
+        let mut direct_files = 0u64;
+        let mut direct_bytes = 0u64;
+        let mut subdirs = Vec::new();
+        for entry in read_dir {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    self.record_scan_issue("walk", &path_to_string(dir), &error.to_string())?;
+                    continue;
+                }
+            };
+            let path = entry.path();
+            let metadata = match entry.metadata() {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    self.record_scan_issue("walk", &path_to_string(&path), &error.to_string())?;
+                    continue;
+                }
+            };
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
+                subdirs.push(path);
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let extension = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_ascii_lowercase());
+            direct_files += 1;
+            direct_bytes += metadata.len();
+            self.index_file(&FileRecord {
+                parent: dir.to_path_buf(),
+                path,
+                name,
+                extension,
+                size: metadata.len(),
+                modified: metadata.modified().ok(),
+                accessed: metadata.accessed().ok(),
+                created: metadata.created().ok(),
+            })?;
+        }
+        self.index_folder(&FolderRecord {
+            path: dir.to_path_buf(),
+            direct_files,
+            direct_bytes,
+        })?;
+        for sub in subdirs {
+            self.probe_directory(&sub)?;
+        }
+        Ok(())
+    }
+
     pub fn largest_folders(&self, limit: usize) -> Result<Vec<FolderSummary>, IndexError> {
         let mut statement = self.connection.prepare(
             "SELECT path, total_files, total_bytes
@@ -1667,6 +1778,64 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
             .expect("group count");
         assert_eq!(groups, 0, "unhashable files never form groups");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn probe_folders_recovers_previously_unreadable_directories() {
+        let root = test_root("issues-probe");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("seen.bin"), &[1; 16]);
+
+        let scanner = Scanner::new(ScanOptions {
+            root: root.clone(),
+            workers: 1,
+        });
+        let events = scanner.scan();
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        for event in events {
+            writer.handle_event(&event).expect("failed to index event");
+            if matches!(event, ScanEvent::Finished(_)) {
+                break;
+            }
+        }
+
+        // A directory the walk couldn't read at scan time... that is readable now.
+        let locked = root.join("was-locked");
+        fs::create_dir_all(&locked).expect("failed to create folder");
+        write_file(&locked.join("recovered.bin"), &[2; 96]);
+        writer
+            .handle_event(&ScanEvent::Error(crate::scanner::ScanError {
+                path: locked.clone(),
+                message: "Access is denied. (os error 5)".to_owned(),
+            }))
+            .expect("failed to record error event");
+        assert_eq!(writer.scan_issues(10).expect("issues").len(), 1);
+
+        writer.probe_folders(&[locked.clone()]).expect("probe failed");
+
+        let issues = writer.scan_issues(10).expect("issues");
+        assert!(issues.is_empty(), "recovered directory clears its issue");
+        let (walk_count, _) = writer.scan_issue_counts().expect("counts");
+        assert_eq!(walk_count, 0, "session tally reconciled after probe");
+        let recovered: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL AND path LIKE '%recovered.bin'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("recovered file count");
+        assert_eq!(recovered, 1, "probed file lands in the index");
+        let rollup: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT total_bytes FROM folders WHERE path = ?1",
+                params![path_to_string(&root)],
+                |row| row.get(0),
+            )
+            .expect("root rollup");
+        assert_eq!(rollup, 16 + 96, "rollups fold in the probed subtree");
         cleanup(&root);
     }
 

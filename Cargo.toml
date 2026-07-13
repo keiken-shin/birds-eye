@@ -14,6 +14,10 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 rayon = "1"
 trash = "3"
 
+[target.'cfg(windows)'.dependencies]
+# Restart Manager: name the processes holding a locked file.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_RestartManager"] }
+
 [lib]
 name = "birds_eye"
 path = "src/lib.rs"

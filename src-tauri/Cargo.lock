@@ -116,6 +116,7 @@ dependencies = [
  "serde",
  "serde_json",
  "trash",
+ "windows-sys 0.59.0",
  "xxhash-rust",
 ]
 

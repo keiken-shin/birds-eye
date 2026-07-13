@@ -172,6 +172,25 @@ export async function scanIssues(indexPath: string, limit = 500) {
   });
 }
 
+/** Targeted retry: re-walks failed directories and re-verifies unhashed files
+ *  only — no full rescan. Resolves to the counts still failing afterwards. */
+export async function retryScanIssues(indexPath: string) {
+  return invoke<{ walk_issues: number; hash_issues: number }>("retry_scan_issues", {
+    request: {
+      index_path: indexPath,
+    },
+  });
+}
+
+/** Names of processes currently holding the file open (Windows Restart Manager). */
+export async function fileLockHolders(path: string) {
+  return invoke<string[]>("file_lock_holders", {
+    request: {
+      path,
+    },
+  });
+}
+
 /** Direct children of one folder (largest first) — drill-down past the
  *  overview's global top-N folder list. */
 export async function folderChildren(indexPath: string, parentPath: string, limit = 500) {

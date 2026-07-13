@@ -6,6 +6,8 @@ use birds_eye::native::api::{
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
     folder_children as query_folder_children,
     scan_issues as query_scan_issues, ScanIssueDto, ScanIssuesRequest,
+    retry_scan_issues as do_retry_scan_issues, RetryScanIssuesRequest, RetryScanIssuesResponse,
+    file_lock_holders as query_file_lock_holders, FileLockHoldersRequest,
     search_files as search_index_files,
     reveal_in_explorer as do_reveal_in_explorer,
     trash_files as do_trash_files, move_files as do_move_files,
@@ -75,6 +77,16 @@ fn folder_children(request: FolderChildrenRequest) -> Result<Vec<FolderSummaryDt
 #[tauri::command(async)]
 fn scan_issues(request: ScanIssuesRequest) -> Result<Vec<ScanIssueDto>, String> {
     query_scan_issues(request)
+}
+
+#[tauri::command(async)]
+fn retry_scan_issues(request: RetryScanIssuesRequest) -> Result<RetryScanIssuesResponse, String> {
+    do_retry_scan_issues(request)
+}
+
+#[tauri::command(async)]
+fn file_lock_holders(request: FileLockHoldersRequest) -> Result<Vec<String>, String> {
+    query_file_lock_holders(request)
 }
 
 #[tauri::command(async)]
@@ -359,6 +371,8 @@ fn main() {
             search_files,
             folder_children,
             scan_issues,
+            retry_scan_issues,
+            file_lock_holders,
             duplicate_group_files,
             list_indexes,
             delete_index,

@@ -940,6 +940,60 @@ pub fn scan_issues(request: ScanIssuesRequest) -> Result<Vec<ScanIssueDto>, Stri
         .collect())
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct RetryScanIssuesRequest {
+    pub index_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct RetryScanIssuesResponse {
+    pub walk_issues: i64,
+    pub hash_issues: i64,
+}
+
+/// Targeted retry of everything the last scan couldn't read or verify:
+/// re-walks just the failed directories, then re-runs duplicate refinement —
+/// which only hashes files that still lack hashes, so previously verified
+/// files aren't touched. No full rescan.
+pub fn retry_scan_issues(request: RetryScanIssuesRequest) -> Result<RetryScanIssuesResponse, String> {
+    let mut writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    let mode = writer.latest_scan_mode().map_err(|error| format!("{error:?}"))?;
+    writer.set_scan_mode(mode);
+
+    let walk_paths: Vec<PathBuf> = writer
+        .scan_issues(crate::index::writer::SCAN_ISSUES_CAP as usize)
+        .map_err(|error| format!("{error:?}"))?
+        .into_iter()
+        .filter(|issue| issue.phase == "walk")
+        .map(|issue| PathBuf::from(issue.path))
+        .collect();
+    if !walk_paths.is_empty() {
+        writer
+            .probe_folders(&walk_paths)
+            .map_err(|error| format!("{error:?}"))?;
+    }
+
+    writer
+        .refine_duplicates()
+        .map_err(|error| format!("{error:?}"))?;
+
+    let (walk_issues, hash_issues) = writer
+        .scan_issue_counts()
+        .map_err(|error| format!("{error:?}"))?;
+    Ok(RetryScanIssuesResponse { walk_issues, hash_issues })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FileLockHoldersRequest {
+    pub path: String,
+}
+
+/// Names of the processes currently holding the file open (Windows Restart
+/// Manager). Empty when nothing holds it — or on non-Windows platforms.
+pub fn file_lock_holders(request: FileLockHoldersRequest) -> Result<Vec<String>, String> {
+    Ok(crate::native::lockinfo::file_lock_holders(&request.path))
+}
+
 // ---- Discoveries ----
 
 #[derive(Debug, Clone, Deserialize)]

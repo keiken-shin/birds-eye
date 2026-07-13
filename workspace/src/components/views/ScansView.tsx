@@ -3,15 +3,20 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  FolderOpen,
   HardDrive,
   ListOrdered,
   RefreshCw,
   ScanLine,
+  ScanSearch,
   Trash2,
   X,
 } from "lucide-react";
 import {
   deleteNativeIndex,
+  fileLockHolders,
+  retryScanIssues,
+  revealInExplorer,
   scanIssues,
   type NativeIndexEntry,
   type NativeScanIssue,
@@ -57,6 +62,9 @@ export function ScansView() {
   /** Index whose issue list is expanded, plus its lazily fetched rows. */
   const [issuesOpenId, setIssuesOpenId] = useState<string | null>(null);
   const [issueRows, setIssueRows] = useState<NativeScanIssue[]>([]);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  /** Lock diagnosis per issue path: undefined = unchecked, null = checking. */
+  const [lockHolders, setLockHolders] = useState<Record<string, string[] | null>>({});
 
   const toggleIssues = (entry: NativeIndexEntry) => {
     if (issuesOpenId === entry.index_path) {
@@ -65,9 +73,33 @@ export function ScansView() {
     }
     setIssuesOpenId(entry.index_path);
     setIssueRows([]);
+    setLockHolders({});
     void scanIssues(entry.index_path)
       .then(setIssueRows)
       .catch(() => setIssueRows([]));
+  };
+
+  /** Re-walk failed folders + re-verify unhashed files — no full rescan. */
+  const handleRetryIssues = async (entry: NativeIndexEntry) => {
+    setRetryingId(entry.index_path);
+    setError(null);
+    try {
+      await retryScanIssues(entry.index_path);
+      await refreshIndexes(); // pick up the new issue counts
+      setIssueRows(await scanIssues(entry.index_path));
+      setLockHolders({});
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
+  const checkLock = (path: string) => {
+    setLockHolders((prev) => ({ ...prev, [path]: null }));
+    void fileLockHolders(path)
+      .then((names) => setLockHolders((prev) => ({ ...prev, [path]: names })))
+      .catch(() => setLockHolders((prev) => ({ ...prev, [path]: [] })));
   };
 
   const handleRescan = (entry: NativeIndexEntry) => {
@@ -344,27 +376,75 @@ export function ScansView() {
                             </span>
                           </button>
                           {issuesOpen ? (
-                            <div className="mt-1.5 max-h-56 overflow-y-auto rounded-lg border border-line-soft bg-inset">
-                              {issueRows.length === 0 ? (
-                                <div className="px-2.5 py-2 text-10 text-label italic">Loading…</div>
-                              ) : (
-                                issueRows.map((issue, i) => (
-                                  <div
-                                    key={`${issue.path}:${i}`}
-                                    className="flex items-baseline gap-2 border-b border-line-soft px-2.5 py-1.5 text-10 last:border-b-0"
-                                  >
-                                    <Tag tone={issue.phase === "walk" ? "amber" : "neutral"}>
-                                      {issue.phase === "walk" ? "unreadable" : "unverified"}
-                                    </Tag>
-                                    <span className="mono min-w-0 flex-1 truncate text-ink-soft" title={issue.path}>
-                                      {issue.path}
-                                    </span>
-                                    <span className="flex-none text-dim" title={issue.message}>
-                                      {issue.message.replace(/\.? \(os error \d+\)$/, "")}
-                                    </span>
-                                  </div>
-                                ))
-                              )}
+                            <div className="mt-1.5 rounded-lg border border-line-soft bg-inset">
+                              <div className="flex items-center justify-between gap-2 border-b border-line-soft px-2.5 py-1.5">
+                                <span className="text-10 text-label">
+                                  Close the apps holding these files (or make cloud files available
+                                  offline), then retry — only the failed items are re-checked.
+                                </span>
+                                <Button
+                                  size="sm"
+                                  variant="subtle"
+                                  icon={RefreshCw}
+                                  disabled={retryingId === entry.index_path}
+                                  onClick={() => void handleRetryIssues(entry)}
+                                >
+                                  {retryingId === entry.index_path ? "Retrying…" : "Retry all"}
+                                </Button>
+                              </div>
+                              <div className="max-h-56 overflow-y-auto">
+                                {issueRows.length === 0 ? (
+                                  <div className="px-2.5 py-2 text-10 text-label italic">Loading…</div>
+                                ) : (
+                                  issueRows.map((issue, i) => {
+                                    const holders = lockHolders[issue.path];
+                                    return (
+                                      <div
+                                        key={`${issue.path}:${i}`}
+                                        className="flex items-center gap-2 border-b border-line-soft px-2.5 py-1.5 text-10 last:border-b-0"
+                                      >
+                                        <Tag tone={issue.phase === "walk" ? "amber" : "neutral"}>
+                                          {issue.phase === "walk" ? "unreadable" : "unverified"}
+                                        </Tag>
+                                        <div className="min-w-0 flex-1">
+                                          <div className="mono truncate text-ink-soft" title={issue.path}>
+                                            {issue.path}
+                                          </div>
+                                          <div className="truncate text-dim" title={issue.message}>
+                                            {holders === null ? (
+                                              "checking who's using it…"
+                                            ) : holders !== undefined ? (
+                                              holders.length ? (
+                                                <span className="text-warn">
+                                                  in use by {holders.join(", ")} — close it, then retry
+                                                </span>
+                                              ) : (
+                                                <span className="text-primary-ink">
+                                                  nothing is holding it now — hit Retry all
+                                                </span>
+                                              )
+                                            ) : (
+                                              issue.message.replace(/\.? \(os error \d+\)$/, "")
+                                            )}
+                                          </div>
+                                        </div>
+                                        <IconButton
+                                          icon={ScanSearch}
+                                          label="Check what's using this file"
+                                          size={13}
+                                          onClick={() => checkLock(issue.path)}
+                                        />
+                                        <IconButton
+                                          icon={FolderOpen}
+                                          label="Reveal in Explorer"
+                                          size={13}
+                                          onClick={() => void revealInExplorer(issue.path).catch(() => {})}
+                                        />
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
                             </div>
                           ) : null}
                         </div>

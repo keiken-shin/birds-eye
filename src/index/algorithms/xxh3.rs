@@ -140,18 +140,30 @@ where
             if cancel() {
                 return (id, path, SampleResult::Cancelled);
             }
+            // Online-only cloud placeholders would stall for the provider's
+            // timeout and then fail anyway — classify them up front with the
+            // fix in the message instead of a cryptic OS error.
+            if is_cloud_placeholder(Path::new(&path)) {
+                return (
+                    id,
+                    path,
+                    SampleResult::Skipped { reason: CLOUD_PLACEHOLDER_REASON.to_owned() },
+                );
+            }
             let result = if sample_chunk_plan(size as u64).is_empty() {
                 // Small file: hash it whole.
-                match full_file_hash(Path::new(&path)) {
+                match with_lock_retry(|| full_file_hash(Path::new(&path))) {
                     Ok(full_hash) => SampleResult::Full { full_hash },
                     Err(error) => SampleResult::Skipped { reason: error.to_string() },
                 }
             } else {
-                match sample_file_hash(Path::new(&path), size as u64) {
-                    Ok(sample_hash) => match partial_file_hash(Path::new(&path), size as u64) {
-                        Ok(partial_hash) => SampleResult::Sampled { partial_hash, sample_hash },
-                        Err(error) => SampleResult::Skipped { reason: error.to_string() },
-                    },
+                match with_lock_retry(|| sample_file_hash(Path::new(&path), size as u64)) {
+                    Ok(sample_hash) => {
+                        match with_lock_retry(|| partial_file_hash(Path::new(&path), size as u64)) {
+                            Ok(partial_hash) => SampleResult::Sampled { partial_hash, sample_hash },
+                            Err(error) => SampleResult::Skipped { reason: error.to_string() },
+                        }
+                    }
                     Err(error) => SampleResult::Skipped { reason: error.to_string() },
                 }
             };
@@ -195,6 +207,48 @@ const BLOCK: usize = 64 * 1024;
 const SMALL_MAX: u64 = 256 * 1024;
 const MEDIUM_MAX: u64 = 1024 * 1024;
 const LARGE_MAX: u64 = 512 * 1024 * 1024;
+
+pub(crate) const CLOUD_PLACEHOLDER_REASON: &str = "online-only cloud file — make it available \
+offline (e.g. OneDrive → 'Always keep on this device'), then retry verification";
+
+/// Dehydrated cloud files (OneDrive "Files On-Demand" etc.) report a size but
+/// reading them triggers a download or a long provider timeout. Detected via
+/// file attributes so they can be reported instead of stalling the scan.
+#[cfg(windows)]
+fn is_cloud_placeholder(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_OFFLINE: u32 = 0x0000_1000;
+    const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x0004_0000;
+    const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+    std::fs::metadata(path)
+        .map(|m| {
+            m.file_attributes()
+                & (FILE_ATTRIBUTE_OFFLINE
+                    | FILE_ATTRIBUTE_RECALL_ON_OPEN
+                    | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
+                != 0
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn is_cloud_placeholder(_path: &Path) -> bool {
+    false
+}
+
+/// One short retry absorbs files that were momentarily locked mid-write
+/// (Windows sharing violation, os error 32). Long-lived locks still fail and
+/// get reported with the holding process discoverable from the UI.
+fn with_lock_retry<T>(op: impl Fn() -> std::io::Result<T>) -> std::io::Result<T> {
+    const SHARING_VIOLATION: i32 = 32;
+    match op() {
+        Err(error) if error.raw_os_error() == Some(SHARING_VIOLATION) => {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            op()
+        }
+        other => other,
+    }
+}
 
 /// Returns the (offset, len) chunks to sample for a file of `size` bytes.
 /// Empty means "skip sampling, hash the whole file directly".
