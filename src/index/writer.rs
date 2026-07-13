@@ -977,13 +977,17 @@ impl IndexWriter {
                         CASE
                           WHEN full_hash IS NOT NULL THEN 1.0
                           WHEN sample_hash IS NOT NULL THEN 0.80
-                          WHEN partial_hash IS NOT NULL THEN 0.60
-                          ELSE 0.35
+                          ELSE 0.60
                         END AS confidence,
                         COUNT(*) AS file_count,
                         size * (COUNT(*) - 1) AS reclaimable_bytes
                  FROM files
-                 WHERE deleted_at IS NULL AND size > 0
+                 -- Files whose hashing failed or was skipped (locked, permission
+                 -- denied, cloud placeholders, vanished) keep NULL hashes; SQL
+                 -- GROUP BY treats NULLs as equal, so without this filter every
+                 -- same-size unhashed file — a video and a document alike —
+                 -- collapses into one phantom \"duplicate\" group.
+                 WHERE deleted_at IS NULL AND size > 0 AND partial_hash IS NOT NULL
                  GROUP BY size, partial_hash, sample_hash, full_hash
                  HAVING COUNT(*) > 1
                  ORDER BY reclaimable_bytes DESC",
@@ -1038,13 +1042,9 @@ impl IndexWriter {
                      SELECT ?1, id FROM files WHERE deleted_at IS NULL AND size = ?2 AND partial_hash = ?3",
                     params![group_id, size, partial_hash],
                 )?;
-            } else {
-                tx.execute(
-                    "INSERT INTO duplicate_group_files (group_id, file_id)
-                     SELECT ?1, id FROM files WHERE deleted_at IS NULL AND size = ?2 AND partial_hash IS NULL",
-                    params![group_id, size],
-                )?;
             }
+            // No hash at all never forms a group: the grouping query above
+            // requires partial_hash, so size-only coincidences are excluded.
         }
 
         tx.commit()?;
@@ -1463,6 +1463,35 @@ mod tests {
             2
         );
         cleanup(&root);
+    }
+
+    #[test]
+    fn unhashed_same_size_files_never_group_as_duplicates() {
+        // Files whose hashing failed (locked, permission denied, cloud
+        // placeholders) keep NULL hashes. Same size + NULL hashes must NOT
+        // form a group — that's how a video and a document got paired.
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        writer
+            .connection()
+            .execute_batch(
+                "INSERT INTO folders (id, path, name, depth, indexed_at) VALUES (1, '/r', 'r', 0, 0);
+                 INSERT INTO files (folder_id, path, name, size, indexed_at)
+                 VALUES (1, '/r/movie.mp4', 'movie.mp4', 4096, 0),
+                        (1, '/r/report.pdf', 'report.pdf', 4096, 0);",
+            )
+            .expect("failed to seed unhashed files");
+
+        writer
+            .rebuild_duplicate_size_groups()
+            .expect("failed to rebuild duplicate groups");
+
+        let group_count: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
+            .expect("failed to count duplicate groups");
+        assert_eq!(group_count, 0, "size-only coincidences are not duplicates");
     }
 
     #[test]
