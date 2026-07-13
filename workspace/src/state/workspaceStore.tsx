@@ -51,6 +51,8 @@ type WorkspaceActions = {
   isPinned: (path: string) => boolean;
   /** Drive the Files view (from the command spine or the view's controls) and switch to it. */
   runQuery: (query: ResultsQuery) => void;
+  /** Drop the active results query (Files view falls back to the largest-files preset). */
+  clearQuery: () => void;
   setOverlay: (overlay: Overlay) => void;
   openReview: () => void;
   closeReview: () => void;
@@ -107,6 +109,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setResultsQuery(query);
     setView("files");
   }, []);
+  const clearQuery = useCallback(() => setResultsQuery(null), []);
   const openReview = useCallback(() => {
     if (staged.length) setReview(true);
   }, [staged.length]);
@@ -138,6 +141,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       unpinCard,
       isPinned,
       runQuery,
+      clearQuery,
       setOverlay,
       openReview,
       closeReview,
@@ -165,6 +169,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       unpinCard,
       isPinned,
       runQuery,
+      clearQuery,
       openReview,
       closeReview,
     ]

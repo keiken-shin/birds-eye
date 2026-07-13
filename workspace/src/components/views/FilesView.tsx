@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Lock, Plus, ScanLine, Search, SearchX } from "lucide-react";
+import { Check, Lock, Plus, ScanLine, Search, SearchX, X } from "lucide-react";
 import { formatBytes, formatCount } from "@bridge/domain";
 import {
   listSavedViews,
@@ -53,6 +53,7 @@ export function FilesView() {
     ontologyEnabled,
     resultsQuery,
     runQuery,
+    clearQuery,
     select,
     selected,
     isStaged,
@@ -78,6 +79,20 @@ export function FilesView() {
   useEffect(() => {
     if (resultsQuery?.kind === "search") setText(resultsQuery.text);
   }, [resultsQuery]);
+
+  // Live search: typing runs the query after a short pause; an emptied box
+  // drops the search so the view falls back to the largest-files preset.
+  useEffect(() => {
+    const t = text.trim();
+    const current = resultsQuery?.kind === "search" ? resultsQuery.text : null;
+    if (t === (current ?? "")) return; // already committed (incl. spine-routed mirrors)
+    if (resultsQuery?.kind === "view" && t === "") return; // don't clobber a saved view
+    const timer = window.setTimeout(() => {
+      if (t) runQuery({ kind: "search", text: t });
+      else clearQuery();
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [text, resultsQuery, runQuery, clearQuery]);
 
   const viewNeedsIntel = resultsQuery?.kind === "view" && !ontologyEnabled;
 
@@ -220,10 +235,24 @@ export function FilesView() {
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && submitSearch()}
-                placeholder="Search files by name or path — Enter to run"
+                placeholder="Search files by name or path"
                 spellCheck={false}
-                className="mono w-full rounded-lg border border-line-input bg-field py-2 pr-3 pl-8 text-12 text-ink placeholder:text-dim focus:border-primary/60 focus:outline-none"
+                className="mono w-full rounded-lg border border-line-input bg-field py-2 pr-8 pl-8 text-12 text-ink placeholder:text-dim focus:border-primary/60 focus:outline-none"
               />
+              {text || resultsQuery ? (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  title="Clear search"
+                  onClick={() => {
+                    setText("");
+                    clearQuery();
+                  }}
+                  className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-dim transition-colors hover:text-ink"
+                >
+                  <X size={13} strokeWidth={2} aria-hidden />
+                </button>
+              ) : null}
             </div>
             <span className="flex flex-none gap-[2px] rounded-lg border border-line-input bg-field p-[2px] text-10">
               {SORTS.map((s) => (
