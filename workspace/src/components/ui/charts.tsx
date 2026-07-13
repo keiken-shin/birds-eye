@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatBytes } from "@bridge/domain";
 
 /* ------------------------------------------------------------------ */
@@ -8,11 +8,24 @@ import { formatBytes } from "@bridge/domain";
 type TipState = { x: number; y: number; body: ReactNode } | null;
 
 function Tip({ tip }: { tip: TipState }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [shift, setShift] = useState(0);
+  // Clamp inside the positioning container so hovering near the right edge
+  // never widens the page into a horizontal scroll.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !tip) return;
+    const parent = el.offsetParent as HTMLElement | null;
+    if (!parent) return;
+    const over = tip.x + 12 + el.offsetWidth - parent.clientWidth;
+    setShift(over > 0 ? over : 0);
+  }, [tip]);
   if (!tip) return null;
   return (
     <div
-      className="pointer-events-none absolute z-10 rounded-lg border border-line-modal bg-overlay px-2.5 py-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
-      style={{ left: tip.x + 12, top: tip.y + 12 }}
+      ref={ref}
+      className="pointer-events-none absolute z-10 rounded-lg border border-line-modal bg-overlay px-2.5 py-1.5 whitespace-nowrap shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
+      style={{ left: Math.max(0, tip.x + 12 - shift), top: tip.y + 12 }}
     >
       {tip.body}
     </div>

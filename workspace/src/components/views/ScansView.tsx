@@ -39,7 +39,7 @@ function relTime(ts: number | null): string {
  * every index you've built — scanning is how all the other views get their data.
  */
 export function ScansView() {
-  const { setOverlay, setIndexPath } = useWorkspace();
+  const { setOverlay, setIndexPath, setView, setScopePath } = useWorkspace();
   const { indexes, activeEntry, refreshIndexes } = useIndexData();
   const { enqueue, queue, dequeue, view, cancel } = useScanController();
 
@@ -246,7 +246,11 @@ export function ScansView() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => setIndexPath(entry.index_path)}
+                              onClick={() => {
+                                setIndexPath(entry.index_path);
+                                setScopePath([]);
+                                setView("overview");
+                              }}
                             >
                               Open
                             </Button>
