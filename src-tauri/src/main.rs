@@ -1,3 +1,6 @@
+// Hide the console window on Windows release builds (keep it in debug for logs/panics).
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use birds_eye::native::api::{
     index_metadata,
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
