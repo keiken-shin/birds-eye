@@ -1,6 +1,8 @@
 import { useState } from "react";
 import {
   AlertTriangle,
+  ChevronDown,
+  ChevronRight,
   HardDrive,
   ListOrdered,
   RefreshCw,
@@ -8,7 +10,12 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { deleteNativeIndex, type NativeIndexEntry } from "@bridge/nativeClient";
+import {
+  deleteNativeIndex,
+  scanIssues,
+  type NativeIndexEntry,
+  type NativeScanIssue,
+} from "@bridge/nativeClient";
 import { formatBytes, formatCount, lastSegment } from "@bridge/domain";
 import { useWorkspace } from "../../state/workspaceStore";
 import { useIndexData } from "../../state/indexData";
@@ -47,6 +54,21 @@ export function ScansView() {
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [rescanningId, setRescanningId] = useState<string | null>(null);
+  /** Index whose issue list is expanded, plus its lazily fetched rows. */
+  const [issuesOpenId, setIssuesOpenId] = useState<string | null>(null);
+  const [issueRows, setIssueRows] = useState<NativeScanIssue[]>([]);
+
+  const toggleIssues = (entry: NativeIndexEntry) => {
+    if (issuesOpenId === entry.index_path) {
+      setIssuesOpenId(null);
+      return;
+    }
+    setIssuesOpenId(entry.index_path);
+    setIssueRows([]);
+    void scanIssues(entry.index_path)
+      .then(setIssueRows)
+      .catch(() => setIssueRows([]));
+  };
 
   const handleRescan = (entry: NativeIndexEntry) => {
     if (!entry.root_path) return;
@@ -204,6 +226,8 @@ export function ScansView() {
                   const isRescanning = rescanningId === entry.index_path;
                   const confirmingDelete = confirmDeleteId === entry.index_path;
                   const rootName = entry.root_path ? lastSegment(entry.root_path) : "(unknown root)";
+                  const issueCount = entry.walk_issues + entry.hash_issues;
+                  const issuesOpen = issuesOpenId === entry.index_path;
 
                   return (
                     <Card
@@ -288,6 +312,63 @@ export function ScansView() {
                           )}
                         </div>
                       </div>
+
+                      {issueCount > 0 ? (
+                        <div className="mt-2 border-t border-line-soft pt-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleIssues(entry)}
+                            className="flex w-full items-center gap-1.5 text-left text-11 text-warn transition-colors hover:brightness-125"
+                            aria-expanded={issuesOpen}
+                          >
+                            {issuesOpen ? (
+                              <ChevronDown size={12} aria-hidden />
+                            ) : (
+                              <ChevronRight size={12} aria-hidden />
+                            )}
+                            <AlertTriangle size={12} aria-hidden />
+                            <span>
+                              {entry.walk_issues > 0 ? (
+                                <>
+                                  <span className="mono font-semibold">{formatCount(entry.walk_issues)}</span>{" "}
+                                  item{entry.walk_issues === 1 ? "" : "s"} couldn't be read
+                                </>
+                              ) : null}
+                              {entry.walk_issues > 0 && entry.hash_issues > 0 ? " · " : null}
+                              {entry.hash_issues > 0 ? (
+                                <>
+                                  <span className="mono font-semibold">{formatCount(entry.hash_issues)}</span>{" "}
+                                  file{entry.hash_issues === 1 ? "" : "s"} couldn't be verified for duplicates
+                                </>
+                              ) : null}
+                            </span>
+                          </button>
+                          {issuesOpen ? (
+                            <div className="mt-1.5 max-h-56 overflow-y-auto rounded-lg border border-line-soft bg-inset">
+                              {issueRows.length === 0 ? (
+                                <div className="px-2.5 py-2 text-10 text-label italic">Loading…</div>
+                              ) : (
+                                issueRows.map((issue, i) => (
+                                  <div
+                                    key={`${issue.path}:${i}`}
+                                    className="flex items-baseline gap-2 border-b border-line-soft px-2.5 py-1.5 text-10 last:border-b-0"
+                                  >
+                                    <Tag tone={issue.phase === "walk" ? "amber" : "neutral"}>
+                                      {issue.phase === "walk" ? "unreadable" : "unverified"}
+                                    </Tag>
+                                    <span className="mono min-w-0 flex-1 truncate text-ink-soft" title={issue.path}>
+                                      {issue.path}
+                                    </span>
+                                    <span className="flex-none text-dim" title={issue.message}>
+                                      {issue.message.replace(/\.? \(os error \d+\)$/, "")}
+                                    </span>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </Card>
                   );
                 })}

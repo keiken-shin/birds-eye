@@ -93,6 +93,17 @@ export type NativeIndexEntry = {
   folders_scanned: number;
   bytes_scanned: number;
   scan_strategy: ScanStrategy;
+  /** entries the walk couldn't read (permissions/locked) — not indexed */
+  walk_issues: number;
+  /** files whose content couldn't be hashed — excluded from duplicate detection */
+  hash_issues: number;
+};
+
+export type NativeScanIssue = {
+  /** 'walk' — couldn't be indexed · 'hash' — couldn't be content-verified */
+  phase: "walk" | "hash";
+  path: string;
+  message: string;
 };
 
 export type NativeDuplicateFile = {
@@ -144,6 +155,16 @@ export async function listenNativeJobEvents(callback: (event: NativeJobEvent) =>
 
 export async function queryNativeIndex(indexPath: string, limit: number) {
   return invoke<NativeIndexOverview>("query_index", {
+    request: {
+      index_path: indexPath,
+      limit,
+    },
+  });
+}
+
+/** Files and folders the last scan couldn't read (walk) or verify (hash). */
+export async function scanIssues(indexPath: string, limit = 500) {
+  return invoke<NativeScanIssue[]>("scan_issues", {
     request: {
       index_path: indexPath,
       limit,

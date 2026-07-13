@@ -11,6 +11,7 @@ use crate::index::writer::{
 
 pub fn update_hashes_for_duplicate_candidates<F, C>(
     connection: &mut Connection,
+    scan_id: i64,
     cancel: &C,
     progress: &mut F,
 ) -> Result<(), IndexError>
@@ -18,7 +19,7 @@ where
     F: FnMut(FinalizationProgress),
     C: Fn() -> bool + Sync,
 {
-    update_partial_hashes_for_duplicate_candidates(connection, cancel, progress)?;
+    update_partial_hashes_for_duplicate_candidates(connection, scan_id, cancel, progress)?;
     if cancel() {
         return Ok(());
     }
@@ -67,7 +68,9 @@ where
             if cancel() {
                 return (id, None);
             }
-            (id, full_file_hash(Path::new(&path)))
+            // A failure here is not a scan issue: the file keeps its sample
+            // hash and stays in duplicate detection at sampled confidence.
+            (id, full_file_hash(Path::new(&path)).ok())
         })
         .collect();
 
@@ -88,11 +91,16 @@ where
 enum SampleResult {
     Sampled { partial_hash: String, sample_hash: String },
     Full { full_hash: String },
-    Skipped,
+    /// Hashing failed — the file ends up with no hashes and is excluded from
+    /// duplicate detection, so the reason is surfaced to the user as a scan issue.
+    Skipped { reason: String },
+    /// The scan was cancelled mid-hash; not an issue, nothing to report.
+    Cancelled,
 }
 
 fn update_partial_hashes_for_duplicate_candidates<F, C>(
     connection: &mut Connection,
+    scan_id: i64,
     cancel: &C,
     progress: &mut F,
 ) -> Result<(), IndexError>
@@ -126,28 +134,33 @@ where
     let total = candidates.len() as u64;
     progress_stage(progress, "Sampling duplicate candidates", 0, total);
 
-    let results: Vec<(i64, SampleResult)> = candidates
+    let results: Vec<(i64, String, SampleResult)> = candidates
         .into_par_iter()
         .map(|(id, path, size)| {
             if cancel() {
-                return (id, SampleResult::Skipped);
+                return (id, path, SampleResult::Cancelled);
             }
-            let result = match sample_file_hash(Path::new(&path), size as u64) {
-                Some(sample_hash) => match partial_file_hash(Path::new(&path), size as u64) {
-                    Some(partial_hash) => SampleResult::Sampled { partial_hash, sample_hash },
-                    None => SampleResult::Skipped,
-                },
-                None => match full_file_hash(Path::new(&path)) {
-                    Some(full_hash) => SampleResult::Full { full_hash },
-                    None => SampleResult::Skipped,
-                },
+            let result = if sample_chunk_plan(size as u64).is_empty() {
+                // Small file: hash it whole.
+                match full_file_hash(Path::new(&path)) {
+                    Ok(full_hash) => SampleResult::Full { full_hash },
+                    Err(error) => SampleResult::Skipped { reason: error.to_string() },
+                }
+            } else {
+                match sample_file_hash(Path::new(&path), size as u64) {
+                    Ok(sample_hash) => match partial_file_hash(Path::new(&path), size as u64) {
+                        Ok(partial_hash) => SampleResult::Sampled { partial_hash, sample_hash },
+                        Err(error) => SampleResult::Skipped { reason: error.to_string() },
+                    },
+                    Err(error) => SampleResult::Skipped { reason: error.to_string() },
+                }
             };
-            (id, result)
+            (id, path, result)
         })
         .collect();
 
     let tx = connection.transaction()?;
-    for (index, (id, result)) in results.into_iter().enumerate() {
+    for (index, (id, path, result)) in results.into_iter().enumerate() {
         match result {
             SampleResult::Sampled { partial_hash, sample_hash } => {
                 tx.execute(
@@ -167,7 +180,10 @@ where
                     params![full_hash, "xxh3-full-v1", id],
                 )?;
             }
-            SampleResult::Skipped => {}
+            SampleResult::Skipped { reason } => {
+                crate::index::writer::insert_scan_issue(&tx, scan_id, "hash", &path, &reason)?;
+            }
+            SampleResult::Cancelled => {}
         }
         emit_counted_progress(progress, "Sampling duplicate candidates", index as u64 + 1, total);
     }
@@ -206,34 +222,42 @@ fn sample_chunk_plan(size: u64) -> Vec<(u64, usize)> {
     ]
 }
 
-fn partial_file_hash(path: &Path, size: u64) -> Option<String> {
+fn partial_file_hash(path: &Path, size: u64) -> std::io::Result<String> {
     const BLOCK_SIZE: usize = 64 * 1024;
 
     if size == 0 {
-        return None;
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "empty file",
+        ));
     }
 
     let last_offset = size.saturating_sub(BLOCK_SIZE as u64);
     hash_file_chunks(path, size, &[(0, BLOCK_SIZE), (last_offset, BLOCK_SIZE)])
 }
 
-fn sample_file_hash(path: &Path, size: u64) -> Option<String> {
+/// Sampled hash for files with a non-empty chunk plan (> 256 KiB); callers
+/// check `sample_chunk_plan` first and full-hash small files instead.
+fn sample_file_hash(path: &Path, size: u64) -> std::io::Result<String> {
     let plan = sample_chunk_plan(size);
     if plan.is_empty() {
-        return None;
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "file below sampling threshold",
+        ));
     }
     hash_file_chunks(path, size, &plan)
 }
 
-fn full_file_hash(path: &Path) -> Option<String> {
+fn full_file_hash(path: &Path) -> std::io::Result<String> {
     const BLOCK_SIZE: usize = 128 * 1024;
 
-    let mut file = File::open(path).ok()?;
+    let mut file = File::open(path)?;
     let mut hasher = Xxh3::new();
     let mut buffer = vec![0_u8; BLOCK_SIZE];
 
     loop {
-        let read = file.read(&mut buffer).ok()?;
+        let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
         }
@@ -241,11 +265,11 @@ fn full_file_hash(path: &Path) -> Option<String> {
         hasher.update(&buffer[..read]);
     }
 
-    Some(format!("{:032x}", hasher.digest128()))
+    Ok(format!("{:032x}", hasher.digest128()))
 }
 
-fn hash_file_chunks(path: &Path, size: u64, chunks: &[(u64, usize)]) -> Option<String> {
-    let mut file = File::open(path).ok()?;
+fn hash_file_chunks(path: &Path, size: u64, chunks: &[(u64, usize)]) -> std::io::Result<String> {
+    let mut file = File::open(path)?;
     let mut hasher = Xxh3::new();
     let mut buffer = vec![0_u8; chunks.iter().map(|(_, len)| *len).max().unwrap_or(0)];
 
@@ -257,15 +281,15 @@ fn hash_file_chunks(path: &Path, size: u64, chunks: &[(u64, usize)]) -> Option<S
         }
 
         let read_len = (*requested_len).min((size - *offset) as usize);
-        file.seek(SeekFrom::Start(*offset)).ok()?;
-        let read = file.read(&mut buffer[..read_len]).ok()?;
+        file.seek(SeekFrom::Start(*offset))?;
+        let read = file.read(&mut buffer[..read_len])?;
 
         hasher.update(&offset.to_le_bytes());
         hasher.update(&(read as u64).to_le_bytes());
         hasher.update(&buffer[..read]);
     }
 
-    Some(format!("{:032x}", hasher.digest128()))
+    Ok(format!("{:032x}", hasher.digest128()))
 }
 
 #[cfg(test)]
@@ -314,8 +338,8 @@ mod tests {
         let pa = write_temp("mid-a.bin", &a);
         let pb = write_temp("mid-b.bin", &b);
         assert_ne!(
-            sample_file_hash(&pa, size as u64),
-            sample_file_hash(&pb, size as u64),
+            sample_file_hash(&pa, size as u64).expect("hash a"),
+            sample_file_hash(&pb, size as u64).expect("hash b"),
             "a middle-byte difference must diverge at the middle chunk"
         );
     }

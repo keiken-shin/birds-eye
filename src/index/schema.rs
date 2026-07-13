@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 8;
+pub const CURRENT_SCHEMA_VERSION: u32 = 9;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -447,6 +447,26 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (8, strftime('%s', 'now'));
 "#;
 
+pub const MIGRATION_009: &str = r#"
+-- Files and folders the scanner could NOT read (permission denied, locked,
+-- cloud placeholder, vanished) — surfaced to the user instead of silently
+-- shaping results. phase: 'walk' (couldn't index) | 'hash' (couldn't verify
+-- content, so excluded from duplicate detection).
+CREATE TABLE IF NOT EXISTS scan_issues (
+  id INTEGER PRIMARY KEY,
+  scan_id INTEGER NOT NULL REFERENCES scan_sessions(id) ON DELETE CASCADE,
+  phase TEXT NOT NULL CHECK (phase IN ('walk', 'hash')),
+  path TEXT NOT NULL,
+  message TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_scan_issues_scan ON scan_issues(scan_id, phase);
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (9, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -456,6 +476,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (6, MIGRATION_006),
     (7, MIGRATION_007),
     (8, MIGRATION_008),
+    (9, MIGRATION_009),
 ];
 
 #[cfg(test)]
@@ -464,8 +485,25 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 8);
-        assert_eq!(ALL_MIGRATIONS.len(), 8);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 9);
+        assert_eq!(ALL_MIGRATIONS.len(), 9);
+    }
+
+    #[test]
+    fn migration_009_creates_scan_issues() {
+        use rusqlite::Connection;
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).expect("migration applies");
+        }
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='scan_issues'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query sqlite_master");
+        assert_eq!(count, 1, "scan_issues must exist after migrations");
     }
 
     #[test]

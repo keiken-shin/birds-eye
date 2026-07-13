@@ -671,6 +671,10 @@ pub struct IndexMetadataDto {
     pub folders_scanned: i64,
     pub bytes_scanned: i64,
     pub scan_strategy: String,
+    /// Entries the walk couldn't read (permission denied, locked) — not indexed.
+    pub walk_issues: i64,
+    /// Files whose content couldn't be hashed — excluded from duplicate detection.
+    pub hash_issues: i64,
 }
 
 pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse, String> {
@@ -863,6 +867,9 @@ pub fn duplicate_group_files(
 
 pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
     let writer = IndexWriter::open(index_path.clone()).map_err(|error| format!("{error:?}"))?;
+    let (walk_issues, hash_issues) = writer
+        .scan_issue_counts()
+        .map_err(|error| format!("{error:?}"))?;
     let metadata = writer
         .connection()
         .query_row(
@@ -881,6 +888,8 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
                     folders_scanned: row.get(4)?,
                     bytes_scanned: row.get(5)?,
                     scan_strategy: row.get(6)?,
+                    walk_issues,
+                    hash_issues,
                 })
             },
         )
@@ -896,7 +905,39 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
         folders_scanned: 0,
         bytes_scanned: 0,
         scan_strategy: ScanMode::default().as_id().to_owned(),
+        walk_issues: 0,
+        hash_issues: 0,
     }))
+}
+
+// ---- Scan issues (files the scanner couldn't read or verify) ----
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScanIssuesRequest {
+    pub index_path: PathBuf,
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ScanIssueDto {
+    /// 'walk' — couldn't be indexed · 'hash' — couldn't be content-verified.
+    pub phase: String,
+    pub path: String,
+    pub message: String,
+}
+
+pub fn scan_issues(request: ScanIssuesRequest) -> Result<Vec<ScanIssueDto>, String> {
+    let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    Ok(writer
+        .scan_issues(request.limit as usize)
+        .map_err(|error| format!("{error:?}"))?
+        .into_iter()
+        .map(|issue| ScanIssueDto {
+            phase: issue.phase,
+            path: issue.path,
+            message: issue.message,
+        })
+        .collect())
 }
 
 // ---- Discoveries ----

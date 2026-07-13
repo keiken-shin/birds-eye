@@ -5,6 +5,7 @@ use birds_eye::native::api::{
     index_metadata,
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
     folder_children as query_folder_children,
+    scan_issues as query_scan_issues, ScanIssueDto, ScanIssuesRequest,
     search_files as search_index_files,
     reveal_in_explorer as do_reveal_in_explorer,
     trash_files as do_trash_files, move_files as do_move_files,
@@ -69,6 +70,11 @@ fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultDto>,
 #[tauri::command(async)]
 fn folder_children(request: FolderChildrenRequest) -> Result<Vec<FolderSummaryDto>, String> {
     query_folder_children(request)
+}
+
+#[tauri::command(async)]
+fn scan_issues(request: ScanIssuesRequest) -> Result<Vec<ScanIssueDto>, String> {
+    query_scan_issues(request)
 }
 
 #[tauri::command(async)]
@@ -352,6 +358,7 @@ fn main() {
             query_index,
             search_files,
             folder_children,
+            scan_issues,
             duplicate_group_files,
             list_indexes,
             delete_index,

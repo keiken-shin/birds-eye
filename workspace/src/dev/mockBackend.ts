@@ -556,6 +556,8 @@ type IndexFix = {
   folders_scanned: number;
   bytes_scanned: number;
   scan_strategy: string;
+  walk_issues: number;
+  hash_issues: number;
 };
 
 let INDEXES: IndexFix[] = [
@@ -568,6 +570,8 @@ let INDEXES: IndexFix[] = [
     folders_scanned: 24_618,
     bytes_scanned: FOLDERS[0].total_bytes,
     scan_strategy: "smart",
+    walk_issues: 3,
+    hash_issues: 2,
   },
   {
     index_path: MEDIA_INDEX,
@@ -578,8 +582,20 @@ let INDEXES: IndexFix[] = [
     folders_scanned: 1_240,
     bytes_scanned: Math.round(682.4 * GB),
     scan_strategy: "metadata",
+    walk_issues: 0,
+    hash_issues: 0,
   },
 ];
+
+const SCAN_ISSUES: Record<string, Array<{ phase: string; path: string; message: string }>> = {
+  [MAIN_INDEX]: [
+    { phase: "walk", path: `${ROOT}\\AppData\\Local\\Temp\\locked`, message: "Access is denied. (os error 5)" },
+    { phase: "walk", path: `${ROOT}\\Documents\\Outlook Files`, message: "The process cannot access the file because it is being used by another process. (os error 32)" },
+    { phase: "walk", path: `${ROOT}\\Videos\\.sync`, message: "Access is denied. (os error 5)" },
+    { phase: "hash", path: `${ROOT}\\Documents\\ledger-2024.xlsx`, message: "The process cannot access the file because it is being used by another process. (os error 32)" },
+    { phase: "hash", path: `${ROOT}\\Photos\\OneDrive\\IMG_8841.heic`, message: "The cloud operation was not completed before the time-out period expired. (os error 362)" },
+  ],
+};
 
 /* ------------------------------------------------------------------ */
 /* Scan-job simulation (dev scan theater)                              */
@@ -638,6 +654,8 @@ function startMockScan(root: string): { job_id: number; index_path: string } {
           folders_scanned: 24_618,
           bytes_scanned: totalBytes,
           scan_strategy: "smart",
+          walk_issues: 3,
+          hash_issues: 2,
         },
         ...INDEXES.filter((e) => e.index_path !== indexPath),
       ];
@@ -796,6 +814,8 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
         timeline: TIMELINE,
         age_buckets: AGE_BUCKETS,
       });
+    case "scan_issues":
+      return done(SCAN_ISSUES[String(request.index_path)] ?? []);
     case "folder_children": {
       const parent = String(request.parent_path ?? "").replace(/[\\/]+$/, "");
       const children = FOLDERS.filter((f) => {

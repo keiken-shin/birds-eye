@@ -48,6 +48,11 @@ impl ScanMode {
     }
 }
 
+/// Cap issue rows per scan — enough to review, never a runaway table when a
+/// whole subtree is unreadable. Counts shown to the user come from this table,
+/// so the cap also caps the reported number.
+pub(crate) const SCAN_ISSUES_CAP: i64 = 500;
+
 pub struct IndexWriter {
     connection: Connection,
     session_id: Option<i64>,
@@ -64,6 +69,14 @@ pub struct FolderSummary {
     pub path: String,
     pub total_files: i64,
     pub total_bytes: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScanIssueSummary {
+    /// 'walk' (couldn't index) or 'hash' (couldn't verify content).
+    pub phase: String,
+    pub path: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -235,7 +248,10 @@ impl IndexWriter {
                 self.finish_session("cancelled", stats)?;
                 self.commit_scan_transaction()
             }
-            ScanEvent::Error(_) | ScanEvent::Progress(_) | ScanEvent::Verbose { .. } => Ok(()),
+            ScanEvent::Error(error) => {
+                self.record_scan_issue("walk", &path_to_string(&error.path), &error.message)
+            }
+            ScanEvent::Progress(_) | ScanEvent::Verbose { .. } => Ok(()),
         }
     }
 
@@ -281,8 +297,15 @@ impl IndexWriter {
         progress_stage(&mut progress, "Sampling duplicate candidates", 0, 1);
         self.mark_hash_jobs_running(scan_id, "sample")?;
         self.mark_duplicate_candidates_status(scan_id, "sampling")?;
+        // Re-runs re-hash every unfinished candidate, so start their issue
+        // slate clean instead of stacking duplicate rows.
+        self.connection.execute(
+            "DELETE FROM scan_issues WHERE scan_id = ?1 AND phase = 'hash'",
+            params![scan_id],
+        )?;
         crate::index::algorithms::update_hashes_for_duplicate_candidates(
             &mut self.connection,
+            scan_id,
             cancel,
             &mut progress,
         )?;
@@ -305,6 +328,53 @@ impl IndexWriter {
 
     pub fn refine_duplicates(&mut self) -> Result<(), IndexError> {
         self.refine_duplicates_with_progress(&|| false, |_| {})
+    }
+
+    /// Issues from the most recent scan session: what couldn't be read (walk)
+    /// or content-verified (hash), with the OS error message. Detail rows are
+    /// capped at `SCAN_ISSUES_CAP` per scan.
+    pub fn scan_issues(&self, limit: usize) -> Result<Vec<ScanIssueSummary>, IndexError> {
+        let scan_id = match self.current_scan_session_id() {
+            Ok(id) => id,
+            Err(IndexError::MissingSession) => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let mut statement = self.connection.prepare(
+            "SELECT phase, path, message FROM scan_issues
+             WHERE scan_id = ?1
+             ORDER BY phase, path
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![scan_id, limit as i64], |row| {
+            Ok(ScanIssueSummary {
+                phase: row.get(0)?,
+                path: row.get(1)?,
+                message: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// (walk, hash) issue counts for the most recent scan session. The walk
+    /// count comes from the session's uncapped `inaccessible_entries` tally;
+    /// the hash count from the (capped) issue rows.
+    pub fn scan_issue_counts(&self) -> Result<(i64, i64), IndexError> {
+        let scan_id = match self.current_scan_session_id() {
+            Ok(id) => id,
+            Err(IndexError::MissingSession) => return Ok((0, 0)),
+            Err(e) => return Err(e),
+        };
+        let walk: i64 = self.connection.query_row(
+            "SELECT inaccessible_entries FROM scan_sessions WHERE id = ?1",
+            params![scan_id],
+            |row| row.get(0),
+        )?;
+        let hash: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM scan_issues WHERE scan_id = ?1 AND phase = 'hash'",
+            params![scan_id],
+            |row| row.get(0),
+        )?;
+        Ok((walk, hash))
     }
 
     pub fn largest_folders(&self, limit: usize) -> Result<Vec<FolderSummary>, IndexError> {
@@ -812,6 +882,11 @@ impl IndexWriter {
         Ok(())
     }
 
+    fn record_scan_issue(&mut self, phase: &str, path: &str, message: &str) -> Result<(), IndexError> {
+        let scan_id = self.current_scan_session_id()?;
+        insert_scan_issue(&self.connection, scan_id, phase, path, message)
+    }
+
     fn current_scan_session_id(&self) -> Result<i64, IndexError> {
         if let Some(session_id) = self.session_id {
             return Ok(session_id);
@@ -1232,6 +1307,24 @@ fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// Insert one scan issue, silently dropping rows past the per-scan cap.
+/// Shared by the walk (writer) and hash (algorithms) phases.
+pub(crate) fn insert_scan_issue(
+    connection: &Connection,
+    scan_id: i64,
+    phase: &str,
+    path: &str,
+    message: &str,
+) -> Result<(), IndexError> {
+    connection.execute(
+        "INSERT INTO scan_issues (scan_id, phase, path, message, created_at)
+         SELECT ?1, ?2, ?3, ?4, ?5
+         WHERE (SELECT COUNT(*) FROM scan_issues WHERE scan_id = ?1) < ?6",
+        params![scan_id, phase, path, message, now_millis(), SCAN_ISSUES_CAP],
+    )?;
+    Ok(())
+}
+
 fn path_prefix(path: &Path) -> String {
     let mut path = path_to_string(path);
     if !path.ends_with(std::path::MAIN_SEPARATOR) {
@@ -1492,6 +1585,89 @@ mod tests {
             })
             .expect("failed to count duplicate groups");
         assert_eq!(group_count, 0, "size-only coincidences are not duplicates");
+    }
+
+    #[test]
+    fn walk_errors_are_recorded_as_scan_issues() {
+        let root = test_root("issues-walk");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("one.bin"), &[1; 16]);
+
+        let scanner = Scanner::new(ScanOptions {
+            root: root.clone(),
+            workers: 1,
+        });
+        let events = scanner.scan();
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        for event in events {
+            let finished = matches!(event, ScanEvent::Finished(_));
+            if finished {
+                // Inject an unreadable-directory error the way a worker reports one.
+                writer
+                    .handle_event(&ScanEvent::Error(crate::scanner::ScanError {
+                        path: root.join("locked-folder"),
+                        message: "Access is denied. (os error 5)".to_owned(),
+                    }))
+                    .expect("failed to record error event");
+            }
+            writer.handle_event(&event).expect("failed to index event");
+            if finished {
+                break;
+            }
+        }
+
+        let issues = writer.scan_issues(10).expect("scan issues");
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].phase, "walk");
+        assert!(issues[0].path.ends_with("locked-folder"));
+        assert!(issues[0].message.contains("denied"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn hash_failures_surface_as_scan_issues() {
+        let root = test_root("issues-hash");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("real.bin"), &[7; 64]);
+
+        let scanner = Scanner::new(ScanOptions {
+            root: root.clone(),
+            workers: 1,
+        });
+        let events = scanner.scan();
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        for event in events {
+            writer.handle_event(&event).expect("failed to index event");
+            if matches!(event, ScanEvent::Finished(_)) {
+                break;
+            }
+        }
+
+        // Two same-size candidates whose backing files no longer exist —
+        // hashing must fail, record issues, and never group them.
+        writer
+            .connection()
+            .execute_batch(
+                "INSERT INTO files (folder_id, path, name, size, indexed_at)
+                 SELECT id, '/gone/movie.mp4', 'movie.mp4', 4096, 0 FROM folders LIMIT 1;
+                 INSERT INTO files (folder_id, path, name, size, indexed_at)
+                 SELECT id, '/gone/report.pdf', 'report.pdf', 4096, 0 FROM folders LIMIT 1;",
+            )
+            .expect("failed to seed phantom files");
+
+        writer.refine_duplicates().expect("failed to refine");
+
+        let issues = writer.scan_issues(10).expect("scan issues");
+        let hash_issues: Vec<_> = issues.iter().filter(|i| i.phase == "hash").collect();
+        assert_eq!(hash_issues.len(), 2, "both unreadable files reported");
+        let (_, hash_count) = writer.scan_issue_counts().expect("issue counts");
+        assert_eq!(hash_count, 2);
+        let groups: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .expect("group count");
+        assert_eq!(groups, 0, "unhashable files never form groups");
+        cleanup(&root);
     }
 
     #[test]
