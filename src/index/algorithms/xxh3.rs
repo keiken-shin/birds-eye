@@ -9,23 +9,30 @@ use crate::index::writer::{
     emit_counted_progress, progress_stage, FinalizationProgress, IndexError,
 };
 
-pub fn update_hashes_for_duplicate_candidates<F>(
+pub fn update_hashes_for_duplicate_candidates<F, C>(
     connection: &mut Connection,
+    cancel: &C,
     progress: &mut F,
 ) -> Result<(), IndexError>
 where
     F: FnMut(FinalizationProgress),
+    C: Fn() -> bool + Sync,
 {
-    update_partial_hashes_for_duplicate_candidates(connection, progress)?;
-    update_full_hashes_for_partial_matches(connection, progress)
+    update_partial_hashes_for_duplicate_candidates(connection, cancel, progress)?;
+    if cancel() {
+        return Ok(());
+    }
+    update_full_hashes_for_partial_matches(connection, cancel, progress)
 }
 
-fn update_full_hashes_for_partial_matches<F>(
+fn update_full_hashes_for_partial_matches<F, C>(
     connection: &mut Connection,
+    cancel: &C,
     progress: &mut F,
 ) -> Result<(), IndexError>
 where
     F: FnMut(FinalizationProgress),
+    C: Fn() -> bool + Sync,
 {
     const EAGER_FULL_HASH_MAX_BYTES: i64 = 64 * 1024 * 1024;
     let candidates = {
@@ -54,7 +61,14 @@ where
 
     let results: Vec<(i64, Option<String>)> = candidates
         .into_par_iter()
-        .map(|(id, path)| (id, full_file_hash(Path::new(&path))))
+        .map(|(id, path)| {
+            // A cancelled scan stops hashing right away; remaining files drain
+            // as no-ops so the pool winds down within one file's worth of work.
+            if cancel() {
+                return (id, None);
+            }
+            (id, full_file_hash(Path::new(&path)))
+        })
         .collect();
 
     let tx = connection.transaction()?;
@@ -77,12 +91,14 @@ enum SampleResult {
     Skipped,
 }
 
-fn update_partial_hashes_for_duplicate_candidates<F>(
+fn update_partial_hashes_for_duplicate_candidates<F, C>(
     connection: &mut Connection,
+    cancel: &C,
     progress: &mut F,
 ) -> Result<(), IndexError>
 where
     F: FnMut(FinalizationProgress),
+    C: Fn() -> bool + Sync,
 {
     let candidates = {
         let mut statement = connection.prepare(
@@ -113,6 +129,9 @@ where
     let results: Vec<(i64, SampleResult)> = candidates
         .into_par_iter()
         .map(|(id, path, size)| {
+            if cancel() {
+                return (id, SampleResult::Skipped);
+            }
             let result = match sample_file_hash(Path::new(&path), size as u64) {
                 Some(sample_hash) => match partial_file_hash(Path::new(&path), size as u64) {
                     Some(partial_hash) => SampleResult::Sampled { partial_hash, sample_hash },

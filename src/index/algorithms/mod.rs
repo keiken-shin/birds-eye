@@ -5,13 +5,16 @@ use crate::index::writer::{FinalizationProgress, IndexError};
 mod xxh3;
 
 /// Compute progressive XXH3 sample and full hashes for duplicate candidates,
-/// then leave duplicate-group rebuilding to the caller.
-pub fn update_hashes_for_duplicate_candidates<F>(
+/// then leave duplicate-group rebuilding to the caller. `cancel` is polled per
+/// file so a cancelled scan stops hashing promptly.
+pub fn update_hashes_for_duplicate_candidates<F, C>(
     connection: &mut Connection,
+    cancel: &C,
     progress: &mut F,
 ) -> Result<(), IndexError>
 where
     F: FnMut(FinalizationProgress),
+    C: Fn() -> bool + Sync,
 {
-    xxh3::update_hashes_for_duplicate_candidates(connection, progress)
+    xxh3::update_hashes_for_duplicate_candidates(connection, cancel, progress)
 }

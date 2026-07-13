@@ -109,6 +109,7 @@ impl ScanJobManager {
         let events = scanner.scan();
         let jobs = Arc::clone(&self.jobs);
         let worker_enrichment_pause = Arc::clone(&enrichment_pause);
+        let worker_controller = controller.clone();
 
         {
             let mut jobs = self
@@ -393,7 +394,10 @@ impl ScanJobManager {
                             );
                         };
 
-                    match writer.refine_duplicates_with_progress(&mut progress_listener) {
+                    match writer.refine_duplicates_with_progress(
+                        &|| worker_controller.is_cancelled(),
+                        &mut progress_listener,
+                    ) {
                         Ok(()) => {
                             timer.finish("scan"); // no-op if already finished
                             let phase_timings: Vec<PhaseTimingDto> = timer
@@ -829,7 +833,7 @@ fn terminal_after_enrichment(
 ) -> JobEventDto {
     if enrichment_pause.load(Ordering::Relaxed) {
         completed.status = JobStatusDto::Cancelled;
-        completed.message = "cancelled during enrichment".to_owned();
+        completed.message = "Scan cancelled".to_owned();
     }
     completed
 }
@@ -1058,7 +1062,7 @@ mod tests {
         let terminal = terminal_after_enrichment(completed, &pause);
 
         assert_eq!(terminal.status, JobStatusDto::Cancelled);
-        assert_eq!(terminal.message, "cancelled during enrichment");
+        assert_eq!(terminal.message, "Scan cancelled");
         assert_eq!(terminal.files_scanned, 7);
     }
 
@@ -1119,7 +1123,7 @@ mod tests {
             .expect("failed to fetch events");
         assert!(events
             .iter()
-            .any(|event| event.message == "cancelled during enrichment"));
+            .any(|event| event.message == "Scan cancelled"));
         cleanup(&root);
     }
 

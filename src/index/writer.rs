@@ -259,11 +259,16 @@ impl IndexWriter {
         Ok(mode.as_deref().map(ScanMode::from_id).unwrap_or_default())
     }
 
-    pub fn refine_duplicates_with_progress<F>(&mut self, mut progress: F) -> Result<(), IndexError>
+    pub fn refine_duplicates_with_progress<F, C>(
+        &mut self,
+        cancel: &C,
+        mut progress: F,
+    ) -> Result<(), IndexError>
     where
         F: FnMut(FinalizationProgress),
+        C: Fn() -> bool + Sync,
     {
-        if self.active_scan_mode == ScanMode::MetadataOnly {
+        if self.active_scan_mode == ScanMode::MetadataOnly || cancel() {
             return Ok(());
         }
 
@@ -278,8 +283,14 @@ impl IndexWriter {
         self.mark_duplicate_candidates_status(scan_id, "sampling")?;
         crate::index::algorithms::update_hashes_for_duplicate_candidates(
             &mut self.connection,
+            cancel,
             &mut progress,
         )?;
+        // Cancelled mid-hash: skip group rebuilding, keep the jobs/candidates
+        // rows as-is so the next scan re-hashes whatever was left unfinished.
+        if cancel() {
+            return Ok(());
+        }
         self.mark_hash_jobs_completed(scan_id, "sample")?;
 
         self.record_completed_full_hash_jobs(scan_id)?;
@@ -293,7 +304,7 @@ impl IndexWriter {
     }
 
     pub fn refine_duplicates(&mut self) -> Result<(), IndexError> {
-        self.refine_duplicates_with_progress(|_| {})
+        self.refine_duplicates_with_progress(&|| false, |_| {})
     }
 
     pub fn largest_folders(&self, limit: usize) -> Result<Vec<FolderSummary>, IndexError> {
@@ -1781,7 +1792,7 @@ mod tests {
         scan_into_index(&root, &mut writer);
 
         writer
-            .refine_duplicates_with_progress(|_| {})
+            .refine_duplicates_with_progress(&|| false, |_| {})
             .expect("failed to refine duplicates");
 
         let duplicate_groups: i64 = writer
