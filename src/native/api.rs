@@ -49,6 +49,13 @@ pub struct IndexQueryRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct FolderChildrenRequest {
+    pub index_path: PathBuf,
+    pub parent_path: String,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct SearchFilesRequest {
     pub index_path: PathBuf,
     pub query: String,
@@ -700,6 +707,20 @@ pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse,
     }
 
     Err("scan ended without terminal event".to_owned())
+}
+
+pub fn folder_children(request: FolderChildrenRequest) -> Result<Vec<FolderSummaryDto>, String> {
+    let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    Ok(writer
+        .folder_children(&request.parent_path, request.limit)
+        .map_err(|error| format!("{error:?}"))?
+        .into_iter()
+        .map(|folder| FolderSummaryDto {
+            path: folder.path,
+            total_files: folder.total_files,
+            total_bytes: folder.total_bytes,
+        })
+        .collect())
 }
 
 pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewDto, String> {

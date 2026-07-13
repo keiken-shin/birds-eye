@@ -151,6 +151,21 @@ export async function queryNativeIndex(indexPath: string, limit: number) {
   });
 }
 
+/** Direct children of one folder (largest first) — drill-down past the
+ *  overview's global top-N folder list. */
+export async function folderChildren(indexPath: string, parentPath: string, limit = 500) {
+  return invoke<Array<{ path: string; total_files: number; total_bytes: number }>>(
+    "folder_children",
+    {
+      request: {
+        index_path: indexPath,
+        parent_path: parentPath,
+        limit,
+      },
+    }
+  );
+}
+
 export async function searchNativeIndex(
   indexPath: string,
   query: string,

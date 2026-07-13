@@ -314,6 +314,32 @@ impl IndexWriter {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Direct children of one folder, largest first. The overview's
+    /// `largest_folders` is a global top-N, so deep/small subtrees fall out of
+    /// it — this scoped query is how drill-down reaches everything else.
+    pub fn folder_children(
+        &self,
+        parent_path: &str,
+        limit: usize,
+    ) -> Result<Vec<FolderSummary>, IndexError> {
+        let mut statement = self.connection.prepare(
+            "SELECT f.path, f.total_files, f.total_bytes
+             FROM folders f
+             JOIN folders p ON f.parent_id = p.id
+             WHERE p.path = ?1 AND f.total_bytes > 0
+             ORDER BY f.total_bytes DESC
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![parent_path, limit as i64], |row| {
+            Ok(FolderSummary {
+                path: row.get(0)?,
+                total_files: row.get(1)?,
+                total_bytes: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     pub fn largest_files(&self, limit: usize) -> Result<Vec<FileSummary>, IndexError> {
         let mut statement = self.connection.prepare(
             "SELECT path, size, extension, media_kind, modified_at

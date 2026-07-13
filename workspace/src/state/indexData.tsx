@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  folderChildren,
   listNativeIndexes,
   ontologyStatus,
   queryNativeIndex,
@@ -18,7 +19,7 @@ import {
   type NativeOntologyStatus,
   type NativeTreemapLensFolder,
 } from "@bridge/nativeClient";
-import { buildFolderTree, type FolderTree } from "../lib/folderTree";
+import { buildFolderTree, type FolderRow, type FolderTree } from "../lib/folderTree";
 import { useWorkspace } from "./workspaceStore";
 
 type DataStatus = "no-index" | "loading" | "ready" | "error";
@@ -38,6 +39,9 @@ type IndexDataValue = {
   dataVersion: number;
   refreshIndexes: () => Promise<void>;
   refreshData: () => Promise<void>;
+  /** Fetch one folder's direct children (they may be below the overview's
+   *  top-N cut) and merge them into the tree. Resolves true if any exist. */
+  loadFolderChildren: (parentPath: string) => Promise<boolean>;
 };
 
 const IndexDataContext = createContext<IndexDataValue | null>(null);
@@ -47,7 +51,7 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
   const { indexPath, setIndexPath, setOntologyEnabled } = useWorkspace();
   const [indexes, setIndexes] = useState<NativeIndexEntry[]>([]);
   const [overview, setOverview] = useState<NativeIndexOverview | null>(null);
-  const [tree, setTree] = useState<FolderTree | null>(null);
+  const [extraFolders, setExtraFolders] = useState<FolderRow[]>([]);
   const [lensByPath, setLensByPath] = useState<Map<string, NativeTreemapLensFolder>>(new Map());
   const [ontology, setOntology] = useState<NativeOntologyStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,7 +77,7 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
   const refreshData = useCallback(async () => {
     if (!indexPath) {
       setOverview(null);
-      setTree(null);
+      setExtraFolders([]);
       setLensByPath(new Map());
       return;
     }
@@ -81,7 +85,6 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setError(null);
     try {
-      const rootPath = indexes.find((e) => e.index_path === indexPath)?.root_path ?? null;
       const [ov, lens, ont] = await Promise.all([
         queryNativeIndex(indexPath, QUERY_LIMIT),
         treemapLensData(indexPath).catch(() => [] as NativeTreemapLensFolder[]),
@@ -91,7 +94,7 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
       ]);
       if (id !== reqId.current) return; // a newer request superseded this one
       setOverview(ov);
-      setTree(buildFolderTree(ov.folders, rootPath));
+      setExtraFolders([]); // fresh scan data invalidates lazily drilled-in folders
       setLensByPath(new Map(lens.map((r) => [r.folder_path, r])));
       if (ont) {
         setOntologyEnabled(ont.enabled);
@@ -117,6 +120,36 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshData();
   }, [refreshData]);
+
+  // The tree over the overview's top-N folders plus any drilled-in children.
+  const tree: FolderTree | null = useMemo(() => {
+    if (!overview) return null;
+    const rootPath = activeEntry?.root_path ?? null;
+    const seen = new Set<string>();
+    const rows = [...overview.folders, ...extraFolders].filter(
+      (f) => !seen.has(f.path) && (seen.add(f.path), true)
+    );
+    return buildFolderTree(rows, rootPath);
+  }, [overview, extraFolders, activeEntry]);
+
+  const loadFolderChildren = useCallback(
+    async (parentPath: string): Promise<boolean> => {
+      if (!indexPath) return false;
+      try {
+        const rows = await folderChildren(indexPath, parentPath);
+        if (!rows.length) return false;
+        setExtraFolders((prev) => {
+          const have = new Set(prev.map((p) => p.path));
+          const fresh = rows.filter((r) => !have.has(r.path));
+          return fresh.length ? [...prev, ...fresh] : prev;
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [indexPath]
+  );
 
   const reclaimableTotal = useMemo(() => {
     if (!tree) return 0;
@@ -145,8 +178,9 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
       dataVersion,
       refreshIndexes,
       refreshData,
+      loadFolderChildren,
     }),
-    [status, error, indexes, activeEntry, overview, tree, lensByPath, reclaimableTotal, ontology, dataVersion, refreshIndexes, refreshData]
+    [status, error, indexes, activeEntry, overview, tree, lensByPath, reclaimableTotal, ontology, dataVersion, refreshIndexes, refreshData, loadFolderChildren]
   );
 
   return <IndexDataContext.Provider value={value}>{children}</IndexDataContext.Provider>;

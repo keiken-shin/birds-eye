@@ -4,6 +4,7 @@
 use birds_eye::native::api::{
     index_metadata,
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
+    folder_children as query_folder_children,
     search_files as search_index_files,
     reveal_in_explorer as do_reveal_in_explorer,
     trash_files as do_trash_files, move_files as do_move_files,
@@ -32,8 +33,8 @@ use birds_eye::native::api::{
     RunOntologyEnrichmentRequest, RunOntologyEnrichmentResponse, SetOntologyEnabledRequest,
     TreemapLensFolderDto, TreemapLensRequest,
     DuplicateFileSummaryDto, DuplicateGroupFilesRequest,
-    FileSearchResultDto, IndexMetadataDto, IndexOverviewDto, IndexQueryRequest,
-    SearchFilesRequest,
+    FileSearchResultDto, FolderChildrenRequest, FolderSummaryDto, IndexMetadataDto,
+    IndexOverviewDto, IndexQueryRequest, SearchFilesRequest,
 };
 use birds_eye::ontology::cleanup::executor::CleanupResult;
 use birds_eye::ontology::cleanup::restore::CleanupLogEntry;
@@ -63,6 +64,11 @@ fn query_index(request: IndexQueryRequest) -> Result<IndexOverviewDto, String> {
 #[tauri::command(async)]
 fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultDto>, String> {
     search_index_files(request)
+}
+
+#[tauri::command(async)]
+fn folder_children(request: FolderChildrenRequest) -> Result<Vec<FolderSummaryDto>, String> {
+    query_folder_children(request)
 }
 
 #[tauri::command(async)]
@@ -345,6 +351,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             query_index,
             search_files,
+            folder_children,
             duplicate_group_files,
             list_indexes,
             delete_index,

@@ -796,6 +796,18 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
         timeline: TIMELINE,
         age_buckets: AGE_BUCKETS,
       });
+    case "folder_children": {
+      const parent = String(request.parent_path ?? "").replace(/[\\/]+$/, "");
+      const children = FOLDERS.filter((f) => {
+        if (!f.path.startsWith(parent)) return false;
+        const rest = f.path.slice(parent.length);
+        return /^[\\/][^\\/]+$/.test(rest);
+      })
+        .slice()
+        .sort((a, b) => b.total_bytes - a.total_bytes)
+        .slice(0, Number(request.limit) || 500);
+      return done(children);
+    }
     case "search_files":
       return done(searchFiles(request as Parameters<typeof searchFiles>[0]));
     case "duplicate_group_files": {
