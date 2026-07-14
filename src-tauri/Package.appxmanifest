@@ -19,7 +19,7 @@
   <Identity
     Name="Keiken.BirdsEye"
     Publisher="CN=B35BECAA-9078-4F48-B99E-F24C71A9F904"
-    Version="0.2.0.0"
+    Version="0.2.1.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
