@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Lock, Plus, ScanLine, Search, SearchX, X } from "lucide-react";
-import { formatAge, formatBytes, formatCount } from "@bridge/domain";
+import { ageDays, formatAge, formatBytes, formatCount } from "@bridge/domain";
 import {
   listSavedViews,
   runSavedView,
@@ -18,7 +18,6 @@ import { ViewHeader } from "./ViewHeader";
 const SEARCH_LIMIT = 500;
 const RENDER_CAP = 200;
 const STALE_DAYS = 180;
-const DAY_S = 86400;
 
 type SortKey = "size" | "newest" | "oldest";
 const SORTS: Array<{ key: SortKey; label: string }> = [
@@ -365,8 +364,12 @@ export function FilesView() {
                   {shown.map((r) => {
                     const cat = categoryOf(r.kind);
                     const Icon = cat.icon;
-                    const days = r.modifiedAt !== null ? Math.max(0, Math.floor((nowSec - r.modifiedAt) / DAY_S)) : null;
+                    // Reset/lost mtimes (pre-1990) resolve to null — an unknown
+                    // age, never "stale". `dateLost` distinguishes that from a
+                    // file that simply carries no timestamp.
+                    const days = ageDays(r.modifiedAt, nowSec);
                     const stale = days !== null && days > STALE_DAYS;
+                    const dateLost = r.modifiedAt !== null && days === null;
                     const staged = isStaged(r.path);
                     const sel = selected?.path === r.path;
                     return (
@@ -402,7 +405,13 @@ export function FilesView() {
                         {showAge ? (
                           <span
                             className="mono w-20 flex-none text-right text-11 text-dim"
-                            title={days !== null ? `${formatCount(days)} days` : undefined}
+                            title={
+                              days !== null
+                                ? `${formatCount(days)} days`
+                                : dateLost
+                                  ? "Date unknown — this file's modified time was lost in transfer (reads as ~1980)"
+                                  : undefined
+                            }
                           >
                             {days !== null ? formatAge(days) : "—"}
                           </span>

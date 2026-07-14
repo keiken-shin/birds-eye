@@ -198,6 +198,27 @@ export function formatCount(value: number) {
 }
 
 /**
+ * Unix-seconds floor below which a file's modified time is treated as lost, not
+ * real (1990-01-01 UTC). Transfers that strip timestamps — some phone/MTP
+ * copies, messaging exports, cloud downloads — reset mtime to the 1980 FAT
+ * epoch, which would otherwise make a recent file look decades old and "stale".
+ */
+export const MIN_REAL_MTIME = 631_152_000;
+
+/**
+ * Whole days since a file's modified time, or null when the timestamp is
+ * missing or implausibly old (a reset/lost mtime we refuse to trust for age or
+ * staleness). Callers render null as "unknown" rather than a huge number.
+ */
+export function ageDays(
+  modifiedAtSec: number | null,
+  nowSec: number = Math.floor(Date.now() / 1000)
+): number | null {
+  if (modifiedAtSec === null || modifiedAtSec < MIN_REAL_MTIME) return null;
+  return Math.max(0, Math.floor((nowSec - modifiedAtSec) / 86_400));
+}
+
+/**
  * A file age in days, rendered for humans: days under a year, otherwise years
  * plus the remaining days ("46y 206d ago" beats "16,996d ago"). Returns the
  * full phrase including "ago" so callers don't produce "today ago".

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, CopyCheck, FolderInput, ScanLine, TriangleAlert } from "lucide-react";
-import { formatAge, formatBytes } from "@bridge/domain";
+import { ageDays, formatAge, formatBytes } from "@bridge/domain";
 import {
   allowPreviewRoot,
   queryNativeDuplicateFiles,
@@ -32,9 +32,8 @@ function ConfidenceTag({ confidence }: { confidence: number }) {
 }
 
 function modifiedAgo(ts: number | null) {
-  if (!ts) return "modified —";
-  const days = Math.max(0, Math.floor((Date.now() - ts * 1000) / 86_400_000));
-  return `modified ${formatAge(days)}`;
+  const days = ageDays(ts); // null when missing or a reset/pre-1990 timestamp
+  return days !== null ? `modified ${formatAge(days)}` : "modified —";
 }
 
 /** Newest copy = latest modified time; unknown mtimes sort oldest. */

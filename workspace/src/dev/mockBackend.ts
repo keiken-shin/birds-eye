@@ -92,6 +92,9 @@ const file = (
 });
 
 const FILES: FileFix[] = [
+  // A file whose mtime was stripped in transfer (reads as the 1980 FAT epoch) —
+  // exercises the lost-date guard: shows "—", never "46y ago" / "Stale".
+  file(j("Photos", "Trips", "Rishikesh", "VID20240330154433.mp4"), 0.95, "mp4", "video", 16996),
   file(j("VMs", "win11-dev.vdi"), 22.4, "vdi", "other", 148),
   file(j("VMs", "ubuntu-lab.qcow2"), 12.8, "qcow2", "other", 411),
   file(j("Projects", "ml-lab", "checkpoints", "sdxl-base.safetensors"), 6.9, "safetensors", "model", 96),
