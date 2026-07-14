@@ -13,7 +13,7 @@ import {
   TrendingUp,
   type LucideIcon,
 } from "lucide-react";
-import { formatBytes, formatCount, lastSegment } from "@bridge/domain";
+import { formatAge, formatBytes, formatCount, lastSegment } from "@bridge/domain";
 import { useIndexData } from "../../state/indexData";
 import { useWorkspace } from "../../state/workspaceStore";
 import { categoryOf } from "../../lib/categories";
@@ -347,7 +347,12 @@ export function TimelineView() {
                         <div className="truncate text-125 text-ink-soft">{name}</div>
                         <div className="mono truncate text-10 text-faint">{f.path}</div>
                       </div>
-                      <span className="mono flex-none text-10 text-dim">{formatCount(days)}d ago</span>
+                      <span
+                        className="mono flex-none text-10 text-dim"
+                        title={`${formatCount(days)} days`}
+                      >
+                        {formatAge(days)}
+                      </span>
                       <span className="mono w-16 flex-none text-right text-11 font-medium text-muted">
                         {formatBytes(f.size)}
                       </span>

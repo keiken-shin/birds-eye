@@ -197,6 +197,19 @@ export function formatCount(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
+/**
+ * A file age in days, rendered for humans: days under a year, otherwise years
+ * plus the remaining days ("46y 206d ago" beats "16,996d ago"). Returns the
+ * full phrase including "ago" so callers don't produce "today ago".
+ */
+export function formatAge(days: number): string {
+  if (days <= 0) return "today";
+  if (days < 365) return `${formatCount(days)}d ago`;
+  const years = Math.floor(days / 365);
+  const rem = days % 365;
+  return rem > 0 ? `${years}y ${rem}d ago` : `${years}y ago`;
+}
+
 export function lastSegment(path: string) {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }

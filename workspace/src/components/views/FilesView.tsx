@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Lock, Plus, ScanLine, Search, SearchX, X } from "lucide-react";
-import { formatBytes, formatCount } from "@bridge/domain";
+import { formatAge, formatBytes, formatCount } from "@bridge/domain";
 import {
   listSavedViews,
   runSavedView,
@@ -70,6 +70,8 @@ export function FilesView() {
   const [kindFilter, setKindFilter] = useState<MediaKind | null>(null);
   const [sort, setSort] = useState<SortKey>("size");
   const reqId = useRef(0);
+  /** The last committed selection key — a change means clear old rows and show loading. */
+  const lastSel = useRef("");
 
   useEffect(() => {
     void listSavedViews().then(setSavedViews).catch(() => setSavedViews([]));
@@ -105,6 +107,16 @@ export function FilesView() {
       return;
     }
     const id = ++reqId.current;
+    // A changed selection (a different view chip or category) clears the old
+    // rows so the loading state shows at once — otherwise the previous chip's
+    // results linger during the fetch and the switch looks like it didn't take.
+    // Background refetches (same selection, new dataVersion) keep their rows to
+    // avoid a flash while enrichment streams in.
+    const sel = `${JSON.stringify(resultsQuery)}|${kindFilter ?? ""}`;
+    if (lastSel.current !== sel) {
+      setFetched([]);
+      lastSel.current = sel;
+    }
     setLoading(true);
     setError(null);
     (async () => {
@@ -388,8 +400,11 @@ export function FilesView() {
                           {formatBytes(r.size)}
                         </span>
                         {showAge ? (
-                          <span className="mono w-16 flex-none text-right text-11 text-dim">
-                            {days !== null ? `${formatCount(days)}d ago` : "—"}
+                          <span
+                            className="mono w-20 flex-none text-right text-11 text-dim"
+                            title={days !== null ? `${formatCount(days)} days` : undefined}
+                          >
+                            {days !== null ? formatAge(days) : "—"}
                           </span>
                         ) : null}
                         <Button
