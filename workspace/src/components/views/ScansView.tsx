@@ -303,20 +303,12 @@ export function ScansView() {
                             </span>
                             <Tag>{entry.scan_strategy}</Tag>
                             {entry.intelligence ? (
-                              <span title="Intelligence is on — folders are classified during scans">
+                              <span
+                                className="inline-flex"
+                                title="Intelligence is on — folders are classified during scans"
+                              >
                                 <Tag tone="green">Intelligence</Tag>
                               </span>
-                            ) : entry.root_path ? (
-                              <button
-                                type="button"
-                                disabled={enablingId === entry.index_path}
-                                title="Classifies every folder on-device (reads file contents, nothing leaves this machine). Runs an incremental rescan so verdicts reflect current data."
-                                onClick={() => void handleEnableIntelligence(entry)}
-                                className="flex items-center gap-1 rounded-full border border-primary-edge px-2 py-0.5 text-9 font-semibold tracking-[0.08em] text-primary-ink uppercase transition-[filter] hover:brightness-125 disabled:opacity-50"
-                              >
-                                <Sparkles size={9} aria-hidden />
-                                {enablingId === entry.index_path ? "Enabling…" : "Enable intelligence"}
-                              </button>
                             ) : null}
                             {active ? <Tag tone="green">Active</Tag> : null}
                           </div>
@@ -346,6 +338,18 @@ export function ScansView() {
                               }}
                             >
                               Open
+                            </Button>
+                          ) : null}
+                          {!entry.intelligence && entry.root_path ? (
+                            <Button
+                              variant="subtle"
+                              size="sm"
+                              icon={Sparkles}
+                              disabled={enablingId === entry.index_path}
+                              title="Classifies every folder on-device (reads file contents; nothing leaves this machine) to unlock safety verdicts and cleanup recommendations. Runs an incremental rescan so verdicts reflect current data."
+                              onClick={() => void handleEnableIntelligence(entry)}
+                            >
+                              {enablingId === entry.index_path ? "Enabling…" : ""}
                             </Button>
                           ) : null}
                           {entry.root_path ? (
