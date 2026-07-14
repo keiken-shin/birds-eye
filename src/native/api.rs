@@ -675,6 +675,8 @@ pub struct IndexMetadataDto {
     pub walk_issues: i64,
     /// Files whose content couldn't be hashed — excluded from duplicate detection.
     pub hash_issues: i64,
+    /// Whether the intelligence (ontology) layer is enabled for this index.
+    pub intelligence: bool,
 }
 
 pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse, String> {
@@ -870,6 +872,8 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
     let (walk_issues, hash_issues) = writer
         .scan_issue_counts()
         .map_err(|error| format!("{error:?}"))?;
+    let intelligence =
+        crate::ontology::enabled::is_enabled(writer.connection()).unwrap_or(false);
     let metadata = writer
         .connection()
         .query_row(
@@ -890,6 +894,7 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
                     scan_strategy: row.get(6)?,
                     walk_issues,
                     hash_issues,
+                    intelligence,
                 })
             },
         )
@@ -907,6 +912,7 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
         scan_strategy: ScanMode::default().as_id().to_owned(),
         walk_issues: 0,
         hash_issues: 0,
+        intelligence,
     }))
 }
 

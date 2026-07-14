@@ -288,7 +288,9 @@ export function BoardView() {
   const dupGroups = overview?.duplicate_groups ?? [];
   const allCards = useMemo<CardModel[]>(() => {
     const out: CardModel[] = [];
-    if (!ontologyEnabled) out.push({ id: "enable", kind: "enable" });
+    // Only prompt once the status read has landed — a null `ontology` means
+    // the index is still loading and the card would flash on every app start.
+    if (ontology && !ontologyEnabled) out.push({ id: "enable", kind: "enable" });
     for (const pin of pinned) out.push({ id: `pin:${pin.path}`, kind: "pin", pin });
     for (const f of findings) out.push({ id: `find:${f.id}`, kind: "finding", finding: f });
     // Cluster findings by their shared source: every origin that two or more
@@ -326,7 +328,7 @@ export function BoardView() {
     }
     for (const n of notes) out.push({ id: n.id, kind: "note", note: n });
     return out;
-  }, [ontologyEnabled, dupGroups, pinned, findings, notes]);
+  }, [ontology, ontologyEnabled, dupGroups, pinned, findings, notes]);
 
   const hiddenCount = useMemo(
     () => allCards.filter((c) => edits.overrides[c.id]?.hidden).length,

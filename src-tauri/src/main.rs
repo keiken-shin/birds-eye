@@ -159,6 +159,7 @@ fn start_scan_job_for_root(
     state: tauri::State<'_, AppState>,
     root: PathBuf,
     scan_strategy: Option<String>,
+    enable_intelligence: Option<bool>,
 ) -> Result<StartScanJobForRootResponse, String> {
     let index_path = default_index_path(&app, &root)?;
     let jobs = state
@@ -171,6 +172,7 @@ fn start_scan_job_for_root(
             root,
             index_path: index_path.clone(),
             scan_strategy,
+            enable_intelligence,
         },
         Some(Arc::new(move |event| {
             let _ = event_app.emit("scan-job-event", event);

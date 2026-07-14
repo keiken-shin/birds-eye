@@ -20,6 +20,11 @@ pub struct StartScanJobRequest {
     pub index_path: PathBuf,
     #[serde(default)]
     pub scan_strategy: Option<String>,
+    /// Some(true)/Some(false) applies the intelligence opt-in before the walk,
+    /// so the same job's enrichment phase runs (or stays off) — no second scan.
+    /// None leaves the index's existing setting untouched.
+    #[serde(default)]
+    pub enable_intelligence: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -176,6 +181,25 @@ impl ScanJobManager {
                     .as_deref()
                     .unwrap_or(ScanMode::default().as_id()),
             ));
+
+            if let Some(enabled) = request.enable_intelligence {
+                let result = if enabled {
+                    crate::ontology::enabled::enable(writer.connection())
+                } else {
+                    crate::ontology::enabled::disable(writer.connection())
+                };
+                if let Err(error) = result {
+                    emit_log(
+                        &jobs,
+                        listener.as_ref(),
+                        &log_file,
+                        job_id,
+                        job_start,
+                        "job",
+                        format!("failed to set intelligence opt-in (non-fatal): {error}"),
+                    );
+                }
+            }
 
             emit_log(
                 &jobs,
@@ -939,6 +963,7 @@ mod tests {
                 root: data_root,
                 index_path: index_path.clone(),
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start job");
 
@@ -978,6 +1003,7 @@ mod tests {
                 root: data_root,
                 index_path: index_path.clone(),
                 scan_strategy: Some("metadata".to_owned()),
+                enable_intelligence: None,
             })
             .expect("failed to start job");
 
@@ -1027,6 +1053,7 @@ mod tests {
                 root: data_root,
                 index_path,
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start job");
         manager
@@ -1080,6 +1107,7 @@ mod tests {
                 root: data_root.clone(),
                 index_path: index_path.clone(),
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start initial job");
         wait_for_terminal(&manager, initial.job_id);
@@ -1096,6 +1124,7 @@ mod tests {
                     root: data_root,
                     index_path,
                     scan_strategy: None,
+                enable_intelligence: None,
                 },
                 Some(Arc::new(move |event| {
                     if event
@@ -1147,6 +1176,7 @@ mod tests {
                     root: data_root,
                     index_path,
                     scan_strategy: None,
+                enable_intelligence: None,
                 },
                 Some(Arc::new(move |event| {
                     captured.lock().unwrap().push(event);
@@ -1193,6 +1223,7 @@ mod tests {
                     root: data_root,
                     index_path,
                     scan_strategy: None,
+                enable_intelligence: None,
                 },
                 Some(Arc::new(move |event| {
                     captured.lock().unwrap().push(event);
@@ -1226,6 +1257,7 @@ mod tests {
                 root: data_root.clone(),
                 index_path: index_path.clone(),
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start initial job");
         wait_for_terminal(&manager, initial.job_id);
@@ -1240,6 +1272,7 @@ mod tests {
                 root: data_root,
                 index_path: index_path.clone(),
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start rerun job");
         wait_for_terminal(&manager, rerun.job_id);
@@ -1286,6 +1319,7 @@ mod tests {
                 root: data_root,
                 index_path: index_path.clone(),
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start job");
         wait_for_terminal(&manager, response.job_id);
@@ -1388,6 +1422,7 @@ mod tests {
                 root: data_root,
                 index_path: index_path.clone(),
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start job");
 

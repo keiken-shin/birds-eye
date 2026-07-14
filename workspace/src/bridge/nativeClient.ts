@@ -97,6 +97,8 @@ export type NativeIndexEntry = {
   walk_issues: number;
   /** files whose content couldn't be hashed — excluded from duplicate detection */
   hash_issues: number;
+  /** whether the intelligence (ontology) layer is enabled for this index */
+  intelligence: boolean;
 };
 
 export type NativeScanIssue = {
@@ -128,10 +130,16 @@ export async function chooseNativeFolder() {
   return typeof selected === "string" ? selected : null;
 }
 
-export async function startNativeScan(root: string, scanStrategy: ScanStrategy) {
+export async function startNativeScan(
+  root: string,
+  scanStrategy: ScanStrategy,
+  enableIntelligence?: boolean
+) {
   const response = await invoke<{ job_id: number; index_path: string }>("start_scan_job_for_root", {
     root,
     scanStrategy,
+    // undefined leaves the index's existing intelligence setting untouched.
+    enableIntelligence: enableIntelligence ?? null,
   });
 
   return { jobId: response.job_id, indexPath: response.index_path };

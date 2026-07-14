@@ -9,6 +9,7 @@ import {
   RefreshCw,
   ScanLine,
   ScanSearch,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -18,6 +19,7 @@ import {
   retryScanIssues,
   revealInExplorer,
   scanIssues,
+  setOntologyEnabled,
   type NativeIndexEntry,
   type NativeScanIssue,
 } from "@bridge/nativeClient";
@@ -108,12 +110,31 @@ export function ScansView() {
     setError(null);
     try {
       // Runs now if idle, else lines up behind the running scan. Only follow it
-      // to the progress sheet when it actually started.
+      // to the progress sheet when it actually started. A plain rescan keeps
+      // the index's intelligence setting as-is.
       if (enqueue(entry.root_path, entry.scan_strategy) === "started") setOverlay("scan");
     } catch (e) {
       setError(String(e));
     } finally {
       setRescanningId(null);
+    }
+  };
+
+  /** Late opt-in for an index scanned without intelligence: flag it on, then run
+   *  an incremental rescan whose enrichment phase classifies fresh data. */
+  const [enablingId, setEnablingId] = useState<string | null>(null);
+  const handleEnableIntelligence = async (entry: NativeIndexEntry) => {
+    if (!entry.root_path) return;
+    setEnablingId(entry.index_path);
+    setError(null);
+    try {
+      await setOntologyEnabled(entry.index_path, true);
+      await refreshIndexes();
+      if (enqueue(entry.root_path, entry.scan_strategy, true) === "started") setOverlay("scan");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setEnablingId(null);
     }
   };
 
@@ -281,6 +302,22 @@ export function ScansView() {
                               {rootName}
                             </span>
                             <Tag>{entry.scan_strategy}</Tag>
+                            {entry.intelligence ? (
+                              <span title="Intelligence is on — folders are classified during scans">
+                                <Tag tone="green">Intelligence</Tag>
+                              </span>
+                            ) : entry.root_path ? (
+                              <button
+                                type="button"
+                                disabled={enablingId === entry.index_path}
+                                title="Classifies every folder on-device (reads file contents, nothing leaves this machine). Runs an incremental rescan so verdicts reflect current data."
+                                onClick={() => void handleEnableIntelligence(entry)}
+                                className="flex items-center gap-1 rounded-full border border-primary-edge px-2 py-0.5 text-9 font-semibold tracking-[0.08em] text-primary-ink uppercase transition-[filter] hover:brightness-125 disabled:opacity-50"
+                              >
+                                <Sparkles size={9} aria-hidden />
+                                {enablingId === entry.index_path ? "Enabling…" : "Enable intelligence"}
+                              </button>
+                            ) : null}
                             {active ? <Tag tone="green">Active</Tag> : null}
                           </div>
                           {entry.root_path ? (

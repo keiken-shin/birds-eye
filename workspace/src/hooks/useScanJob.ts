@@ -99,10 +99,10 @@ export function useScanJob(onComplete?: (indexPath: string) => void) {
     };
   }, [view.jobId, apply]);
 
-  const start = useCallback(async (root: string, strategy: ScanStrategy) => {
+  const start = useCallback(async (root: string, strategy: ScanStrategy, enableIntelligence?: boolean) => {
     lineCount.current = 0;
     try {
-      const { jobId, indexPath } = await startNativeScan(root, strategy);
+      const { jobId, indexPath } = await startNativeScan(root, strategy, enableIntelligence);
       jobRef.current = { jobId, indexPath };
       setView({ ...IDLE, jobId, indexPath, status: "scanning", message: "Scanning…" });
     } catch (e) {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
+import { useIndexData } from "../state/indexData";
 import { useWorkspace } from "../state/workspaceStore";
 import { useEnableIntelligence } from "../hooks/useEnableIntelligence";
 import { Card } from "./ui/Card";
@@ -8,6 +9,7 @@ import { Button } from "./ui/Button";
 /** First-class, non-destructive opt-in prompt — appears once per index when intelligence is off. */
 export function EnableIntelligence() {
   const { indexPath, ontologyEnabled } = useWorkspace();
+  const { ontology } = useIndexData();
   const { enable, busy, error } = useEnableIntelligence();
   const [dismissed, setDismissed] = useState(true);
 
@@ -16,7 +18,9 @@ export function EnableIntelligence() {
     setDismissed(localStorage.getItem(`be.ws.enable.dismissed:${indexPath}`) === "1");
   }, [indexPath]);
 
-  if (!indexPath || ontologyEnabled || dismissed) return null;
+  // `ontology === null` means the status read hasn't landed yet — showing the
+  // prompt then flashes it at every app start while a big index loads.
+  if (!indexPath || ontology === null || ontologyEnabled || dismissed) return null;
 
   const dismiss = () => {
     localStorage.setItem(`be.ws.enable.dismissed:${indexPath}`, "1");

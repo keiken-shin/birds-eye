@@ -34,7 +34,7 @@ export function useEnableIntelligence() {
       // Confirmed enable flips the prompt away via refreshData's status read; verdicts
       // stream in when the job's enrichment phase lands and onComplete refreshes again.
       await refreshData();
-      enqueue(root, getDefaultStrategy());
+      enqueue(root, getDefaultStrategy(), true);
       setView("scans");
     } catch (e) {
       setError(String(e));

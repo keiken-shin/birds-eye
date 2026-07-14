@@ -558,6 +558,7 @@ type IndexFix = {
   scan_strategy: string;
   walk_issues: number;
   hash_issues: number;
+  intelligence: boolean;
 };
 
 let INDEXES: IndexFix[] = [
@@ -572,6 +573,7 @@ let INDEXES: IndexFix[] = [
     scan_strategy: "smart",
     walk_issues: 3,
     hash_issues: 2,
+    intelligence: true,
   },
   {
     index_path: MEDIA_INDEX,
@@ -584,6 +586,7 @@ let INDEXES: IndexFix[] = [
     scan_strategy: "metadata",
     walk_issues: 0,
     hash_issues: 0,
+    intelligence: false,
   },
 ];
 
@@ -656,6 +659,7 @@ function startMockScan(root: string): { job_id: number; index_path: string } {
           scan_strategy: "smart",
           walk_issues: 3,
           hash_issues: 2,
+          intelligence: ontologyEnabled,
         },
         ...INDEXES.filter((e) => e.index_path !== indexPath),
       ];
@@ -789,7 +793,10 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
 
   switch (cmd) {
     case "list_indexes":
-      return done(INDEXES);
+      // The main index mirrors the live ontology flag so enable/disable shows up.
+      return done(
+        INDEXES.map((e) => (e.index_path === MAIN_INDEX ? { ...e, intelligence: ontologyEnabled } : e))
+      );
     case "delete_index": {
       const path = (args as { indexPath: string }).indexPath;
       INDEXES = INDEXES.filter((e) => e.index_path !== path);
@@ -1010,8 +1017,12 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       });
     case "allow_preview_root":
       return done(ROOT);
-    case "start_scan_job_for_root":
-      return done(startMockScan((args as { root: string }).root));
+    case "start_scan_job_for_root": {
+      const a = args as { root: string; enableIntelligence?: boolean | null };
+      // Mirror the real backend: the opt-in is applied with the scan itself.
+      if (typeof a.enableIntelligence === "boolean") ontologyEnabled = a.enableIntelligence;
+      return done(startMockScan(a.root));
+    }
     case "cancel_scan_job": {
       const jobId = (args as { jobId: number }).jobId;
       const timer = jobTimers.get(jobId);
