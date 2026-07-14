@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatBytes } from "@bridge/domain";
 
 /* ------------------------------------------------------------------ */
@@ -8,13 +8,56 @@ import { formatBytes } from "@bridge/domain";
 type TipState = { x: number; y: number; body: ReactNode } | null;
 
 function Tip({ tip }: { tip: TipState }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [shift, setShift] = useState(0);
+  // Clamp inside the positioning container so hovering near the right edge
+  // never widens the page into a horizontal scroll.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !tip) return;
+    const parent = el.offsetParent as HTMLElement | null;
+    if (!parent) return;
+    const over = tip.x + 12 + el.offsetWidth - parent.clientWidth;
+    setShift(over > 0 ? over : 0);
+  }, [tip]);
   if (!tip) return null;
   return (
     <div
-      className="pointer-events-none absolute z-10 rounded-lg border border-line-modal bg-overlay px-2.5 py-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
-      style={{ left: tip.x + 12, top: tip.y + 12 }}
+      ref={ref}
+      className="pointer-events-none absolute z-10 rounded-lg border border-line-modal bg-overlay px-2.5 py-1.5 whitespace-nowrap shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
+      style={{ left: Math.max(0, tip.x + 12 - shift), top: tip.y + 12 }}
     >
       {tip.body}
+    </div>
+  );
+}
+
+/**
+ * A tooltip anchored above a chart point/bar. `anchor` is 0..1 across the
+ * container width; the tip centers on it but self-clamps so it never spills
+ * past the container edge (which would widen the page into a horizontal
+ * scroll). The container must be the tip's positioned offsetParent.
+ */
+function ChartTip({ anchor, children }: { anchor: number; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [left, setLeft] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const parent = el?.offsetParent as HTMLElement | null;
+    if (!el || !parent) return;
+    const w = el.offsetWidth;
+    const cw = parent.clientWidth;
+    const centered = anchor * cw - w / 2;
+    setLeft(Math.max(4, Math.min(centered, Math.max(4, cw - w - 4))));
+  });
+  return (
+    <div
+      ref={ref}
+      className="pointer-events-none absolute bottom-full z-10 mb-1.5 rounded-lg border border-line-modal bg-overlay px-2.5 py-1.5 whitespace-nowrap shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
+      // Hidden on the first paint (before measurement) so it never flashes at left:0.
+      style={{ left: left ?? 0, visibility: left === null ? "hidden" : "visible" }}
+    >
+      {children}
     </div>
   );
 }
@@ -310,13 +353,10 @@ export function AreaChart({
         ) : null}
       </svg>
       {hover !== null ? (
-        <div
-          className="pointer-events-none absolute -top-1 z-10 -translate-x-1/2 rounded-lg border border-line-modal bg-overlay px-2.5 py-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
-          style={{ left: `${(coords[hover].x / W) * 100}%` }}
-        >
+        <ChartTip anchor={coords[hover].x / W}>
           <div className="text-10 whitespace-nowrap text-faint">{points[hover].meta ?? points[hover].label}</div>
           <div className="mono text-115 font-semibold text-ink">{formatValue(points[hover].value)}</div>
-        </div>
+        </ChartTip>
       ) : null}
     </div>
   );
@@ -337,29 +377,47 @@ export function DistBars({
   height?: number;
   formatValue?: (v: number) => string;
 }) {
-  const [hot, setHot] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Track the hovered bar plus its center as a 0..1 fraction of the chart, so
+  // the single shared ChartTip anchors on the bar and clamps at the edges.
+  const [hot, setHot] = useState<{ key: string; anchor: number } | null>(null);
   const max = Math.max(1, ...buckets.map((b) => b.value));
+  const active = hot ? buckets.find((b) => b.key === hot.key) : null;
   return (
-    <div className="flex items-end gap-2" style={{ height }} onMouseLeave={() => setHot(null)}>
+    <div
+      ref={rootRef}
+      className="relative flex items-end gap-2"
+      style={{ height }}
+      onMouseLeave={() => setHot(null)}
+    >
       {buckets.map((b) => {
         const h = Math.max(4, (b.value / max) * (height - 34));
         return (
-          <div key={b.key} className="group relative flex h-full flex-1 flex-col items-center justify-end gap-1.5">
-            {hot === b.key ? (
-              <div className="pointer-events-none absolute -top-2 z-10 -translate-y-full rounded-lg border border-line-modal bg-overlay px-2.5 py-1.5 whitespace-nowrap shadow-[0_8px_30px_rgba(0,0,0,0.5)]">
-                <div className="text-10 text-faint">{b.meta ?? b.label}</div>
-                <div className="mono text-115 font-semibold text-ink">{formatValue(b.value)}</div>
-              </div>
-            ) : null}
+          <div key={b.key} className="flex h-full flex-1 flex-col items-center justify-end gap-1.5">
             <div
               className="w-full max-w-11 rounded-t-[4px] transition-[filter]"
-              style={{ height: h, background: b.color, filter: hot === b.key ? "brightness(1.3)" : undefined }}
-              onMouseEnter={() => setHot(b.key)}
+              style={{ height: h, background: b.color, filter: hot?.key === b.key ? "brightness(1.3)" : undefined }}
+              onMouseEnter={(e) => {
+                const root = rootRef.current;
+                if (!root) return setHot({ key: b.key, anchor: 0.5 });
+                const bar = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                const box = root.getBoundingClientRect();
+                setHot({
+                  key: b.key,
+                  anchor: box.width ? (bar.left + bar.width / 2 - box.left) / box.width : 0.5,
+                });
+              }}
             />
             <div className="text-9 tracking-wide text-label uppercase">{b.label}</div>
           </div>
         );
       })}
+      {active && hot ? (
+        <ChartTip anchor={hot.anchor}>
+          <div className="text-10 text-faint">{active.meta ?? active.label}</div>
+          <div className="mono text-115 font-semibold text-ink">{formatValue(active.value)}</div>
+        </ChartTip>
+      ) : null}
     </div>
   );
 }

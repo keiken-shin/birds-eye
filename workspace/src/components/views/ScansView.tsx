@@ -1,14 +1,28 @@
 import { useState } from "react";
 import {
   AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  FolderOpen,
   HardDrive,
   ListOrdered,
   RefreshCw,
   ScanLine,
+  ScanSearch,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
-import { deleteNativeIndex, type NativeIndexEntry } from "@bridge/nativeClient";
+import {
+  deleteNativeIndex,
+  fileLockHolders,
+  retryScanIssues,
+  revealInExplorer,
+  scanIssues,
+  setOntologyEnabled,
+  type NativeIndexEntry,
+  type NativeScanIssue,
+} from "@bridge/nativeClient";
 import { formatBytes, formatCount, lastSegment } from "@bridge/domain";
 import { useWorkspace } from "../../state/workspaceStore";
 import { useIndexData } from "../../state/indexData";
@@ -39,7 +53,7 @@ function relTime(ts: number | null): string {
  * every index you've built — scanning is how all the other views get their data.
  */
 export function ScansView() {
-  const { setOverlay, setIndexPath } = useWorkspace();
+  const { setOverlay, setIndexPath, setView, setScopePath } = useWorkspace();
   const { indexes, activeEntry, refreshIndexes } = useIndexData();
   const { enqueue, queue, dequeue, view, cancel } = useScanController();
 
@@ -47,6 +61,48 @@ export function ScansView() {
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [rescanningId, setRescanningId] = useState<string | null>(null);
+  /** Index whose issue list is expanded, plus its lazily fetched rows. */
+  const [issuesOpenId, setIssuesOpenId] = useState<string | null>(null);
+  const [issueRows, setIssueRows] = useState<NativeScanIssue[]>([]);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  /** Lock diagnosis per issue path: undefined = unchecked, null = checking. */
+  const [lockHolders, setLockHolders] = useState<Record<string, string[] | null>>({});
+
+  const toggleIssues = (entry: NativeIndexEntry) => {
+    if (issuesOpenId === entry.index_path) {
+      setIssuesOpenId(null);
+      return;
+    }
+    setIssuesOpenId(entry.index_path);
+    setIssueRows([]);
+    setLockHolders({});
+    void scanIssues(entry.index_path)
+      .then(setIssueRows)
+      .catch(() => setIssueRows([]));
+  };
+
+  /** Re-walk failed folders + re-verify unhashed files — no full rescan. */
+  const handleRetryIssues = async (entry: NativeIndexEntry) => {
+    setRetryingId(entry.index_path);
+    setError(null);
+    try {
+      await retryScanIssues(entry.index_path);
+      await refreshIndexes(); // pick up the new issue counts
+      setIssueRows(await scanIssues(entry.index_path));
+      setLockHolders({});
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
+  const checkLock = (path: string) => {
+    setLockHolders((prev) => ({ ...prev, [path]: null }));
+    void fileLockHolders(path)
+      .then((names) => setLockHolders((prev) => ({ ...prev, [path]: names })))
+      .catch(() => setLockHolders((prev) => ({ ...prev, [path]: [] })));
+  };
 
   const handleRescan = (entry: NativeIndexEntry) => {
     if (!entry.root_path) return;
@@ -54,12 +110,31 @@ export function ScansView() {
     setError(null);
     try {
       // Runs now if idle, else lines up behind the running scan. Only follow it
-      // to the progress sheet when it actually started.
+      // to the progress sheet when it actually started. A plain rescan keeps
+      // the index's intelligence setting as-is.
       if (enqueue(entry.root_path, entry.scan_strategy) === "started") setOverlay("scan");
     } catch (e) {
       setError(String(e));
     } finally {
       setRescanningId(null);
+    }
+  };
+
+  /** Late opt-in for an index scanned without intelligence: flag it on, then run
+   *  an incremental rescan whose enrichment phase classifies fresh data. */
+  const [enablingId, setEnablingId] = useState<string | null>(null);
+  const handleEnableIntelligence = async (entry: NativeIndexEntry) => {
+    if (!entry.root_path) return;
+    setEnablingId(entry.index_path);
+    setError(null);
+    try {
+      await setOntologyEnabled(entry.index_path, true);
+      await refreshIndexes();
+      if (enqueue(entry.root_path, entry.scan_strategy, true) === "started") setOverlay("scan");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setEnablingId(null);
     }
   };
 
@@ -204,6 +279,8 @@ export function ScansView() {
                   const isRescanning = rescanningId === entry.index_path;
                   const confirmingDelete = confirmDeleteId === entry.index_path;
                   const rootName = entry.root_path ? lastSegment(entry.root_path) : "(unknown root)";
+                  const issueCount = entry.walk_issues + entry.hash_issues;
+                  const issuesOpen = issuesOpenId === entry.index_path;
 
                   return (
                     <Card
@@ -225,6 +302,14 @@ export function ScansView() {
                               {rootName}
                             </span>
                             <Tag>{entry.scan_strategy}</Tag>
+                            {entry.intelligence ? (
+                              <span
+                                className="inline-flex"
+                                title="Intelligence is on — folders are classified during scans"
+                              >
+                                <Tag tone="green">Intelligence</Tag>
+                              </span>
+                            ) : null}
                             {active ? <Tag tone="green">Active</Tag> : null}
                           </div>
                           {entry.root_path ? (
@@ -246,9 +331,25 @@ export function ScansView() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => setIndexPath(entry.index_path)}
+                              onClick={() => {
+                                setIndexPath(entry.index_path);
+                                setScopePath([]);
+                                setView("overview");
+                              }}
                             >
                               Open
+                            </Button>
+                          ) : null}
+                          {!entry.intelligence && entry.root_path ? (
+                            <Button
+                              variant="subtle"
+                              size="sm"
+                              icon={Sparkles}
+                              disabled={enablingId === entry.index_path}
+                              title="Enable Intelligence: Classifies every folder on-device (reads file contents; nothing leaves this machine) to unlock safety verdicts and cleanup recommendations. Runs an incremental rescan so verdicts reflect current data."
+                              onClick={() => void handleEnableIntelligence(entry)}
+                            >
+                              {enablingId === entry.index_path ? "Enabling…" : ""}
                             </Button>
                           ) : null}
                           {entry.root_path ? (
@@ -284,6 +385,111 @@ export function ScansView() {
                           )}
                         </div>
                       </div>
+
+                      {issueCount > 0 ? (
+                        <div className="mt-2 border-t border-line-soft pt-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleIssues(entry)}
+                            className="flex w-full items-center gap-1.5 text-left text-11 text-warn transition-colors hover:brightness-125"
+                            aria-expanded={issuesOpen}
+                          >
+                            {issuesOpen ? (
+                              <ChevronDown size={12} aria-hidden />
+                            ) : (
+                              <ChevronRight size={12} aria-hidden />
+                            )}
+                            <AlertTriangle size={12} aria-hidden />
+                            <span>
+                              {entry.walk_issues > 0 ? (
+                                <>
+                                  <span className="mono font-semibold">{formatCount(entry.walk_issues)}</span>{" "}
+                                  item{entry.walk_issues === 1 ? "" : "s"} couldn't be read
+                                </>
+                              ) : null}
+                              {entry.walk_issues > 0 && entry.hash_issues > 0 ? " · " : null}
+                              {entry.hash_issues > 0 ? (
+                                <>
+                                  <span className="mono font-semibold">{formatCount(entry.hash_issues)}</span>{" "}
+                                  file{entry.hash_issues === 1 ? "" : "s"} couldn't be verified for duplicates
+                                </>
+                              ) : null}
+                            </span>
+                          </button>
+                          {issuesOpen ? (
+                            <div className="mt-1.5 rounded-lg border border-line-soft bg-inset">
+                              <div className="flex items-center justify-between gap-2 border-b border-line-soft px-2.5 py-1.5">
+                                <span className="text-10 text-label">
+                                  Close the apps holding these files (or make cloud files available
+                                  offline), then retry — only the failed items are re-checked.
+                                </span>
+                                <Button
+                                  size="sm"
+                                  variant="subtle"
+                                  icon={RefreshCw}
+                                  disabled={retryingId === entry.index_path}
+                                  onClick={() => void handleRetryIssues(entry)}
+                                >
+                                  {retryingId === entry.index_path ? "Retrying…" : "Retry all"}
+                                </Button>
+                              </div>
+                              <div className="max-h-56 overflow-y-auto">
+                                {issueRows.length === 0 ? (
+                                  <div className="px-2.5 py-2 text-10 text-label italic">Loading…</div>
+                                ) : (
+                                  issueRows.map((issue, i) => {
+                                    const holders = lockHolders[issue.path];
+                                    return (
+                                      <div
+                                        key={`${issue.path}:${i}`}
+                                        className="flex items-center gap-2 border-b border-line-soft px-2.5 py-1.5 text-10 last:border-b-0"
+                                      >
+                                        <Tag tone={issue.phase === "walk" ? "amber" : "neutral"}>
+                                          {issue.phase === "walk" ? "unreadable" : "unverified"}
+                                        </Tag>
+                                        <div className="min-w-0 flex-1">
+                                          <div className="mono truncate text-ink-soft" title={issue.path}>
+                                            {issue.path}
+                                          </div>
+                                          <div className="truncate text-dim" title={issue.message}>
+                                            {holders === null ? (
+                                              "checking who's using it…"
+                                            ) : holders !== undefined ? (
+                                              holders.length ? (
+                                                <span className="text-warn">
+                                                  in use by {holders.join(", ")} — close it, then retry
+                                                </span>
+                                              ) : (
+                                                <span className="text-primary-ink">
+                                                  nothing is holding it now — hit Retry all
+                                                </span>
+                                              )
+                                            ) : (
+                                              issue.message.replace(/\.? \(os error \d+\)$/, "")
+                                            )}
+                                          </div>
+                                        </div>
+                                        <IconButton
+                                          icon={ScanSearch}
+                                          label="Check what's using this file"
+                                          size={13}
+                                          onClick={() => checkLock(issue.path)}
+                                        />
+                                        <IconButton
+                                          icon={FolderOpen}
+                                          label="Reveal in Explorer"
+                                          size={13}
+                                          onClick={() => void revealInExplorer(issue.path).catch(() => {})}
+                                        />
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </Card>
                   );
                 })}

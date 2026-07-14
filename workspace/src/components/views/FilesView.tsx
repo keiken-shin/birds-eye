@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Lock, Plus, ScanLine, Search, SearchX } from "lucide-react";
-import { formatBytes, formatCount } from "@bridge/domain";
+import { Check, Lock, Plus, ScanLine, Search, SearchX, X } from "lucide-react";
+import { ageDays, formatAge, formatBytes, formatCount } from "@bridge/domain";
 import {
   listSavedViews,
   runSavedView,
@@ -18,7 +18,6 @@ import { ViewHeader } from "./ViewHeader";
 const SEARCH_LIMIT = 500;
 const RENDER_CAP = 200;
 const STALE_DAYS = 180;
-const DAY_S = 86400;
 
 type SortKey = "size" | "newest" | "oldest";
 const SORTS: Array<{ key: SortKey; label: string }> = [
@@ -53,6 +52,7 @@ export function FilesView() {
     ontologyEnabled,
     resultsQuery,
     runQuery,
+    clearQuery,
     select,
     selected,
     isStaged,
@@ -69,6 +69,8 @@ export function FilesView() {
   const [kindFilter, setKindFilter] = useState<MediaKind | null>(null);
   const [sort, setSort] = useState<SortKey>("size");
   const reqId = useRef(0);
+  /** The last committed selection key — a change means clear old rows and show loading. */
+  const lastSel = useRef("");
 
   useEffect(() => {
     void listSavedViews().then(setSavedViews).catch(() => setSavedViews([]));
@@ -78,6 +80,20 @@ export function FilesView() {
   useEffect(() => {
     if (resultsQuery?.kind === "search") setText(resultsQuery.text);
   }, [resultsQuery]);
+
+  // Live search: typing runs the query after a short pause; an emptied box
+  // drops the search so the view falls back to the largest-files preset.
+  useEffect(() => {
+    const t = text.trim();
+    const current = resultsQuery?.kind === "search" ? resultsQuery.text : null;
+    if (t === (current ?? "")) return; // already committed (incl. spine-routed mirrors)
+    if (resultsQuery?.kind === "view" && t === "") return; // don't clobber a saved view
+    const timer = window.setTimeout(() => {
+      if (t) runQuery({ kind: "search", text: t });
+      else clearQuery();
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [text, resultsQuery, runQuery, clearQuery]);
 
   const viewNeedsIntel = resultsQuery?.kind === "view" && !ontologyEnabled;
 
@@ -90,6 +106,16 @@ export function FilesView() {
       return;
     }
     const id = ++reqId.current;
+    // A changed selection (a different view chip or category) clears the old
+    // rows so the loading state shows at once — otherwise the previous chip's
+    // results linger during the fetch and the switch looks like it didn't take.
+    // Background refetches (same selection, new dataVersion) keep their rows to
+    // avoid a flash while enrichment streams in.
+    const sel = `${JSON.stringify(resultsQuery)}|${kindFilter ?? ""}`;
+    if (lastSel.current !== sel) {
+      setFetched([]);
+      lastSel.current = sel;
+    }
     setLoading(true);
     setError(null);
     (async () => {
@@ -220,10 +246,24 @@ export function FilesView() {
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && submitSearch()}
-                placeholder="Search files by name or path — Enter to run"
+                placeholder="Search files by name or path"
                 spellCheck={false}
-                className="mono w-full rounded-lg border border-line-input bg-field py-2 pr-3 pl-8 text-12 text-ink placeholder:text-dim focus:border-primary/60 focus:outline-none"
+                className="mono w-full rounded-lg border border-line-input bg-field py-2 pr-8 pl-8 text-12 text-ink placeholder:text-dim focus:border-primary/60 focus:outline-none"
               />
+              {text || resultsQuery ? (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  title="Clear search"
+                  onClick={() => {
+                    setText("");
+                    clearQuery();
+                  }}
+                  className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-dim transition-colors hover:text-ink"
+                >
+                  <X size={13} strokeWidth={2} aria-hidden />
+                </button>
+              ) : null}
             </div>
             <span className="flex flex-none gap-[2px] rounded-lg border border-line-input bg-field p-[2px] text-10">
               {SORTS.map((s) => (
@@ -324,8 +364,12 @@ export function FilesView() {
                   {shown.map((r) => {
                     const cat = categoryOf(r.kind);
                     const Icon = cat.icon;
-                    const days = r.modifiedAt !== null ? Math.max(0, Math.floor((nowSec - r.modifiedAt) / DAY_S)) : null;
+                    // Reset/lost mtimes (pre-1990) resolve to null — an unknown
+                    // age, never "stale". `dateLost` distinguishes that from a
+                    // file that simply carries no timestamp.
+                    const days = ageDays(r.modifiedAt, nowSec);
                     const stale = days !== null && days > STALE_DAYS;
+                    const dateLost = r.modifiedAt !== null && days === null;
                     const staged = isStaged(r.path);
                     const sel = selected?.path === r.path;
                     return (
@@ -359,8 +403,17 @@ export function FilesView() {
                           {formatBytes(r.size)}
                         </span>
                         {showAge ? (
-                          <span className="mono w-16 flex-none text-right text-11 text-dim">
-                            {days !== null ? `${formatCount(days)}d ago` : "—"}
+                          <span
+                            className="mono w-20 flex-none text-right text-11 text-dim"
+                            title={
+                              days !== null
+                                ? `${formatCount(days)} days`
+                                : dateLost
+                                  ? "Date unknown — this file's modified time was lost in transfer (reads as ~1980)"
+                                  : undefined
+                            }
+                          >
+                            {days !== null ? formatAge(days) : "—"}
                           </span>
                         ) : null}
                         <Button

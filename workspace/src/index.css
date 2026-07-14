@@ -122,10 +122,16 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* Keyboard focus is always visible, mouse focus stays quiet. */
-:focus-visible {
+/* Keyboard focus is always visible, mouse focus stays quiet. Text fields are
+   excluded: their bordered container already signals focus, so the ring would
+   draw a second outline inside it. */
+:focus-visible:not(input):not(textarea) {
   outline: 2px solid var(--color-primary-edge);
   outline-offset: 1px;
+}
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
 }
 
 ::-webkit-scrollbar {

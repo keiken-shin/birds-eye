@@ -4,6 +4,10 @@
 use birds_eye::native::api::{
     index_metadata,
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
+    folder_children as query_folder_children,
+    scan_issues as query_scan_issues, ScanIssueDto, ScanIssuesRequest,
+    retry_scan_issues as do_retry_scan_issues, RetryScanIssuesRequest, RetryScanIssuesResponse,
+    file_lock_holders as query_file_lock_holders, FileLockHoldersRequest,
     search_files as search_index_files,
     reveal_in_explorer as do_reveal_in_explorer,
     trash_files as do_trash_files, move_files as do_move_files,
@@ -32,8 +36,8 @@ use birds_eye::native::api::{
     RunOntologyEnrichmentRequest, RunOntologyEnrichmentResponse, SetOntologyEnabledRequest,
     TreemapLensFolderDto, TreemapLensRequest,
     DuplicateFileSummaryDto, DuplicateGroupFilesRequest,
-    FileSearchResultDto, IndexMetadataDto, IndexOverviewDto, IndexQueryRequest,
-    SearchFilesRequest,
+    FileSearchResultDto, FolderChildrenRequest, FolderSummaryDto, IndexMetadataDto,
+    IndexOverviewDto, IndexQueryRequest, SearchFilesRequest,
 };
 use birds_eye::ontology::cleanup::executor::CleanupResult;
 use birds_eye::ontology::cleanup::restore::CleanupLogEntry;
@@ -63,6 +67,26 @@ fn query_index(request: IndexQueryRequest) -> Result<IndexOverviewDto, String> {
 #[tauri::command(async)]
 fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultDto>, String> {
     search_index_files(request)
+}
+
+#[tauri::command(async)]
+fn folder_children(request: FolderChildrenRequest) -> Result<Vec<FolderSummaryDto>, String> {
+    query_folder_children(request)
+}
+
+#[tauri::command(async)]
+fn scan_issues(request: ScanIssuesRequest) -> Result<Vec<ScanIssueDto>, String> {
+    query_scan_issues(request)
+}
+
+#[tauri::command(async)]
+fn retry_scan_issues(request: RetryScanIssuesRequest) -> Result<RetryScanIssuesResponse, String> {
+    do_retry_scan_issues(request)
+}
+
+#[tauri::command(async)]
+fn file_lock_holders(request: FileLockHoldersRequest) -> Result<Vec<String>, String> {
+    query_file_lock_holders(request)
 }
 
 #[tauri::command(async)]
@@ -135,6 +159,7 @@ fn start_scan_job_for_root(
     state: tauri::State<'_, AppState>,
     root: PathBuf,
     scan_strategy: Option<String>,
+    enable_intelligence: Option<bool>,
 ) -> Result<StartScanJobForRootResponse, String> {
     let index_path = default_index_path(&app, &root)?;
     let jobs = state
@@ -147,6 +172,7 @@ fn start_scan_job_for_root(
             root,
             index_path: index_path.clone(),
             scan_strategy,
+            enable_intelligence,
         },
         Some(Arc::new(move |event| {
             let _ = event_app.emit("scan-job-event", event);
@@ -345,6 +371,10 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             query_index,
             search_files,
+            folder_children,
+            scan_issues,
+            retry_scan_issues,
+            file_lock_holders,
             duplicate_group_files,
             list_indexes,
             delete_index,

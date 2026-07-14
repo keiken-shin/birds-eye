@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Copy, CopyCheck, FolderInput, ScanLine } from "lucide-react";
-import { formatBytes } from "@bridge/domain";
+import { Check, Copy, CopyCheck, FolderInput, ScanLine, TriangleAlert } from "lucide-react";
+import { ageDays, formatAge, formatBytes } from "@bridge/domain";
 import {
   allowPreviewRoot,
   queryNativeDuplicateFiles,
@@ -32,9 +32,8 @@ function ConfidenceTag({ confidence }: { confidence: number }) {
 }
 
 function modifiedAgo(ts: number | null) {
-  if (!ts) return "modified —";
-  const days = Math.max(0, Math.floor((Date.now() - ts * 1000) / 86_400_000));
-  return `modified ${days}d ago`;
+  const days = ageDays(ts); // null when missing or a reset/pre-1990 timestamp
+  return days !== null ? `modified ${formatAge(days)}` : "modified —";
 }
 
 /** Newest copy = latest modified time; unknown mtimes sort oldest. */
@@ -49,8 +48,27 @@ function newestOf(files: NativeDuplicateFile[]): NativeDuplicateFile | null {
  * Tray — nothing here deletes directly.
  */
 export function DuplicatesView() {
-  const { status, overview, dataVersion } = useIndexData();
-  const { indexPath, toggleStaged, isStaged, select, setOverlay } = useWorkspace();
+  const { status, overview, dataVersion, activeEntry } = useIndexData();
+  const { indexPath, toggleStaged, isStaged, select, setOverlay, setView } = useWorkspace();
+  const unverified = activeEntry?.hash_issues ?? 0;
+
+  // Duplicate detection silently excludes files it couldn't hash — say so.
+  const unverifiedNote =
+    unverified > 0 ? (
+      <button
+        type="button"
+        onClick={() => setView("scans")}
+        className="flex items-center gap-1.5 border-b border-line-soft px-4 py-1.5 text-left text-11 text-warn transition-[filter] hover:brightness-125"
+        title="Open Scans for the file-by-file list"
+      >
+        <TriangleAlert size={12} className="flex-none" aria-hidden />
+        <span>
+          <span className="mono font-semibold">{unverified}</span> file{unverified === 1 ? "" : "s"} couldn't
+          be read for content verification (locked, permission denied or offline) and are not part of these
+          groups — details in Scans →
+        </span>
+      </button>
+    ) : null;
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [movePaths, setMovePaths] = useState<string[] | null>(null);
   const [files, setFiles] = useState<NativeDuplicateFile[] | null>(null);
@@ -162,6 +180,7 @@ export function DuplicatesView() {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <ViewHeader title="Duplicates" sub="0 groups" />
+        {unverifiedNote}
         <div className="flex flex-1 items-center justify-center">
           <EmptyState
             icon={Copy}
@@ -196,6 +215,7 @@ export function DuplicatesView() {
           </Button>
         }
       />
+      {unverifiedNote}
 
       <div className="min-h-0 flex-1 overflow-hidden">
         <div className="flex h-full">

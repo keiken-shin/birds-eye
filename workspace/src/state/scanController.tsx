@@ -4,14 +4,16 @@ import { useScanJob, type ScanJobView } from "../hooks/useScanJob";
 import { useIndexData } from "./indexData";
 import { useWorkspace } from "./workspaceStore";
 
-export type QueuedScan = { root: string; strategy: ScanStrategy };
+export type QueuedScan = { root: string; strategy: ScanStrategy; intelligence?: boolean };
 
 type ScanControllerValue = {
   view: ScanJobView;
   queue: QueuedScan[];
-  start: (root: string, strategy: ScanStrategy) => Promise<void>;
-  /** Run now if idle, otherwise append to the FIFO. Returns which happened. */
-  enqueue: (root: string, strategy: ScanStrategy) => "started" | "queued";
+  start: (root: string, strategy: ScanStrategy, intelligence?: boolean) => Promise<void>;
+  /** Run now if idle, otherwise append to the FIFO. Returns which happened.
+   *  `intelligence` true/false applies the opt-in with the scan (enrichment
+   *  runs in the same job); undefined leaves the index's setting untouched. */
+  enqueue: (root: string, strategy: ScanStrategy, intelligence?: boolean) => "started" | "queued";
   dequeue: (index: number) => void;
   cancel: () => Promise<void>;
   reset: () => void;
@@ -32,7 +34,9 @@ export function ScanControllerProvider({ children }: { children: ReactNode }) {
   const [queue, setQueue] = useState<QueuedScan[]>([]);
   const queueRef = useRef(queue);
   queueRef.current = queue;
-  const startRef = useRef<((root: string, strategy: ScanStrategy) => Promise<void>) | null>(null);
+  const startRef = useRef<
+    ((root: string, strategy: ScanStrategy, intelligence?: boolean) => Promise<void>) | null
+  >(null);
 
   const onComplete = useCallback(
     (indexPath: string) => {
@@ -43,7 +47,7 @@ export function ScanControllerProvider({ children }: { children: ReactNode }) {
       const [next, ...rest] = queueRef.current;
       if (next) {
         setQueue(rest);
-        void startRef.current?.(next.root, next.strategy);
+        void startRef.current?.(next.root, next.strategy, next.intelligence);
       }
     },
     [refreshIndexes, setIndexPath, setScopePath, select]
@@ -53,12 +57,12 @@ export function ScanControllerProvider({ children }: { children: ReactNode }) {
   startRef.current = start;
 
   const enqueue = useCallback(
-    (root: string, strategy: ScanStrategy): "started" | "queued" => {
+    (root: string, strategy: ScanStrategy, intelligence?: boolean): "started" | "queued" => {
       if (view.status === "scanning") {
-        setQueue((q) => [...q, { root, strategy }]);
+        setQueue((q) => [...q, { root, strategy, intelligence }]);
         return "queued";
       }
-      void start(root, strategy);
+      void start(root, strategy, intelligence);
       return "started";
     },
     [view.status, start]

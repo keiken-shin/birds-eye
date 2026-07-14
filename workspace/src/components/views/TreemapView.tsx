@@ -28,8 +28,17 @@ function categoryStyle(kind: MediaKind): TileStyle {
 }
 
 export function TreemapView() {
-  const { tree, lensByPath, status, error, refreshData, overview, reclaimableTotal, activeEntry } =
-    useIndexData();
+  const {
+    tree,
+    lensByPath,
+    status,
+    error,
+    refreshData,
+    overview,
+    reclaimableTotal,
+    activeEntry,
+    loadFolderChildren,
+  } = useIndexData();
   const { scopePath, selected, ontologyEnabled, select, drillInto, popScopeTo, isStaged, setOverlay } =
     useWorkspace();
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -62,6 +71,17 @@ export function TreemapView() {
     }
     return best;
   }, [overview]);
+
+  // Drill into a tile. Children of deep/small folders (e.g. protected system
+  // trees) may be missing from the overview's global top-N — fetch them from
+  // the index on demand, then zoom only if the folder really has subfolders.
+  const openTile = async (node: FolderNode) => {
+    if (node.hasChildren) {
+      drillInto(node.path);
+      return;
+    }
+    if (await loadFolderChildren(node.path)) drillInto(node.path);
+  };
 
   const children = useMemo(() => (tree ? scopeChildren(tree, scopePath) : []), [tree, scopePath]);
   const scopeTotal = scopeTotalBytes(children);
@@ -184,7 +204,7 @@ export function TreemapView() {
             <div
               key={node.path}
               onClick={() => select({ kind: "folder", path: node.path, name: node.name, bytes: node.bytes })}
-              onDoubleClick={() => node.hasChildren && drillInto(node.path)}
+              onDoubleClick={() => void openTile(node)}
               onMouseEnter={() => setHover(node.path)}
               onMouseLeave={() => setHover((prev) => (prev === node.path ? null : prev))}
               className="absolute cursor-pointer overflow-hidden rounded-[6px] p-2"
@@ -229,7 +249,7 @@ export function TreemapView() {
                   {staged ? <Check size={11} strokeWidth={3} /> : <ArrowUp size={11} strokeWidth={2.5} />}
                 </div>
               )}
-              {hovered && node.hasChildren && showLabel && (
+              {hovered && showLabel && (
                 <div className="absolute right-[9px] bottom-2 flex items-center gap-1 rounded-[5px] bg-black/40 px-1.5 py-0.5 text-10 text-muted">
                   <Maximize2 size={9} aria-hidden /> open
                 </div>

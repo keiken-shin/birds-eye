@@ -93,6 +93,19 @@ export type NativeIndexEntry = {
   folders_scanned: number;
   bytes_scanned: number;
   scan_strategy: ScanStrategy;
+  /** entries the walk couldn't read (permissions/locked) — not indexed */
+  walk_issues: number;
+  /** files whose content couldn't be hashed — excluded from duplicate detection */
+  hash_issues: number;
+  /** whether the intelligence (ontology) layer is enabled for this index */
+  intelligence: boolean;
+};
+
+export type NativeScanIssue = {
+  /** 'walk' — couldn't be indexed · 'hash' — couldn't be content-verified */
+  phase: "walk" | "hash";
+  path: string;
+  message: string;
 };
 
 export type NativeDuplicateFile = {
@@ -117,10 +130,16 @@ export async function chooseNativeFolder() {
   return typeof selected === "string" ? selected : null;
 }
 
-export async function startNativeScan(root: string, scanStrategy: ScanStrategy) {
+export async function startNativeScan(
+  root: string,
+  scanStrategy: ScanStrategy,
+  enableIntelligence?: boolean
+) {
   const response = await invoke<{ job_id: number; index_path: string }>("start_scan_job_for_root", {
     root,
     scanStrategy,
+    // undefined leaves the index's existing intelligence setting untouched.
+    enableIntelligence: enableIntelligence ?? null,
   });
 
   return { jobId: response.job_id, indexPath: response.index_path };
@@ -149,6 +168,50 @@ export async function queryNativeIndex(indexPath: string, limit: number) {
       limit,
     },
   });
+}
+
+/** Files and folders the last scan couldn't read (walk) or verify (hash). */
+export async function scanIssues(indexPath: string, limit = 500) {
+  return invoke<NativeScanIssue[]>("scan_issues", {
+    request: {
+      index_path: indexPath,
+      limit,
+    },
+  });
+}
+
+/** Targeted retry: re-walks failed directories and re-verifies unhashed files
+ *  only — no full rescan. Resolves to the counts still failing afterwards. */
+export async function retryScanIssues(indexPath: string) {
+  return invoke<{ walk_issues: number; hash_issues: number }>("retry_scan_issues", {
+    request: {
+      index_path: indexPath,
+    },
+  });
+}
+
+/** Names of processes currently holding the file open (Windows Restart Manager). */
+export async function fileLockHolders(path: string) {
+  return invoke<string[]>("file_lock_holders", {
+    request: {
+      path,
+    },
+  });
+}
+
+/** Direct children of one folder (largest first) — drill-down past the
+ *  overview's global top-N folder list. */
+export async function folderChildren(indexPath: string, parentPath: string, limit = 500) {
+  return invoke<Array<{ path: string; total_files: number; total_bytes: number }>>(
+    "folder_children",
+    {
+      request: {
+        index_path: indexPath,
+        parent_path: parentPath,
+        limit,
+      },
+    }
+  );
 }
 
 export async function searchNativeIndex(

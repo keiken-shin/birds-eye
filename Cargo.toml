@@ -1,6 +1,6 @@
 [package]
 name = "birds-eye"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2021"
 description = "Native disk space intelligence platform scanner core"
 license = "MIT"
@@ -13,6 +13,10 @@ regex = "1"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 rayon = "1"
 trash = "3"
+
+[target.'cfg(windows)'.dependencies]
+# Restart Manager: name the processes holding a locked file.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_RestartManager"] }
 
 [lib]
 name = "birds_eye"

@@ -49,6 +49,13 @@ pub struct IndexQueryRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct FolderChildrenRequest {
+    pub index_path: PathBuf,
+    pub parent_path: String,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct SearchFilesRequest {
     pub index_path: PathBuf,
     pub query: String,
@@ -664,6 +671,12 @@ pub struct IndexMetadataDto {
     pub folders_scanned: i64,
     pub bytes_scanned: i64,
     pub scan_strategy: String,
+    /// Entries the walk couldn't read (permission denied, locked) — not indexed.
+    pub walk_issues: i64,
+    /// Files whose content couldn't be hashed — excluded from duplicate detection.
+    pub hash_issues: i64,
+    /// Whether the intelligence (ontology) layer is enabled for this index.
+    pub intelligence: bool,
 }
 
 pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse, String> {
@@ -700,6 +713,20 @@ pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse,
     }
 
     Err("scan ended without terminal event".to_owned())
+}
+
+pub fn folder_children(request: FolderChildrenRequest) -> Result<Vec<FolderSummaryDto>, String> {
+    let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    Ok(writer
+        .folder_children(&request.parent_path, request.limit)
+        .map_err(|error| format!("{error:?}"))?
+        .into_iter()
+        .map(|folder| FolderSummaryDto {
+            path: folder.path,
+            total_files: folder.total_files,
+            total_bytes: folder.total_bytes,
+        })
+        .collect())
 }
 
 pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewDto, String> {
@@ -842,6 +869,11 @@ pub fn duplicate_group_files(
 
 pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
     let writer = IndexWriter::open(index_path.clone()).map_err(|error| format!("{error:?}"))?;
+    let (walk_issues, hash_issues) = writer
+        .scan_issue_counts()
+        .map_err(|error| format!("{error:?}"))?;
+    let intelligence =
+        crate::ontology::enabled::is_enabled(writer.connection()).unwrap_or(false);
     let metadata = writer
         .connection()
         .query_row(
@@ -860,6 +892,9 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
                     folders_scanned: row.get(4)?,
                     bytes_scanned: row.get(5)?,
                     scan_strategy: row.get(6)?,
+                    walk_issues,
+                    hash_issues,
+                    intelligence,
                 })
             },
         )
@@ -875,7 +910,94 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
         folders_scanned: 0,
         bytes_scanned: 0,
         scan_strategy: ScanMode::default().as_id().to_owned(),
+        walk_issues: 0,
+        hash_issues: 0,
+        intelligence,
     }))
+}
+
+// ---- Scan issues (files the scanner couldn't read or verify) ----
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScanIssuesRequest {
+    pub index_path: PathBuf,
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ScanIssueDto {
+    /// 'walk' — couldn't be indexed · 'hash' — couldn't be content-verified.
+    pub phase: String,
+    pub path: String,
+    pub message: String,
+}
+
+pub fn scan_issues(request: ScanIssuesRequest) -> Result<Vec<ScanIssueDto>, String> {
+    let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    Ok(writer
+        .scan_issues(request.limit as usize)
+        .map_err(|error| format!("{error:?}"))?
+        .into_iter()
+        .map(|issue| ScanIssueDto {
+            phase: issue.phase,
+            path: issue.path,
+            message: issue.message,
+        })
+        .collect())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RetryScanIssuesRequest {
+    pub index_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct RetryScanIssuesResponse {
+    pub walk_issues: i64,
+    pub hash_issues: i64,
+}
+
+/// Targeted retry of everything the last scan couldn't read or verify:
+/// re-walks just the failed directories, then re-runs duplicate refinement —
+/// which only hashes files that still lack hashes, so previously verified
+/// files aren't touched. No full rescan.
+pub fn retry_scan_issues(request: RetryScanIssuesRequest) -> Result<RetryScanIssuesResponse, String> {
+    let mut writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    let mode = writer.latest_scan_mode().map_err(|error| format!("{error:?}"))?;
+    writer.set_scan_mode(mode);
+
+    let walk_paths: Vec<PathBuf> = writer
+        .scan_issues(crate::index::writer::SCAN_ISSUES_CAP as usize)
+        .map_err(|error| format!("{error:?}"))?
+        .into_iter()
+        .filter(|issue| issue.phase == "walk")
+        .map(|issue| PathBuf::from(issue.path))
+        .collect();
+    if !walk_paths.is_empty() {
+        writer
+            .probe_folders(&walk_paths)
+            .map_err(|error| format!("{error:?}"))?;
+    }
+
+    writer
+        .refine_duplicates()
+        .map_err(|error| format!("{error:?}"))?;
+
+    let (walk_issues, hash_issues) = writer
+        .scan_issue_counts()
+        .map_err(|error| format!("{error:?}"))?;
+    Ok(RetryScanIssuesResponse { walk_issues, hash_issues })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FileLockHoldersRequest {
+    pub path: String,
+}
+
+/// Names of the processes currently holding the file open (Windows Restart
+/// Manager). Empty when nothing holds it — or on non-Windows platforms.
+pub fn file_lock_holders(request: FileLockHoldersRequest) -> Result<Vec<String>, String> {
+    Ok(crate::native::lockinfo::file_lock_holders(&request.path))
 }
 
 // ---- Discoveries ----
