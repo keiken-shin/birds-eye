@@ -52,6 +52,19 @@ export function ScanOverlay() {
     void isNativeRuntime().then(setNative);
   }, []);
 
+  // Opening the sheet after a finished (complete/failed/cancelled) job shows
+  // the NEW-scan form, not the stale progress screen. A running scan still
+  // opens onto its live progress. Keyed on `overlay` only: resetting must
+  // happen on open, never the moment a scan finishes while the sheet is up.
+  useEffect(() => {
+    if (overlay === "scan" && view.status !== "idle" && view.status !== "scanning") {
+      reset();
+      setQueued(false);
+      setError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlay]);
+
   // Phase timings arrive on the terminal job event; fetch them once the scan completes.
   useEffect(() => {
     if (view.status !== "complete" || view.jobId === null) {

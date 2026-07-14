@@ -64,6 +64,19 @@ export function IndexDataProvider({ children }: { children: ReactNode }) {
     [indexes, indexPath]
   );
 
+  // Switching indexes drops the old index's data IMMEDIATELY. Without this the
+  // whole app keeps rendering the previous scan (scope tree, board, intelligence
+  // prompt) as "ready" for however long the new index takes to load — on a big
+  // index that's many seconds of convincingly wrong data. Same-index refreshes
+  // (enrichment ticks) keep their data; only a real switch blanks to loading.
+  useEffect(() => {
+    setOverview(null);
+    setExtraFolders([]);
+    setLensByPath(new Map());
+    setOntology(null);
+    setError(null);
+  }, [indexPath]);
+
   const refreshIndexes = useCallback(async () => {
     try {
       const list = await listNativeIndexes();

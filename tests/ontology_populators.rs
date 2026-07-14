@@ -78,6 +78,7 @@ fn scan_dataset(manager: &ScanJobManager, dataset: PathBuf, index_path: PathBuf)
             root: dataset,
             index_path,
             scan_strategy: None,
+            enable_intelligence: None,
         })
         .expect("failed to start scan job");
     wait_for_terminal(manager, response.job_id);

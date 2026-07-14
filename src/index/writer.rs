@@ -239,6 +239,9 @@ impl IndexWriter {
                 progress_stage(&mut progress, "Building extension statistics", 0, 1);
                 self.rebuild_extension_stats()?;
                 progress_stage(&mut progress, "Building extension statistics", 1, 1);
+                progress_stage(&mut progress, "Building overview statistics", 0, 1);
+                self.rebuild_derived_stats()?;
+                progress_stage(&mut progress, "Building overview statistics", 1, 1);
                 progress_stage(&mut progress, "Capturing timeline", 0, 1);
                 self.capture_timeline(&report.root, &report.stats)?;
                 progress_stage(&mut progress, "Capturing timeline", 1, 1);
@@ -414,6 +417,7 @@ impl IndexWriter {
         self.commit_scan_transaction()?; // flush any batched crawl commits
         self.recompute_folder_rollups(&mut |_| {})?;
         self.rebuild_extension_stats()?;
+        self.rebuild_derived_stats()?;
         // The session's walk tally now reflects what is still unreadable.
         self.connection.execute(
             "UPDATE scan_sessions
@@ -555,7 +559,17 @@ impl IndexWriter {
     /// Monthly modified-time activity buckets (`YYYY-MM`) over the last `months`
     /// months, oldest first. Files with no modified timestamp are excluded.
     pub fn timeline_summaries(&self, months: usize) -> Result<Vec<TimelineBucket>, IndexError> {
-        let mut statement = self.connection.prepare(
+        let horizon = format!("-{months} months");
+        // 'YYYY-MM' strings compare chronologically, so the materialized table
+        // filters by plain string range.
+        let sql = if self.has_rows("month_stats")? {
+            "SELECT bucket, file_count, total_bytes
+             FROM month_stats
+             WHERE bucket != 'unknown'
+               AND bucket >= strftime('%Y-%m', 'now', ?1)
+               AND bucket <= strftime('%Y-%m', 'now', '+1 day')
+             ORDER BY bucket ASC"
+        } else {
             "SELECT strftime('%Y-%m', modified_at, 'unixepoch') AS bucket,
                     COUNT(*) AS file_count,
                     SUM(size) AS total_bytes
@@ -565,9 +579,9 @@ impl IndexWriter {
                AND modified_at >= strftime('%s', 'now', ?1)
                AND modified_at <= strftime('%s', 'now', '+1 day')
              GROUP BY bucket
-             ORDER BY bucket ASC",
-        )?;
-        let horizon = format!("-{months} months");
+             ORDER BY bucket ASC"
+        };
+        let mut statement = self.connection.prepare(sql)?;
         let rows = statement.query_map(params![horizon], |row| {
             Ok(TimelineBucket {
                 bucket: row.get(0)?,
@@ -581,6 +595,21 @@ impl IndexWriter {
     /// Staleness distribution: how many files (and bytes) were last modified
     /// within each fixed age band. Files with no modified timestamp land in `unknown`.
     pub fn age_summaries(&self) -> Result<Vec<AgeBucket>, IndexError> {
+        // Materialized bands are relative to the last scan — they describe the
+        // scanned snapshot, which is what the rest of the index shows anyway.
+        if self.has_rows("age_stats")? {
+            let mut statement = self
+                .connection
+                .prepare("SELECT bucket, file_count, total_bytes FROM age_stats")?;
+            let rows = statement.query_map([], |row| {
+                Ok(AgeBucket {
+                    bucket: row.get(0)?,
+                    file_count: row.get(1)?,
+                    total_bytes: row.get(2)?,
+                })
+            })?;
+            return Ok(rows.collect::<Result<Vec<_>, _>>()?);
+        }
         let mut statement = self.connection.prepare(
             "SELECT CASE
                       WHEN modified_at IS NULL THEN 'unknown'
@@ -869,14 +898,84 @@ impl IndexWriter {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Rebuild the materialized overview aggregates (media, per-folder media,
+    /// monthly activity, age bands). Runs once per scan finalization so the
+    /// startup overview reads small tables instead of full-scanning `files`.
+    fn rebuild_derived_stats(&mut self) -> Result<(), IndexError> {
+        let tx = self.connection.transaction()?;
+        tx.execute_batch(
+            "DELETE FROM media_stats;
+             INSERT INTO media_stats (media_kind, file_count, total_bytes)
+             SELECT media_kind, COUNT(*), COALESCE(SUM(size), 0)
+             FROM files
+             WHERE deleted_at IS NULL
+             GROUP BY media_kind;
+
+             DELETE FROM folder_media_stats;
+             INSERT INTO folder_media_stats (folder_path, media_kind, total_bytes)
+             SELECT f.path, files.media_kind, COALESCE(SUM(files.size), 0)
+             FROM files
+             JOIN folders f ON f.id = files.folder_id
+             WHERE files.deleted_at IS NULL
+             GROUP BY f.path, files.media_kind;
+
+             DELETE FROM month_stats;
+             INSERT INTO month_stats (bucket, file_count, total_bytes)
+             SELECT COALESCE(strftime('%Y-%m', modified_at, 'unixepoch'), 'unknown'),
+                    COUNT(*),
+                    COALESCE(SUM(size), 0)
+             FROM files
+             WHERE deleted_at IS NULL
+             GROUP BY 1;
+
+             DELETE FROM age_stats;
+             INSERT INTO age_stats (bucket, file_count, total_bytes)
+             SELECT CASE
+                      WHEN modified_at IS NULL THEN 'unknown'
+                      WHEN age < 2592000 THEN 'lt1mo'
+                      WHEN age < 7776000 THEN '1to3mo'
+                      WHEN age < 15552000 THEN '3to6mo'
+                      WHEN age < 31536000 THEN '6to12mo'
+                      WHEN age < 63072000 THEN '1to2yr'
+                      ELSE 'gt2yr'
+                    END AS bucket,
+                    COUNT(*),
+                    COALESCE(SUM(size), 0)
+             FROM (
+               SELECT modified_at,
+                      size,
+                      CAST(strftime('%s', 'now') AS INTEGER) - modified_at AS age
+               FROM files
+               WHERE deleted_at IS NULL
+             )
+             GROUP BY bucket;",
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn has_rows(&self, table: &str) -> Result<bool, IndexError> {
+        let count: i64 = self
+            .connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))?;
+        Ok(count > 0)
+    }
+
     pub fn media_summaries(&self) -> Result<Vec<MediaSummary>, IndexError> {
-        let mut statement = self.connection.prepare(
+        // Empty stats table = index last scanned before materialization landed
+        // (or an empty index) — fall back to the live aggregate.
+        let sql = if self.has_rows("media_stats")? {
+            "SELECT media_kind, file_count, total_bytes
+             FROM media_stats
+             ORDER BY total_bytes DESC"
+        } else {
             "SELECT media_kind, COUNT(*), COALESCE(SUM(size), 0)
              FROM files
              WHERE deleted_at IS NULL
              GROUP BY media_kind
-             ORDER BY SUM(size) DESC",
-        )?;
+             ORDER BY SUM(size) DESC"
+        };
+        let mut statement = self.connection.prepare(sql)?;
         let rows = statement.query_map([], |row| {
             Ok(MediaSummary {
                 media_kind: row.get(0)?,
@@ -891,15 +990,21 @@ impl IndexWriter {
         &self,
         limit: usize,
     ) -> Result<Vec<FolderMediaSummary>, IndexError> {
-        let mut statement = self.connection.prepare(
+        let sql = if self.has_rows("folder_media_stats")? {
+            "SELECT folder_path, media_kind, total_bytes
+             FROM folder_media_stats
+             ORDER BY total_bytes DESC
+             LIMIT ?1"
+        } else {
             "SELECT f.path, files.media_kind, COALESCE(SUM(files.size), 0) AS total_bytes
              FROM files
              JOIN folders f ON f.id = files.folder_id
              WHERE files.deleted_at IS NULL
              GROUP BY f.path, files.media_kind
              ORDER BY total_bytes DESC
-             LIMIT ?1",
-        )?;
+             LIMIT ?1"
+        };
+        let mut statement = self.connection.prepare(sql)?;
         let rows = statement.query_map(params![limit as i64], |row| {
             Ok(FolderMediaSummary {
                 folder_path: row.get(0)?,
@@ -1781,6 +1886,138 @@ mod tests {
         cleanup(&root);
     }
 
+    /// Not a correctness test — a measurement harness for the startup "load
+    /// index" cost. Builds a ~700k-file index on disk (cold-cache HDD effects
+    /// excluded) and times every section the overview query runs.
+    /// Run: cargo test --release bench_overview -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_overview_sections_on_large_index() {
+        use std::time::Instant;
+        const FILES: i64 = 700_000;
+        const FOLDERS: i64 = 25_000;
+        const DUP_PAIRS: i64 = 3_000;
+
+        let dir = std::env::temp_dir().join("birdseye-bench");
+        fs::create_dir_all(&dir).expect("bench dir");
+        let db = dir.join("bench.sqlite");
+        let _ = fs::remove_file(&db);
+        let mut writer = IndexWriter::open(&db).expect("open bench index");
+
+        let build_start = Instant::now();
+        {
+            let tx = writer.connection.transaction().expect("tx");
+            tx.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at) VALUES (1, NULL, 'D:\\bench', 'bench', 1, 0)",
+                [],
+            )
+            .expect("root");
+            {
+                let mut stmt = tx
+                    .prepare("INSERT INTO folders (id, parent_id, path, name, depth, indexed_at) VALUES (?1, 1, ?2, ?3, 2, 0)")
+                    .expect("prep folders");
+                for i in 0..FOLDERS {
+                    stmt.execute(params![i + 2, format!("D:\\bench\\f{i}"), format!("f{i}")])
+                        .expect("folder row");
+                }
+            }
+            {
+                let exts = ["jpg", "mp4", "pdf", "rs", "zip", "exe", "txt", "png", "mp3", "bin"];
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT INTO files (folder_id, path, name, extension, size, modified_at, media_kind, indexed_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
+                    )
+                    .expect("prep files");
+                for i in 0..FILES {
+                    let h = (i.wrapping_mul(2654435761)) as u64;
+                    let ext = exts[(h % 10) as usize];
+                    stmt.execute(params![
+                        (i % FOLDERS) + 2,
+                        format!("D:\\bench\\f{}\\file{i}.{ext}", i % FOLDERS),
+                        format!("file{i}.{ext}"),
+                        ext,
+                        (h % 500_000_000) as i64,
+                        1_600_000_000_i64 + ((h % 94_608_000) as i64), // ~3yr spread
+                        classify_media_kind(Some(ext)),
+                    ])
+                    .expect("file row");
+                }
+            }
+            {
+                // Duplicate pairs: shared size+hashes so group rebuilding is exercised.
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT INTO files (folder_id, path, name, extension, size, modified_at, media_kind,
+                                            partial_hash, sample_hash, full_hash, hash_state, indexed_at)
+                         VALUES (?1, ?2, ?3, 'dup', ?4, 0, 'other', ?5, ?5, ?5, 4, 0)",
+                    )
+                    .expect("prep dups");
+                for i in 0..DUP_PAIRS {
+                    for copy in 0..2 {
+                        stmt.execute(params![
+                            (i % FOLDERS) + 2,
+                            format!("D:\\bench\\f{}\\dup{i}-{copy}.dup", i % FOLDERS),
+                            format!("dup{i}-{copy}.dup"),
+                            1_000_000 + i,
+                            format!("{i:032x}"),
+                        ])
+                        .expect("dup row");
+                    }
+                }
+            }
+            tx.commit().expect("commit");
+        }
+        writer
+            .recompute_folder_rollups(&mut |_| {})
+            .expect("rollups");
+        writer.rebuild_extension_stats().expect("ext stats");
+        writer
+            .rebuild_duplicate_size_groups()
+            .expect("dup groups");
+        writer.rebuild_derived_stats().expect("derived stats");
+        println!("build: {:?}", build_start.elapsed());
+
+        // Fresh writer = fresh connection + page cache like a real app start.
+        drop(writer);
+        let open_start = Instant::now();
+        let writer = IndexWriter::open(&db).expect("reopen");
+        println!("open+migrate: {:?}", open_start.elapsed());
+
+        let section = |name: &str, run: &mut dyn FnMut()| {
+            let t = Instant::now();
+            run();
+            println!("{name}: {:?}", t.elapsed());
+        };
+        section("largest_folders(4000)", &mut || {
+            writer.largest_folders(4000).expect("folders");
+        });
+        section("largest_files(4000)", &mut || {
+            writer.largest_files(4000).expect("files");
+        });
+        section("extension_summaries(4000)", &mut || {
+            writer.extension_summaries(4000).expect("ext");
+        });
+        section("duplicate_groups(4000)", &mut || {
+            writer.duplicate_groups(4000).expect("dups");
+        });
+        section("media_summaries", &mut || {
+            writer.media_summaries().expect("media");
+        });
+        section("folder_media_summaries(24000)", &mut || {
+            writer.folder_media_summaries(24000).expect("folder media");
+        });
+        section("timeline_summaries(24)", &mut || {
+            writer.timeline_summaries(24).expect("timeline");
+        });
+        section("age_summaries", &mut || {
+            writer.age_summaries().expect("age");
+        });
+        section("scan_issue_counts", &mut || {
+            writer.scan_issue_counts().ok();
+        });
+    }
+
     #[test]
     fn probe_folders_recovers_previously_unreadable_directories() {
         let root = test_root("issues-probe");
@@ -2277,6 +2514,8 @@ mod tests {
         assert_eq!(ages[0].file_count, 2);
 
         // A file backdated two years lands in the oldest band and off the 24-month timeline.
+        // Summaries are materialized at scan finalization, so an out-of-band SQL
+        // mutation needs an explicit rebuild — a real rescan does this itself.
         writer
             .connection()
             .execute(
@@ -2285,6 +2524,7 @@ mod tests {
                 [],
             )
             .expect("failed to backdate file");
+        writer.rebuild_derived_stats().expect("rebuild stats");
         let ages = writer.age_summaries().expect("age summaries");
         assert!(ages.iter().any(|bucket| bucket.bucket == "gt2yr" && bucket.file_count == 1));
         let timeline = writer.timeline_summaries(24).expect("timeline summaries");
