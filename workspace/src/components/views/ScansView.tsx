@@ -346,7 +346,7 @@ export function ScansView() {
                               size="sm"
                               icon={Sparkles}
                               disabled={enablingId === entry.index_path}
-                              title="Classifies every folder on-device (reads file contents; nothing leaves this machine) to unlock safety verdicts and cleanup recommendations. Runs an incremental rescan so verdicts reflect current data."
+                              title="Enable Intelligence: Classifies every folder on-device (reads file contents; nothing leaves this machine) to unlock safety verdicts and cleanup recommendations. Runs an incremental rescan so verdicts reflect current data."
                               onClick={() => void handleEnableIntelligence(entry)}
                             >
                               {enablingId === entry.index_path ? "Enabling…" : ""}
