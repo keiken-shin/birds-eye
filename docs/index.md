@@ -15,10 +15,10 @@ hide:
 
 <p class="be-hero__sub">Bird's Eye classifies what's on your disk — size, staleness, and a plain-language reason — then stages cleanup that's fully reversible.</p>
 
-<div class="be-cta" markdown>
-[:material-microsoft: Get it on the Microsoft Store](https://apps.microsoft.com/detail/9NZH5J31GHSL){ .md-button .be-key }
-[:material-download: Download portable .exe](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe){ .md-button .be-key }
-[:fontawesome-brands-github: View source on GitHub](https://github.com/keiken-shin/birds-eye){ .md-button .be-cta__tertiary }
+<div class="be-cta">
+  <a class="md-button be-store" href="https://apps.microsoft.com/detail/9NZH5J31GHSL"><svg class="be-store__logo" width="19" height="19" viewBox="0 0 23 23" aria-hidden="true"><path fill="#f25022" d="M1 1h10v10H1z"/><path fill="#7fba00" d="M12 1h10v10H12z"/><path fill="#00a4ef" d="M1 12h10v10H1z"/><path fill="#ffb900" d="M12 12h10v10H12z"/></svg><span class="be-store__text"><span class="be-store__sub">Get it from the</span><span class="be-store__name">Microsoft Store</span></span></a>
+  <a class="md-button be-key" href="https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe"><svg class="be-btn__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download portable .exe</a>
+  <a class="md-button be-cta__tertiary" href="https://github.com/keiken-shin/birds-eye"><svg class="be-btn__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>View source on GitHub</a>
 </div>
 
 <div class="be-trust">
@@ -191,10 +191,10 @@ contents. Verify it yourself — [the source is MIT-licensed and public](https:/
 
 ## Get Bird's Eye
 
-<div class="be-cta" markdown>
-[:material-microsoft: Get it on the Microsoft Store](https://apps.microsoft.com/detail/9NZH5J31GHSL){ .md-button .be-key }
-[:material-download: Download portable .exe](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe){ .md-button .be-key }
-[:material-hammer-wrench: Build from source](develop/building.md){ .md-button .be-cta__tertiary }
+<div class="be-cta">
+  <a class="md-button be-store" href="https://apps.microsoft.com/detail/9NZH5J31GHSL"><svg class="be-store__logo" width="19" height="19" viewBox="0 0 23 23" aria-hidden="true"><path fill="#f25022" d="M1 1h10v10H1z"/><path fill="#7fba00" d="M12 1h10v10H12z"/><path fill="#00a4ef" d="M1 12h10v10H1z"/><path fill="#ffb900" d="M12 12h10v10H12z"/></svg><span class="be-store__text"><span class="be-store__sub">Get it from the</span><span class="be-store__name">Microsoft Store</span></span></a>
+  <a class="md-button be-key" href="https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe"><svg class="be-btn__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download portable .exe</a>
+  <a class="md-button be-cta__tertiary" href="develop/building/"><svg class="be-btn__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Build from source</a>
 </div>
 
 ### On the Microsoft Store { #windows-store }

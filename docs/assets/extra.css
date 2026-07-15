@@ -149,13 +149,19 @@
   margin: 0.5rem 0 0.4rem;
 }
 .md-typeset .be-cta .md-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
   margin: 0;
+  min-height: 44px;
   border-radius: 10px;
   font-weight: 600;
   color: var(--be-text);
   transition: transform 0.08s ease, box-shadow 0.15s ease, background 0.15s ease,
     color 0.15s ease, border-color 0.15s ease;
 }
+.md-typeset .be-cta .md-button svg { flex: none; }
 /* Primary = filled spring green (dark ink reads on green in both schemes) */
 .md-typeset .be-cta .md-button--primary {
   background: var(--be-green);
@@ -301,7 +307,37 @@
   box-shadow: 0 8px 24px var(--be-glow);
 }
 /* Tint the leading lucide icon green; keep the label neutral */
-.md-typeset .be-cta .md-button.be-key svg { fill: var(--be-accent-text); }
+.md-typeset .be-cta .md-button.be-key .be-btn__icon { color: var(--be-accent-text); }
+
+/* Microsoft Store — a recognizable dark badge (fixed in both schemes), so it
+   reads as "this goes to the Store", distinct from the green portable button. */
+.md-typeset .be-cta .md-button.be-store {
+  gap: 0.6rem;
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+  text-align: left;
+  background: #050506;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #f4f5f7;
+}
+.md-typeset .be-cta .md-button.be-store:hover {
+  background: #101216;
+  border-color: rgba(255, 255, 255, 0.34);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.be-store__logo { flex: none; }
+.be-store__text { display: flex; flex-direction: column; line-height: 1.05; }
+.be-store__sub {
+  font-family: var(--md-code-font-family);
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(244, 245, 247, 0.72);
+  text-transform: none;
+}
+.be-store__name { font-size: 0.95rem; font-weight: 700; letter-spacing: -0.01em; }
 /* Tertiary = text only, muted, no border */
 .md-typeset .be-cta .md-button.be-cta__tertiary {
   border-color: transparent;
@@ -336,31 +372,37 @@
 /* --- Stat band (mono values, neutral — reads as data, not decoration) ---- */
 .be-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 0.6rem;
-  max-width: 840px;
+  max-width: 860px;
   margin: 1.6rem auto 0.5rem;
 }
 .be-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 104px;
   border: 1px solid var(--be-surface-line);
   background: var(--be-surface);
   border-radius: 12px;
-  padding: 0.95rem 0.8rem;
+  padding: 0.9rem 0.6rem;
   text-align: center;
 }
 .be-stat__num {
-  display: block;
   font-family: var(--md-code-font-family);
-  font-size: 1.5rem;
+  font-size: 1.4rem;
   font-weight: 600;
+  line-height: 1.1;
   color: var(--be-text);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .be-stat__label {
-  display: block;
-  margin-top: 0.25rem;
+  margin-top: 0.35rem;
   font-size: 0.72rem;
+  line-height: 1.25;
   color: var(--be-text-faint);
   letter-spacing: 0.02em;
 }
@@ -460,4 +502,31 @@
 @media screen and (max-width: 32em) {
   .be-cta { flex-direction: column; align-items: stretch; }
   .md-typeset .be-cta .md-button { width: 100%; }
+}
+
+/* --- Every button across the docs wears the brand, not Material's blue ---- */
+.md-typeset .md-button {
+  border-radius: 10px;
+  border-color: var(--be-surface-line);
+  color: var(--be-text);
+  transition: transform 0.08s ease, border-color 0.15s ease, color 0.15s ease,
+    background 0.15s ease, box-shadow 0.15s ease;
+}
+.md-typeset .md-button:hover,
+.md-typeset .md-button:focus-visible {
+  border-color: var(--be-green);
+  color: var(--be-accent-text);
+  background: transparent;
+}
+/* Filled green primary keeps priority where it's explicitly used */
+.md-typeset .md-button--primary {
+  background: var(--be-green);
+  border-color: var(--be-green);
+  color: var(--be-on-green);
+}
+.md-typeset .md-button--primary:hover,
+.md-typeset .md-button--primary:focus-visible {
+  background: var(--be-green-bright);
+  border-color: var(--be-green-bright);
+  color: var(--be-on-green);
 }
