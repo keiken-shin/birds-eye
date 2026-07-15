@@ -3,7 +3,7 @@ site_description: >-
   Storage cognition for your own machine — an offline desktop app that scans
   local folders, classifies what's safe to delete and why, and cleans up
   reversibly. Everything runs locally. Nothing ever leaves your machine.
-site_url: https://keiken-shin.github.io/birds-eye/
+site_url: https://birds-eye.keiken.dev/
 site_author: Keiken
 
 repo_name: keiken-shin/birds-eye
