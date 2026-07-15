@@ -3,12 +3,16 @@
 /workspace/dist/
 /workspace/node_modules/
 
+# Docs site build output (MkDocs)
+/site/
+
 *.log
 *.tmp
 *.sqlite
 *.sqlite3
 *.db
 
+.claude/
 .playwright*
 .remember
 .vscode/

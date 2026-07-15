@@ -1,0 +1,95 @@
+site_name: Bird's Eye
+site_description: >-
+  Storage cognition for your own machine — an offline desktop app that scans
+  local folders, classifies what's safe to delete and why, and cleans up
+  reversibly. Everything runs locally. Nothing ever leaves your machine.
+site_url: https://keiken-shin.github.io/birds-eye/
+site_author: Keiken
+
+repo_name: keiken-shin/birds-eye
+repo_url: https://github.com/keiken-shin/birds-eye
+edit_uri: edit/main/docs/
+copyright: >-
+  Bird's Eye is free software released under the MIT License. Built by Keiken.
+
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/favicon.svg
+  icon:
+    repo: fontawesome/brands/github
+  font:
+    text: Space Grotesk
+    code: JetBrains Mono
+  palette:
+    # Dark is the brand default — the app is dark, so the docs are too.
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: green
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: green
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+
+extra_css:
+  - assets/extra.css
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/keiken-shin/birds-eye
+      name: Bird's Eye on GitHub
+  generator: false
+
+nav:
+  - Home: index.md
+  - User Guide:
+      - Getting started: guide/getting-started.md
+      - The workspace: guide/the-workspace.md
+      - Working safely: guide/working-safely.md
+  - Developer:
+      - Architecture: develop/architecture.md
+      - Building from source: develop/building.md
+      - Contributing: develop/contributing.md
+      - Releasing: develop/releasing.md
+  - Brand: brand.md
