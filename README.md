@@ -10,11 +10,11 @@
 [![Rust](https://img.shields.io/badge/Rust-backend-orange)](./src)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB)](./src-tauri)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB)](./workspace)
-[![Docs](https://img.shields.io/badge/docs-birds--eye-3ddc84)](https://keiken-shin.github.io/birds-eye/)
+[![Docs](https://img.shields.io/badge/docs-birds--eye-3ddc84)](https://birds-eye.keiken.dev/)
 
 [**Get it from the Microsoft Store**](https://apps.microsoft.com/detail/9NZH5J31GHSL) ·
 [**Download portable (.exe)**](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe) ·
-[**Documentation**](https://keiken-shin.github.io/birds-eye/)
+[**Documentation**](https://birds-eye.keiken.dev/)
 
 ![Bird's Eye demo](./docs/assets/demo.gif)
 
@@ -63,7 +63,7 @@ Install from the [**Microsoft Store**](https://apps.microsoft.com/detail/9NZH5J3
 [**portable `.exe`**](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe)
 from [GitHub Releases](https://github.com/keiken-shin/birds-eye/releases/latest) — Windows 10
 & 11, x64. Full walkthrough:
-[Getting started](https://keiken-shin.github.io/birds-eye/guide/getting-started/).
+[Getting started](https://birds-eye.keiken.dev/guide/getting-started/).
 
 ## Build from source
 
@@ -107,8 +107,8 @@ npx vitest run                                    # frontend unit tests
 - `workspace/` — the React 19 + Tailwind 4 frontend (`src/bridge/` is the typed Tauri bridge,
   `src/dev/` the browser-mode mock backend, `src/components/ui/` the design-system primitives).
 - `docs/` — the documentation site (MkDocs Material), published to
-  [keiken-shin.github.io/birds-eye](https://keiken-shin.github.io/birds-eye/). Start with
-  [Architecture](https://keiken-shin.github.io/birds-eye/develop/architecture/) for the
+  [birds-eye.keiken.dev](https://birds-eye.keiken.dev/). Start with
+  [Architecture](https://birds-eye.keiken.dev/develop/architecture/) for the
   developer tour.
 
 ## Contributing
