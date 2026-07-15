@@ -1,22 +1,23 @@
 # Releasing
 
-How Bird's Eye ships. Today the primary channel is **GitHub Releases**; a **Microsoft
-Store** listing is in progress. This page is for maintainers.
+How Bird's Eye ships. It's published on the **Microsoft Store** (one-click, auto-updating)
+and as a **portable `.exe`** on **GitHub Releases**. This page is for maintainers.
 
 ## Channels
 
-- **GitHub Releases** — the current, canonical download. The site and README link
-  directly to the installer via a **stable, version-less asset name**, so the button
-  always fetches the newest build without any docs edits.
-- **Microsoft Store** — coming soon. One-click install and automatic updates, shipped as
-  an MSIX package. The build and submission flow is below.
+- **Microsoft Store** — [live](https://apps.microsoft.com/detail/9NZH5J31GHSL). One-click
+  install, automatic updates, and a Store-signed MSIX package. The build and submission flow
+  is below.
+- **GitHub Releases** — the portable download. The site and README link directly to the
+  installer via a **stable, version-less asset name**, so the button always fetches the
+  newest build without any docs edits.
 
 !!! important "Attach a stable-named asset to every release"
     The download buttons point at
-    `…/releases/latest/download/**birds-eye-windows-x64.exe**`. GitHub's `latest/download/`
+    `…/releases/latest/download/**birds-eye-windows-portable-x64.exe**`. GitHub's `latest/download/`
     redirect only works if an asset with that **exact** name exists on the latest release.
     So each release (including the current `v0.2.0`) must include an asset named
-    **`birds-eye-windows-x64.exe`** — the version stays in the release *tag*, not the
+    **`birds-eye-windows-portable-x64.exe`** — the version stays in the release *tag*, not the
     filename. Either rename the built `.exe` to that on upload, or add a copy alongside the
     version-named one. Miss it and the direct link 404s.
 

@@ -11,17 +11,31 @@ hide:
 
 <h1 class="be-hero__title">Bird's <span class="be-accent">Eye</span></h1>
 
-<p class="be-hero__tagline">Storage cognition for your own machine — not just <em>“what’s big?”</em> but <em>“what’s safe to delete, and why?”</em></p>
+<p class="be-hero__tagline">See every folder. Trust every verdict.</p>
 
-<p class="be-hero__sub"><strong>Everything runs locally.</strong> Nothing ever leaves your machine.</p>
+<p class="be-hero__sub">Bird's Eye classifies what's on your disk — size, staleness, and a plain-language reason — then stages cleanup that's fully reversible.</p>
 
 <div class="be-cta" markdown>
-[:material-download: Download for Windows](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-x64.exe){ .md-button .md-button--primary }
-[:material-microsoft-windows: Microsoft Store<span class="be-pill">Coming soon</span>](#windows-store){ .md-button .be-soon }
-[:fontawesome-brands-github: View source](https://github.com/keiken-shin/birds-eye){ .md-button }
+[:material-microsoft: Get it on the Microsoft Store](https://apps.microsoft.com/detail/9NZH5J31GHSL){ .md-button .be-key }
+[:material-download: Download portable .exe](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe){ .md-button .be-key }
+[:fontawesome-brands-github: View source on GitHub](https://github.com/keiken-shin/birds-eye){ .md-button .be-cta__tertiary }
 </div>
 
-<p class="be-platform">Windows 10 &amp; 11 · x64 · free and open source (MIT) · offline</p>
+<div class="be-trust">
+  <span>Recycle bin first</span>
+  <span>Restorable 30 days</span>
+  <span>Never leaves your machine</span>
+</div>
+
+<p class="be-platform">Windows 10 &amp; 11 · x64 · ~14 MB · MIT · fully offline</p>
+
+<div class="be-stats">
+  <div class="be-stat"><span class="be-stat__num">100%</span><span class="be-stat__label">offline, always</span></div>
+  <div class="be-stat"><span class="be-stat__num">0 bytes</span><span class="be-stat__label">ever uploaded</span></div>
+  <div class="be-stat"><span class="be-stat__num">7 views</span><span class="be-stat__label">one persistent index</span></div>
+  <div class="be-stat"><span class="be-stat__num">30-day</span><span class="be-stat__label">restore window</span></div>
+  <div class="be-stat"><span class="be-stat__num">190+</span><span class="be-stat__label">Rust tests</span></div>
+</div>
 
 <div class="be-demo">
   <img src="assets/demo.gif" alt="Bird's Eye walkthrough — Overview, Treemap, Board, Files, Duplicates, Cleanup, and Timeline views of a scanned drive" />
@@ -29,18 +43,22 @@ hide:
 
 </div>
 
-## Storage tools tell you what’s big. Bird’s Eye tells you what to do about it.
+<p class="be-eyebrow">Why Bird's Eye</p>
 
-A disk map answers one question — *where did the space go?* Bird's Eye answers the
-one that actually unblocks you: **which of this is safe to remove, and on what evidence?**
+<p class="be-manifesto">Storage tools tell you what's big. Bird's Eye tells you what's <span class="be-accent">safe to delete</span> — every folder classified, quantified, and reversible, without a single byte leaving your machine.</p>
+
+A disk map answers one question — *where did the space go?* Bird's Eye answers the one that
+actually unblocks you: **which of this is safe to remove, and on what evidence?**
 
 It scans your folders into a persistent on-device index, then runs an opt-in
 **intelligence layer** that reasons about every folder — why it exists, whether it's
 regenerable, what depends on it — and turns that into safety verdicts, reclaimable-space
 estimates, and a reviewed, fully reversible cleanup flow.
 
-No accounts. No telemetry. No upload. The index, the reasoning, and every decision stay
-on your disk.
+No accounts. No telemetry. No upload. The index, the reasoning, and every decision stay on
+your disk.
+
+<p class="be-eyebrow">How it works</p>
 
 ## The loop
 
@@ -82,6 +100,8 @@ on your disk.
 
 </div>
 
+<p class="be-eyebrow">The workspace</p>
+
 ## One workspace, seven lenses
 
 There are no “pages.” A single persistent workspace holds one index, and the top-bar
@@ -90,49 +110,49 @@ with you the whole time.
 
 <div class="grid cards" markdown>
 
--   **Overview**
+-   :material-view-dashboard-outline:{ .lg .middle } **Overview**
 
     ---
 
     The hub: capacity bar, category donut, top consumers, an age snapshot, and a headline —
     *“X GB can likely be freed.”*
 
--   **Treemap**
+-   :material-grid:{ .lg .middle } **Treemap**
 
     ---
 
     A squarified space map colored by **type** or by **safety verdict**, drillable to any
     depth.
 
--   **Board**
+-   :material-graph-outline:{ .lg .middle } **Board**
 
     ---
 
     An open canvas of the investigation: findings cluster around shared-source hubs with
     labeled edges; marquee-select, group-drag, auto-arrange.
 
--   **Files**
+-   :material-file-search-outline:{ .lg .middle } **Files**
 
     ---
 
     Ranked search with category filters, size/date sorting, staleness tags, and curated
     saved views like *“Large & regenerable.”*
 
--   **Duplicates**
+-   :material-content-copy:{ .lg .middle } **Duplicates**
 
     ---
 
     Waste-ranked groups with side-by-side previews — keep the newest, stage the rest, or
     move a copy where it belongs.
 
--   **Cleanup**
+-   :material-broom:{ .lg .middle } **Cleanup**
 
     ---
 
     Risk-labeled recommendations (safe · review · caution) with multi-select staging into
     the tray.
 
--   **Timeline**
+-   :material-chart-timeline-variant:{ .lg .middle } **Timeline**
 
     ---
 
@@ -141,6 +161,8 @@ with you the whole time.
 </div>
 
 [Tour the workspace :material-arrow-right:](guide/the-workspace.md){ .md-button }
+
+<p class="be-eyebrow">Safety</p>
 
 ## Safety is the default, not a setting
 
@@ -157,23 +179,28 @@ pressures you toward a “clean now” button.
 
 [How the safety model works :material-arrow-right:](guide/working-safely.md){ .md-button }
 
+<p class="be-eyebrow">Privacy</p>
+
 ## Private by design
 
 Bird's Eye is an offline desktop app. There is no server to sign in to, no account to
 create, and no path in the code that uploads your file paths, metadata, hashes, or
 contents. Verify it yourself — [the source is MIT-licensed and public](https://github.com/keiken-shin/birds-eye).
 
+<p class="be-eyebrow">Get it</p>
+
 ## Get Bird's Eye
 
 <div class="be-cta" markdown>
-[:material-download: Download the latest release](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-x64.exe){ .md-button .md-button--primary }
-[:material-hammer-wrench: Build from source](develop/building.md){ .md-button }
+[:material-microsoft: Get it on the Microsoft Store](https://apps.microsoft.com/detail/9NZH5J31GHSL){ .md-button .be-key }
+[:material-download: Download portable .exe](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe){ .md-button .be-key }
+[:material-hammer-wrench: Build from source](develop/building.md){ .md-button .be-cta__tertiary }
 </div>
 
-### Windows Store { #windows-store }
+### On the Microsoft Store { #windows-store }
 
-A Microsoft Store listing — one-click install and automatic updates — is **on the way**.
-Until it lands, grab the latest signed build from
-[GitHub Releases](https://github.com/keiken-shin/birds-eye/releases/latest). Maintainers
-can read how the Store package is built and submitted in
-[Releasing](develop/releasing.md).
+Bird's Eye is [**live on the Microsoft Store**](https://apps.microsoft.com/detail/9NZH5J31GHSL) —
+one-click install, automatic updates, and a Store-signed package. Prefer no install? The
+[portable `.exe`](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe)
+is on [GitHub Releases](https://github.com/keiken-shin/birds-eye/releases/latest). Maintainers
+can read how the Store package is built and submitted in [Releasing](develop/releasing.md).

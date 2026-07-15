@@ -42,6 +42,9 @@
   --be-accent-text: var(--be-green-strong);
   --be-warn: #b26a12;
   --be-glow: rgba(61, 220, 132, 0.10);
+  --be-dot: rgba(15, 20, 25, 0.045);
+  --be-key-bg: color-mix(in srgb, var(--be-green) 9%, #ffffff);
+  --be-key-line: color-mix(in srgb, var(--be-green) 34%, transparent);
 }
 
 /* --- Dark scheme: force the app's exact near-black + green ---------------- */
@@ -68,6 +71,9 @@
   --be-accent-text: var(--be-green-ink);
   --be-warn: #e0a44a;
   --be-glow: rgba(61, 220, 132, 0.18);
+  --be-dot: #23262d;
+  --be-key-bg: color-mix(in srgb, var(--be-green) 9%, var(--be-window));
+  --be-key-line: color-mix(in srgb, var(--be-green) 30%, transparent);
 }
 
 /* Header/tabs stay dark in BOTH schemes (primary: black), so brand them once */
@@ -172,29 +178,6 @@
   color: var(--be-accent-text);
   background: transparent;
 }
-/* "Coming soon" — non-interactive, dimmed, with a pill */
-.md-typeset .be-cta .be-soon {
-  cursor: default;
-  opacity: 0.85;
-  border-style: dashed;
-  border-color: var(--be-surface-line);
-  color: var(--be-text-muted);
-  pointer-events: none;
-}
-.be-pill {
-  display: inline-block;
-  margin-left: 0.5ch;
-  padding: 0.05rem 0.45rem;
-  border-radius: 999px;
-  font-size: 0.62em;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  vertical-align: middle;
-  background: color-mix(in srgb, var(--be-warn) 16%, transparent);
-  color: var(--be-warn);
-  border: 1px solid color-mix(in srgb, var(--be-warn) 40%, transparent);
-}
 
 .be-platform {
   text-align: center;
@@ -262,4 +245,219 @@
 @media screen and (max-width: 44em) {
   .be-hero__title { font-size: 2.3rem; }
   .be-hero__tagline { font-size: 1rem; }
+}
+
+/* ==========================================================================
+   Brand uplift — signature texture, stat band, dual CTAs, eyebrows, rhythm.
+   Everything is token-driven and works in both schemes. Self-contained: no
+   external requests; texture and chrome are pure CSS.
+   ========================================================================== */
+
+/* --- Signature dot-grid page texture (behind content, faded out) --------- */
+.md-main { position: relative; }
+.md-main::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle at 1px 1px, var(--be-dot) 1.2px, transparent 0);
+  background-size: 22px 22px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 60vh, transparent 100vh);
+  mask-image: linear-gradient(to bottom, #000 0, #000 60vh, transparent 100vh);
+}
+.md-main__inner,
+.md-content { position: relative; z-index: 1; }
+
+/* --- Hero ambient green glow (stacks with the logo drop-shadow) ---------- */
+.be-hero { position: relative; }
+.be-hero::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -2rem;
+  transform: translateX(-50%);
+  width: min(720px, 90%);
+  height: 340px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(60% 60% at 50% 30%, var(--be-glow) 0%, transparent 70%);
+  filter: blur(8px);
+}
+
+/* --- Equal-weight primary CTAs + quiet tertiary -------------------------- */
+/* .md-button.be-key raises specificity to (0,4,0) so it beats the generic
+   ghost-button rule (.md-button:not(.md-button--primary)) on border/color. */
+.md-typeset .be-cta .md-button.be-key {
+  background: var(--be-key-bg);
+  border: 1px solid var(--be-key-line);
+  color: var(--be-text);
+}
+.md-typeset .be-cta .md-button.be-key:hover {
+  background: var(--be-key-bg);
+  border-color: var(--be-green);
+  color: var(--be-text);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px var(--be-glow);
+}
+/* Tint the leading lucide icon green; keep the label neutral */
+.md-typeset .be-cta .md-button.be-key svg { fill: var(--be-accent-text); }
+/* Tertiary = text only, muted, no border */
+.md-typeset .be-cta .md-button.be-cta__tertiary {
+  border-color: transparent;
+  background: transparent;
+  color: var(--be-text-muted);
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+.md-typeset .be-cta .md-button.be-cta__tertiary:hover {
+  color: var(--be-accent-text);
+  background: transparent;
+  border-color: transparent;
+}
+
+/* --- Trust chips (calm, quantified, no alarm colors) --------------------- */
+.be-trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  margin: 0.5rem 0 0;
+}
+.be-trust span {
+  font-family: var(--md-code-font-family);
+  font-size: 0.72rem;
+  color: var(--be-text-muted);
+  border: 1px solid var(--be-surface-line);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+}
+
+/* --- Stat band (mono values, neutral — reads as data, not decoration) ---- */
+.be-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.6rem;
+  max-width: 840px;
+  margin: 1.6rem auto 0.5rem;
+}
+.be-stat {
+  border: 1px solid var(--be-surface-line);
+  background: var(--be-surface);
+  border-radius: 12px;
+  padding: 0.95rem 0.8rem;
+  text-align: center;
+}
+.be-stat__num {
+  display: block;
+  font-family: var(--md-code-font-family);
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--be-text);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.be-stat__label {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  color: var(--be-text-faint);
+  letter-spacing: 0.02em;
+}
+
+/* --- Demo frame: a calm app-window titlebar ------------------------------ */
+.be-demo { position: relative; }
+.be-demo::before {
+  content: "";
+  display: block;
+  height: 30px;
+  background: var(--be-panel);
+  border-bottom: 1px solid var(--be-line);
+}
+.be-demo::after {
+  content: "";
+  position: absolute;
+  top: 11px;
+  left: 14px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--be-line-strong);
+  box-shadow: 14px 0 var(--be-line-strong), 28px 0 var(--be-line-strong);
+}
+
+/* --- Section eyebrows + rhythm (landing only, via the eyebrow anchor) ----- */
+.md-typeset .be-eyebrow {
+  font-family: var(--md-code-font-family);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--be-accent-text);
+  margin: 3.6rem 0 0.4rem;
+  padding-top: 2.6rem;
+  border-top: 1px solid var(--be-surface-line);
+}
+.md-typeset .be-eyebrow + h2,
+.md-typeset .be-eyebrow + .be-manifesto {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* --- Manifesto (section-opener statement, accent pivot clause) ----------- */
+.md-typeset .be-manifesto {
+  font-family: var(--be-display, "Space Grotesk", var(--md-text-font-family));
+  font-size: clamp(1.55rem, 1.1rem + 1.6vw, 2.35rem);
+  font-weight: 500;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+  color: var(--be-text);
+  max-width: 30ch;
+  margin: 0 0 1.1rem;
+}
+.md-typeset .be-manifesto .be-accent { color: var(--be-accent-text); }
+
+/* --- Monospace utilities for figures + paths ----------------------------- */
+.be-mono,
+.be-path { font-family: var(--md-code-font-family); }
+.be-path { color: var(--be-text-muted); }
+
+/* --- Feature cards: green icon tint + keyboard-reachable hover lift ------- */
+.md-typeset .grid.cards > :is(ul, ol) > li :is(.lg, .middle),
+.md-typeset .grid.cards > :is(ul, ol) > li > p:first-child svg {
+  color: var(--be-accent-text);
+}
+.md-typeset .grid.cards > :is(ul, ol) > li {
+  border-top: 2px solid transparent;
+  transition: transform 0.12s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.md-typeset .grid.cards > :is(ul, ol) > li:hover,
+.md-typeset .grid.cards > :is(ul, ol) > li:focus-within {
+  transform: translateY(-2px);
+  border-color: var(--be-green);
+  border-top-color: var(--be-green);
+  box-shadow: 0 8px 30px var(--be-glow);
+}
+
+/* --- Brand-green focus-visible ring (keyboard only) ---------------------- */
+.md-typeset a.md-button:focus-visible,
+.md-typeset .grid.cards a:focus-visible,
+.md-content a:focus-visible {
+  outline: 2px solid var(--be-green);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md-typeset .grid.cards > :is(ul, ol) > li,
+  .md-typeset .be-cta .be-key { transition: none; }
+  .md-typeset .grid.cards > :is(ul, ol) > li:hover,
+  .md-typeset .grid.cards > :is(ul, ol) > li:focus-within,
+  .md-typeset .be-cta .be-key:hover { transform: none; }
+}
+
+@media screen and (max-width: 32em) {
+  .be-cta { flex-direction: column; align-items: stretch; }
+  .md-typeset .be-cta .md-button { width: 100%; }
 }

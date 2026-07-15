@@ -5,14 +5,17 @@ your machine, and helps you reclaim space without ever putting a file beyond rec
 
 ## Install
 
-=== "Download a release (recommended)"
+=== "Microsoft Store (recommended)"
 
-    1. Go to the [latest release](https://github.com/keiken-shin/birds-eye/releases/latest).
-    2. Download the Windows build and run it. No installer wizard, no account.
-    3. Launch **Bird's Eye**.
+    Install from the [**Microsoft Store**](https://apps.microsoft.com/detail/9NZH5J31GHSL) —
+    one click, automatic updates, and a signed package. Then launch **Bird's Eye**.
 
-    A one-click **Microsoft Store** listing is coming soon — see
-    [Windows Store](../index.md#windows-store).
+=== "Portable build"
+
+    Prefer a no-install download? Grab the
+    [**portable `.exe`**](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe)
+    from the [latest release](https://github.com/keiken-shin/birds-eye/releases/latest) and
+    run it. No installer wizard, no account.
 
 === "Build from source"
 

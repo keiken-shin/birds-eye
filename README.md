@@ -12,9 +12,9 @@
 [![React 19](https://img.shields.io/badge/React-19-61DAFB)](./workspace)
 [![Docs](https://img.shields.io/badge/docs-birds--eye-3ddc84)](https://keiken-shin.github.io/birds-eye/)
 
-[**Download for Windows**](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-x64.exe) ·
-[**Documentation**](https://keiken-shin.github.io/birds-eye/) ·
-Microsoft Store — _coming soon_
+[**Get it from the Microsoft Store**](https://apps.microsoft.com/detail/9NZH5J31GHSL) ·
+[**Download portable (.exe)**](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe) ·
+[**Documentation**](https://keiken-shin.github.io/birds-eye/)
 
 ![Bird's Eye demo](./docs/assets/demo.gif)
 
@@ -58,9 +58,11 @@ background rescan.
 
 ## Install
 
-Grab the latest signed build from
-[**GitHub Releases**](https://github.com/keiken-shin/birds-eye/releases/latest) (Windows 10
-& 11, x64). A one-click **Microsoft Store** listing is coming soon. Full walkthrough:
+Install from the [**Microsoft Store**](https://apps.microsoft.com/detail/9NZH5J31GHSL)
+(one click, auto-updating, signed), or download the
+[**portable `.exe`**](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe)
+from [GitHub Releases](https://github.com/keiken-shin/birds-eye/releases/latest) — Windows 10
+& 11, x64. Full walkthrough:
 [Getting started](https://keiken-shin.github.io/birds-eye/guide/getting-started/).
 
 ## Build from source
