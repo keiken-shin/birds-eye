@@ -20,6 +20,11 @@ pub struct StartScanJobRequest {
     pub index_path: PathBuf,
     #[serde(default)]
     pub scan_strategy: Option<String>,
+    /// Some(true)/Some(false) applies the intelligence opt-in before the walk,
+    /// so the same job's enrichment phase runs (or stays off) — no second scan.
+    /// None leaves the index's existing setting untouched.
+    #[serde(default)]
+    pub enable_intelligence: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -109,6 +114,7 @@ impl ScanJobManager {
         let events = scanner.scan();
         let jobs = Arc::clone(&self.jobs);
         let worker_enrichment_pause = Arc::clone(&enrichment_pause);
+        let worker_controller = controller.clone();
 
         {
             let mut jobs = self
@@ -175,6 +181,25 @@ impl ScanJobManager {
                     .as_deref()
                     .unwrap_or(ScanMode::default().as_id()),
             ));
+
+            if let Some(enabled) = request.enable_intelligence {
+                let result = if enabled {
+                    crate::ontology::enabled::enable(writer.connection())
+                } else {
+                    crate::ontology::enabled::disable(writer.connection())
+                };
+                if let Err(error) = result {
+                    emit_log(
+                        &jobs,
+                        listener.as_ref(),
+                        &log_file,
+                        job_id,
+                        job_start,
+                        "job",
+                        format!("failed to set intelligence opt-in (non-fatal): {error}"),
+                    );
+                }
+            }
 
             emit_log(
                 &jobs,
@@ -393,7 +418,10 @@ impl ScanJobManager {
                             );
                         };
 
-                    match writer.refine_duplicates_with_progress(&mut progress_listener) {
+                    match writer.refine_duplicates_with_progress(
+                        &|| worker_controller.is_cancelled(),
+                        &mut progress_listener,
+                    ) {
                         Ok(()) => {
                             timer.finish("scan"); // no-op if already finished
                             let phase_timings: Vec<PhaseTimingDto> = timer
@@ -829,7 +857,7 @@ fn terminal_after_enrichment(
 ) -> JobEventDto {
     if enrichment_pause.load(Ordering::Relaxed) {
         completed.status = JobStatusDto::Cancelled;
-        completed.message = "cancelled during enrichment".to_owned();
+        completed.message = "Scan cancelled".to_owned();
     }
     completed
 }
@@ -935,6 +963,7 @@ mod tests {
                 root: data_root,
                 index_path: index_path.clone(),
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start job");
 
@@ -974,6 +1003,7 @@ mod tests {
                 root: data_root,
                 index_path: index_path.clone(),
                 scan_strategy: Some("metadata".to_owned()),
+                enable_intelligence: None,
             })
             .expect("failed to start job");
 
@@ -1023,6 +1053,7 @@ mod tests {
                 root: data_root,
                 index_path,
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start job");
         manager
@@ -1058,7 +1089,7 @@ mod tests {
         let terminal = terminal_after_enrichment(completed, &pause);
 
         assert_eq!(terminal.status, JobStatusDto::Cancelled);
-        assert_eq!(terminal.message, "cancelled during enrichment");
+        assert_eq!(terminal.message, "Scan cancelled");
         assert_eq!(terminal.files_scanned, 7);
     }
 
@@ -1076,6 +1107,7 @@ mod tests {
                 root: data_root.clone(),
                 index_path: index_path.clone(),
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start initial job");
         wait_for_terminal(&manager, initial.job_id);
@@ -1092,6 +1124,7 @@ mod tests {
                     root: data_root,
                     index_path,
                     scan_strategy: None,
+                enable_intelligence: None,
                 },
                 Some(Arc::new(move |event| {
                     if event
@@ -1119,7 +1152,7 @@ mod tests {
             .expect("failed to fetch events");
         assert!(events
             .iter()
-            .any(|event| event.message == "cancelled during enrichment"));
+            .any(|event| event.message == "Scan cancelled"));
         cleanup(&root);
     }
 
@@ -1143,6 +1176,7 @@ mod tests {
                     root: data_root,
                     index_path,
                     scan_strategy: None,
+                enable_intelligence: None,
                 },
                 Some(Arc::new(move |event| {
                     captured.lock().unwrap().push(event);
@@ -1189,6 +1223,7 @@ mod tests {
                     root: data_root,
                     index_path,
                     scan_strategy: None,
+                enable_intelligence: None,
                 },
                 Some(Arc::new(move |event| {
                     captured.lock().unwrap().push(event);
@@ -1222,6 +1257,7 @@ mod tests {
                 root: data_root.clone(),
                 index_path: index_path.clone(),
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start initial job");
         wait_for_terminal(&manager, initial.job_id);
@@ -1236,6 +1272,7 @@ mod tests {
                 root: data_root,
                 index_path: index_path.clone(),
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start rerun job");
         wait_for_terminal(&manager, rerun.job_id);
@@ -1282,6 +1319,7 @@ mod tests {
                 root: data_root,
                 index_path: index_path.clone(),
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start job");
         wait_for_terminal(&manager, response.job_id);
@@ -1384,6 +1422,7 @@ mod tests {
                 root: data_root,
                 index_path: index_path.clone(),
                 scan_strategy: None,
+                enable_intelligence: None,
             })
             .expect("failed to start job");
 

@@ -3,13 +3,17 @@ import {
   Check,
   Copy,
   Expand,
+  Eye,
+  EyeOff,
   File,
   Folder,
+  Link2,
   Loader2,
   Minus,
   Move,
   Network,
   Orbit,
+  Pencil,
   PinOff,
   Play,
   Plus,
@@ -95,6 +99,23 @@ const MAX_ZOOM = 2;
 
 const posKey = (indexPath: string) => `be.board2.pos:${indexPath}`;
 const noteKey = (indexPath: string) => `be.board2.notes:${indexPath}`;
+const editsKey = (indexPath: string) => `be.board2.edits:${indexPath}`;
+
+/** A user-drawn edge between any two cards. */
+type UserEdge = { id: string; from: string; to: string; label: string };
+
+/**
+ * The user's own concepts layered OVER the generated intelligence: rename or
+ * hide any derived card, relabel or delete derived edges, draw new edges.
+ * Same per-index localStorage overlay pattern as positions and notes.
+ */
+type BoardEdits = {
+  overrides: Record<string, { label?: string; hidden?: boolean }>;
+  edges: UserEdge[];
+  removedEdges: string[];
+  edgeLabels: Record<string, string>;
+};
+const EMPTY_EDITS: BoardEdits = { overrides: {}, edges: [], removedEdges: [], edgeLabels: {} };
 
 function loadJson<T>(key: string, fallback: T): T {
   try {
@@ -180,11 +201,96 @@ export function BoardView() {
     [indexPath]
   );
 
+  /* ---- user edits: renames, hidden cards, own edges ---- */
+  const [edits, setEdits] = useState<BoardEdits>(() =>
+    indexPath ? { ...EMPTY_EDITS, ...loadJson(editsKey(indexPath), EMPTY_EDITS) } : EMPTY_EDITS
+  );
+  useEffect(() => {
+    setEdits(indexPath ? { ...EMPTY_EDITS, ...loadJson(editsKey(indexPath), EMPTY_EDITS) } : EMPTY_EDITS);
+  }, [indexPath]);
+  const saveEdits = useCallback(
+    (update: (prev: BoardEdits) => BoardEdits) =>
+      setEdits((prev) => {
+        const next = update(prev);
+        if (indexPath) localStorage.setItem(editsKey(indexPath), JSON.stringify(next));
+        return next;
+      }),
+    [indexPath]
+  );
+  /** Card the connect gesture started from; the next card clicked completes the edge. */
+  const [linkFrom, setLinkFrom] = useState<string | null>(null);
+  /** Edge whose label is being edited inline, by edge key. */
+  const [editingEdge, setEditingEdge] = useState<string | null>(null);
+  /** Card being renamed inline. */
+  const [editingCard, setEditingCard] = useState<string | null>(null);
+
+  const renameCard = useCallback(
+    (id: string, label: string) =>
+      saveEdits((prev) => ({
+        ...prev,
+        overrides: { ...prev.overrides, [id]: { ...prev.overrides[id], label: label.trim() || undefined } },
+      })),
+    [saveEdits]
+  );
+  const hideCard = useCallback(
+    (id: string) =>
+      saveEdits((prev) => ({
+        ...prev,
+        overrides: { ...prev.overrides, [id]: { ...prev.overrides[id], hidden: true } },
+      })),
+    [saveEdits]
+  );
+  const completeLink = useCallback(
+    (id: string) => {
+      setLinkFrom((from) => {
+        if (!from) return id;
+        if (from !== id) {
+          const edgeId = `uedge:${Date.now()}`;
+          saveEdits((prev) => ({
+            ...prev,
+            edges: [...prev.edges, { id: edgeId, from, to: id, label: "relates to" }],
+          }));
+          setEditingEdge(edgeId); // name the relationship right away
+        }
+        return null;
+      });
+    },
+    [saveEdits]
+  );
+  const commitEdgeLabel = useCallback(
+    (edge: { key: string; user?: boolean }, label: string) => {
+      const text = label.trim();
+      if (edge.user) {
+        saveEdits((prev) => ({
+          ...prev,
+          edges: prev.edges.map((e) => (e.id === edge.key ? { ...e, label: text || e.label } : e)),
+        }));
+      } else if (text) {
+        saveEdits((prev) => ({ ...prev, edgeLabels: { ...prev.edgeLabels, [edge.key]: text } }));
+      }
+      setEditingEdge(null);
+    },
+    [saveEdits]
+  );
+  const deleteEdge = useCallback(
+    (edge: { key: string; user?: boolean }) => {
+      if (edge.user) {
+        saveEdits((prev) => ({ ...prev, edges: prev.edges.filter((e) => e.id !== edge.key) }));
+      } else {
+        saveEdits((prev) => ({ ...prev, removedEdges: [...prev.removedEdges, edge.key] }));
+      }
+      setEditingEdge(null);
+    },
+    [saveEdits]
+  );
+
   /* ---- card models (content-keyed, order-independent) ---- */
   const dupGroups = overview?.duplicate_groups ?? [];
-  const cards = useMemo<CardModel[]>(() => {
+  const allCards = useMemo<CardModel[]>(() => {
     const out: CardModel[] = [];
-    if (!ontologyEnabled) out.push({ id: "enable", kind: "enable" });
+    // Only prompt once the status read has landed — a null `ontology` means
+    // the index is still loading and the card would flash on every app start.
+    if (ontology && !ontologyEnabled) out.push({ id: "enable", kind: "enable" });
     for (const pin of pinned) out.push({ id: `pin:${pin.path}`, kind: "pin", pin });
     for (const f of findings) out.push({ id: `find:${f.id}`, kind: "finding", finding: f });
     // Cluster findings by their shared source: every origin that two or more
@@ -222,7 +328,16 @@ export function BoardView() {
     }
     for (const n of notes) out.push({ id: n.id, kind: "note", note: n });
     return out;
-  }, [ontologyEnabled, dupGroups, pinned, findings, notes]);
+  }, [ontology, ontologyEnabled, dupGroups, pinned, findings, notes]);
+
+  const hiddenCount = useMemo(
+    () => allCards.filter((c) => edits.overrides[c.id]?.hidden).length,
+    [allCards, edits]
+  );
+  const cards = useMemo(
+    () => allCards.filter((c) => !edits.overrides[c.id]?.hidden),
+    [allCards, edits]
+  );
 
   /* ---- spatial state ---- */
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -480,10 +595,10 @@ export function BoardView() {
         }
       }
 
-      persistPositions(next, new Set(cards.map((c) => c.id)));
+      persistPositions(next, new Set(allCards.map((c) => c.id)));
       return next;
     });
-  }, [cards, persistPositions, layoutEpoch]);
+  }, [cards, allCards, persistPositions, layoutEpoch]);
 
   /* ---- edges ---- */
   const edges = useMemo(() => {
@@ -493,7 +608,7 @@ export function BoardView() {
       const pos = positions[id];
       return pos ? { x: pos.x + CARD_W / 2, y: pos.y + CARD_H[kind] / 2 } : null;
     };
-    const out: Array<{ key: string; from: Pos; to: Pos; label: string; strong: boolean }> = [];
+    const out: Array<{ key: string; from: Pos; to: Pos; label: string; strong: boolean; user?: boolean }> = [];
     const hubs = new Set(cards.filter((c) => c.kind === "source").map((c) => (c as SourceCardModel).path));
     const findingCards = cards.filter(
       (c): c is Extract<CardModel, { kind: "finding" }> => c.kind === "finding"
@@ -542,8 +657,22 @@ export function BoardView() {
         if (from && to) out.push({ key: `${dup.id}~${fc.id}`, from, to, label: "shares files", strong: false });
       }
     }
-    return out;
-  }, [cards, positions, pinned]);
+    // User edits win over the derived graph: deleted edges disappear, relabels
+    // replace the generated predicate, and user-drawn edges join the layer.
+    const kept = out
+      .filter((e) => !edits.removedEdges.includes(e.key))
+      .map((e) => (edits.edgeLabels[e.key] ? { ...e, label: edits.edgeLabels[e.key] } : e));
+    const kindOf = new Map(cards.map((c) => [c.id, c.kind]));
+    for (const ue of edits.edges) {
+      const fk = kindOf.get(ue.from);
+      const tk = kindOf.get(ue.to);
+      if (!fk || !tk) continue; // an endpoint card no longer exists (or is hidden)
+      const from = center(ue.from, fk);
+      const to = center(ue.to, tk);
+      if (from && to) kept.push({ key: ue.id, from, to, label: ue.label, strong: true, user: true });
+    }
+    return kept;
+  }, [cards, positions, pinned, edits]);
 
   /* ---- pointer interactions ---- */
   useEffect(() => {
@@ -633,6 +762,11 @@ export function BoardView() {
     (id: string) => (e: React.PointerEvent) => {
       if ((e.target as HTMLElement).closest("button, input, textarea, a, video, audio")) return;
       e.stopPropagation();
+      if (linkFrom) {
+        // Connect mode: clicking any card completes the edge instead of dragging.
+        completeLink(id);
+        return;
+      }
       if (e.shiftKey) {
         // Shift+click toggles membership without starting a drag.
         setSelectedIds((prev) => {
@@ -648,7 +782,7 @@ export function BoardView() {
       if (!selectedIds.has(id)) setSelectedIds(new Set([id]));
       beginCardsDrag(ids, e);
     },
-    [selectedIds, beginCardsDrag]
+    [selectedIds, beginCardsDrag, linkFrom, completeLink]
   );
 
   /** Pointer-down on a hull label: select the whole cluster and drag it as one. */
@@ -690,7 +824,7 @@ export function BoardView() {
     const d = drag.current;
     if (d?.mode === "cards") {
       setPositions((prev) => {
-        persistPositions(prev, new Set(cards.map((c) => c.id)));
+        persistPositions(prev, new Set(allCards.map((c) => c.id)));
         return prev;
       });
     } else if (d?.mode === "pan" && !d.moved) {
@@ -720,7 +854,7 @@ export function BoardView() {
     drag.current = null;
     setDragging(null);
     setPanning(false);
-  }, [persistPositions, cards, positions]);
+  }, [persistPositions, cards, allCards, positions]);
 
   /* ---- selection keyboard: Esc clears · Ctrl+A selects all · arrows nudge ---- */
   useEffect(() => {
@@ -730,6 +864,9 @@ export function BoardView() {
       if (overlay || review) return; // overlays own the keyboard
       if (e.key === "Escape") {
         setMarquee(null);
+        setLinkFrom(null);
+        setEditingEdge(null);
+        setEditingCard(null);
         setSelectedIds((prev) => (prev.size ? new Set() : prev));
         return;
       }
@@ -749,14 +886,14 @@ export function BoardView() {
             const pos = next[id];
             if (pos) next[id] = { x: pos.x + dx, y: pos.y + dy };
           }
-          persistPositions(next, new Set(cards.map((c) => c.id)));
+          persistPositions(next, new Set(allCards.map((c) => c.id)));
           return next;
         });
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [cards, selectedIds, overlay, review, persistPositions]);
+  }, [cards, allCards, selectedIds, overlay, review, persistPositions]);
 
   /* ---- camera helpers ---- */
   const contentBounds = useCallback(() => {
@@ -1058,6 +1195,23 @@ export function BoardView() {
                   </Button>
                 </span>
               ))}
+            {hiddenCount > 0 ? (
+              <Button
+                size="sm"
+                icon={Eye}
+                title="Restore the cards you hid"
+                onClick={() =>
+                  saveEdits((prev) => ({
+                    ...prev,
+                    overrides: Object.fromEntries(
+                      Object.entries(prev.overrides).map(([k, v]) => [k, { ...v, hidden: false }])
+                    ),
+                  }))
+                }
+              >
+                Show {hiddenCount} hidden
+              </Button>
+            ) : null}
             <Button size="sm" icon={StickyNote} onClick={addNote}>
               Note
             </Button>
@@ -1171,16 +1325,59 @@ export function BoardView() {
                       markerEnd="url(#be-arrow)"
                     />
                     <foreignObject
-                      x={(edge.from.x + 2 * cx + edge.to.x) / 4 - 48}
-                      y={(edge.from.y + 2 * cy + edge.to.y) / 4 - 10}
-                      width={96}
-                      height={20}
+                      x={(edge.from.x + 2 * cx + edge.to.x) / 4 - (editingEdge === edge.key ? 90 : 48)}
+                      y={(edge.from.y + 2 * cy + edge.to.y) / 4 - (editingEdge === edge.key ? 13 : 10)}
+                      width={editingEdge === edge.key ? 180 : 96}
+                      height={editingEdge === edge.key ? 26 : 20}
                     >
-                      <div className="mono flex justify-center">
-                        <span className="rounded-full border border-line-modal bg-overlay px-1.5 text-[8.5px] leading-[14px] whitespace-nowrap text-faint">
-                          {edge.label}
-                        </span>
-                      </div>
+                      {editingEdge === edge.key ? (
+                        <div
+                          className="flex items-center justify-center gap-1"
+                          style={{ pointerEvents: "auto" }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            autoFocus
+                            defaultValue={edge.label}
+                            aria-label="Edge label"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") commitEdgeLabel(edge, e.currentTarget.value);
+                              if (e.key === "Escape") setEditingEdge(null);
+                            }}
+                            onBlur={(e) => commitEdgeLabel(edge, e.target.value)}
+                            className="mono w-[128px] rounded-full border border-primary-edge bg-overlay px-2 text-[9px] leading-[20px] text-ink outline-none"
+                          />
+                          <button
+                            type="button"
+                            title="Delete this connection"
+                            // fires before the input's blur commits
+                            onPointerDown={(e) => {
+                              e.preventDefault();
+                              deleteEdge(edge);
+                            }}
+                            className="flex h-[18px] w-[18px] items-center justify-center rounded-full border border-danger/40 bg-overlay text-danger"
+                          >
+                            <X size={10} aria-hidden />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="mono flex justify-center">
+                          <button
+                            type="button"
+                            title="Click to rename or delete this connection"
+                            style={{ pointerEvents: "auto" }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={() => setEditingEdge(edge.key)}
+                            className={`rounded-full border px-1.5 text-[8.5px] leading-[14px] whitespace-nowrap transition-colors hover:text-ink ${
+                              edge.user
+                                ? "border-history/50 bg-overlay text-history"
+                                : "border-line-modal bg-overlay text-faint"
+                            }`}
+                          >
+                            {edge.label}
+                          </button>
+                        </div>
+                      )}
                     </foreignObject>
                   </g>
                 );
@@ -1198,20 +1395,94 @@ export function BoardView() {
                   key={card.id}
                   data-board-card
                   onPointerDown={onCardDown(card.id)}
-                  className="absolute rounded-xl"
+                  className="group absolute rounded-xl"
                   style={{
                     left: pos.x,
                     top: pos.y,
                     width: CARD_W,
                     zIndex: dragging === card.id ? 20 : groupDragging ? 19 : 2,
-                    cursor: groupDragging ? "grabbing" : "grab",
-                    boxShadow: inSelection
-                      ? "0 0 0 2px var(--color-history), 0 0 18px color-mix(in srgb, var(--color-history) 25%, transparent)"
-                      : undefined,
+                    cursor: linkFrom ? "crosshair" : groupDragging ? "grabbing" : "grab",
+                    boxShadow:
+                      linkFrom === card.id
+                        ? "0 0 0 2px var(--color-primary), 0 0 18px color-mix(in srgb, var(--color-primary) 30%, transparent)"
+                        : inSelection
+                          ? "0 0 0 2px var(--color-history), 0 0 18px color-mix(in srgb, var(--color-history) 25%, transparent)"
+                          : undefined,
                   }}
                 >
+                  {/* Edit controls — connect, rename, hide. Visible on hover. */}
+                  {card.kind !== "enable" ? (
+                    <div
+                      className={`absolute -top-2.5 -right-2.5 z-30 gap-1 ${
+                        linkFrom === card.id ? "flex" : "hidden group-hover:flex"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        title={
+                          linkFrom === card.id
+                            ? "Cancel connecting (Esc)"
+                            : linkFrom
+                              ? "Connect to this card"
+                              : "Connect to another card"
+                        }
+                        onClick={() => completeLink(card.id)}
+                        className={`flex h-6 w-6 items-center justify-center rounded-full border shadow-[0_2px_8px_rgba(0,0,0,0.4)] transition-colors ${
+                          linkFrom === card.id
+                            ? "border-primary bg-primary text-on-primary"
+                            : "border-line-modal bg-overlay text-faint hover:text-ink"
+                        }`}
+                      >
+                        <Link2 size={11} aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        title="Rename — your name replaces the generated one"
+                        onClick={() => setEditingCard(card.id)}
+                        className="flex h-6 w-6 items-center justify-center rounded-full border border-line-modal bg-overlay text-faint shadow-[0_2px_8px_rgba(0,0,0,0.4)] transition-colors hover:text-ink"
+                      >
+                        <Pencil size={11} aria-hidden />
+                      </button>
+                      {card.kind !== "note" ? (
+                        <button
+                          type="button"
+                          title="Hide this card from the board"
+                          onClick={() => hideCard(card.id)}
+                          className="flex h-6 w-6 items-center justify-center rounded-full border border-line-modal bg-overlay text-faint shadow-[0_2px_8px_rgba(0,0,0,0.4)] transition-colors hover:text-ink"
+                        >
+                          <EyeOff size={11} aria-hidden />
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {editingCard === card.id ? (
+                    <div
+                      className="absolute -top-9 left-0 z-30 w-full"
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        autoFocus
+                        defaultValue={edits.overrides[card.id]?.label ?? ""}
+                        placeholder="Name this card — empty restores the generated name"
+                        aria-label="Card name"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            renameCard(card.id, e.currentTarget.value);
+                            setEditingCard(null);
+                          }
+                          if (e.key === "Escape") setEditingCard(null);
+                        }}
+                        onBlur={(e) => {
+                          renameCard(card.id, e.target.value);
+                          setEditingCard(null);
+                        }}
+                        className="w-full rounded-md border border-primary-edge bg-overlay px-2 py-1 text-11 text-ink shadow-[0_8px_30px_rgba(0,0,0,0.5)] outline-none placeholder:text-dim"
+                      />
+                    </div>
+                  ) : null}
                   <BoardCard
                     card={card}
+                    overrideLabel={edits.overrides[card.id]?.label}
                     busyId={busyId}
                     busyKind={busyKind}
                     onConfirmCluster={confirmCluster}
@@ -1247,6 +1518,15 @@ export function BoardView() {
             onClick={autoArrange}
           />
         </div>
+
+        {/* Connect-mode HUD */}
+        {linkFrom ? (
+          <div className="absolute top-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-primary-edge bg-overlay px-3.5 py-1.5 text-11 text-ink-soft shadow-[0_8px_30px_rgba(0,0,0,0.5)]">
+            <Link2 size={11} className="text-primary" aria-hidden />
+            <span>Click another card to connect them</span>
+            <Kbd>Esc</Kbd>
+          </div>
+        ) : null}
 
         {/* Selection HUD */}
         {selectedIds.size >= 2 ? (
@@ -1294,6 +1574,8 @@ export function BoardView() {
 
 type BoardCardProps = {
   card: CardModel;
+  /** User rename — replaces the generated kind label in the card header. */
+  overrideLabel?: string;
   busyId: number | null;
   busyKind: string | null;
   onConfirmCluster: (hub: SourceCardModel) => void;
@@ -1382,6 +1664,7 @@ function CardHeader({
 
 function FindingCard({
   finding,
+  overrideLabel,
   busyId,
   isStaged,
   onStageFinding,
@@ -1398,7 +1681,7 @@ function FindingCard({
       <CardHeader
         icon={Sparkles}
         tint="var(--color-primary)"
-        label="Finding"
+        label={overrideLabel ?? "Finding"}
         right={<span className="mono text-9 text-label">{Math.round(finding.confidence * 100)}%</span>}
       />
       <div className="px-3 py-2.5">
@@ -1451,6 +1734,7 @@ function FindingCard({
 
 function SourceCard({
   source,
+  overrideLabel,
   busyKind,
   onConfirmCluster,
 }: BoardCardProps & { source: SourceCardModel }) {
@@ -1463,7 +1747,7 @@ function SourceCard({
       <CardHeader
         icon={Icon}
         tint="var(--color-cat-archive)"
-        label="Source"
+        label={overrideLabel ?? "Source"}
         right={<span className="mono text-9 text-label">{formatCount(source.count)} linked</span>}
       />
       <div className="px-3 py-2.5">
@@ -1489,14 +1773,14 @@ function SourceCard({
   );
 }
 
-function DupCard({ dup }: BoardCardProps & { dup: Extract<CardModel, { kind: "dup" }> }) {
+function DupCard({ dup, overrideLabel }: BoardCardProps & { dup: Extract<CardModel, { kind: "dup" }> }) {
   const { setView } = useWorkspace();
   return (
     <CardShell accent="color-mix(in srgb, var(--color-danger) 40%, transparent)">
       <CardHeader
         icon={Copy}
         tint="var(--color-danger)"
-        label="Duplicate group"
+        label={overrideLabel ?? "Duplicate group"}
         right={
           <Tag tone={dup.confidence >= 0.99 ? "green" : "neutral"}>
             {dup.confidence >= 0.99 ? "VERIFIED" : dup.confidence >= 0.8 ? "SAMPLED" : "SIZE MATCH"}
@@ -1536,6 +1820,7 @@ function DupCard({ dup }: BoardCardProps & { dup: Extract<CardModel, { kind: "du
 
 function PinCard({
   pin,
+  overrideLabel,
   selectedPath,
   onSelect,
   onUnpin,
@@ -1574,7 +1859,7 @@ function PinCard({
       <CardHeader
         icon={Folder}
         tint="var(--color-history)"
-        label="Pinned folder"
+        label={overrideLabel ?? "Pinned folder"}
         right={<IconButton icon={PinOff} label="Unpin" size={11} onClick={() => onUnpin(pin.path)} />}
       />
       <button
@@ -1624,13 +1909,13 @@ function PinCard({
   );
 }
 
-function NoteCard({ note, onNoteChange, onNoteDelete }: BoardCardProps & { note: NoteModel }) {
+function NoteCard({ note, overrideLabel, onNoteChange, onNoteDelete }: BoardCardProps & { note: NoteModel }) {
   return (
     <div className="overflow-hidden rounded-xl border border-dashed border-line-modal bg-inset/80 shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
       <CardHeader
         icon={StickyNote}
         tint="var(--color-warn)"
-        label="Note"
+        label={overrideLabel ?? "Note"}
         right={<IconButton icon={X} label="Delete note" size={11} onClick={() => onNoteDelete(note.id)} />}
       />
       <textarea

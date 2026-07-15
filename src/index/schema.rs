@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 8;
+pub const CURRENT_SCHEMA_VERSION: u32 = 10;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -447,6 +447,62 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (8, strftime('%s', 'now'));
 "#;
 
+pub const MIGRATION_009: &str = r#"
+-- Files and folders the scanner could NOT read (permission denied, locked,
+-- cloud placeholder, vanished) — surfaced to the user instead of silently
+-- shaping results. phase: 'walk' (couldn't index) | 'hash' (couldn't verify
+-- content, so excluded from duplicate detection).
+CREATE TABLE IF NOT EXISTS scan_issues (
+  id INTEGER PRIMARY KEY,
+  scan_id INTEGER NOT NULL REFERENCES scan_sessions(id) ON DELETE CASCADE,
+  phase TEXT NOT NULL CHECK (phase IN ('walk', 'hash')),
+  path TEXT NOT NULL,
+  message TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_scan_issues_scan ON scan_issues(scan_id, phase);
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (9, strftime('%s', 'now'));
+"#;
+
+pub const MIGRATION_010: &str = r#"
+-- Startup-cost materialization: media totals, per-folder media, monthly
+-- activity and age bands were full-table scans on EVERY overview query
+-- (~1.1s warm on a 700k-file index, much worse cold). Rebuilt once per scan
+-- finalization instead, like extension_stats.
+CREATE TABLE IF NOT EXISTS media_stats (
+  media_kind TEXT PRIMARY KEY,
+  file_count INTEGER NOT NULL,
+  total_bytes INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS folder_media_stats (
+  folder_path TEXT NOT NULL,
+  media_kind TEXT NOT NULL,
+  total_bytes INTEGER NOT NULL,
+  PRIMARY KEY (folder_path, media_kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_folder_media_stats_bytes ON folder_media_stats(total_bytes DESC);
+
+CREATE TABLE IF NOT EXISTS month_stats (
+  bucket TEXT PRIMARY KEY, -- 'YYYY-MM', or 'unknown' for files with no mtime
+  file_count INTEGER NOT NULL,
+  total_bytes INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS age_stats (
+  bucket TEXT PRIMARY KEY, -- lt1mo … gt2yr / unknown, relative to scan time
+  file_count INTEGER NOT NULL,
+  total_bytes INTEGER NOT NULL
+);
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (10, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -456,6 +512,8 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (6, MIGRATION_006),
     (7, MIGRATION_007),
     (8, MIGRATION_008),
+    (9, MIGRATION_009),
+    (10, MIGRATION_010),
 ];
 
 #[cfg(test)]
@@ -464,8 +522,44 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 8);
-        assert_eq!(ALL_MIGRATIONS.len(), 8);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 10);
+        assert_eq!(ALL_MIGRATIONS.len(), 10);
+    }
+
+    #[test]
+    fn migration_010_creates_derived_stat_tables() {
+        use rusqlite::Connection;
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).expect("migration applies");
+        }
+        for table in ["media_stats", "folder_media_stats", "month_stats", "age_stats"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |r| r.get(0),
+                )
+                .expect("query sqlite_master");
+            assert_eq!(count, 1, "{table} must exist after migrations");
+        }
+    }
+
+    #[test]
+    fn migration_009_creates_scan_issues() {
+        use rusqlite::Connection;
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).expect("migration applies");
+        }
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='scan_issues'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query sqlite_master");
+        assert_eq!(count, 1, "scan_issues must exist after migrations");
     }
 
     #[test]

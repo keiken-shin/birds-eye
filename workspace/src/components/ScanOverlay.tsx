@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderOpen, Play, Sparkles, Zap, type LucideIcon } from "lucide-react";
+import { FolderOpen, Info, Play, Sparkles, Zap, type LucideIcon } from "lucide-react";
 import {
   chooseNativeFolder,
   isNativeRuntime,
@@ -9,7 +9,11 @@ import {
 import { formatBytes, formatCount, type ScanStrategy } from "@bridge/domain";
 import { useScanController } from "../state/scanController";
 import { useWorkspace } from "../state/workspaceStore";
-import { getDefaultStrategy } from "../lib/prefs";
+import {
+  getDefaultEnableIntelligence,
+  getDefaultStrategy,
+  setDefaultEnableIntelligence,
+} from "../lib/prefs";
 import type { ScanJobView } from "../hooks/useScanJob";
 import { OverlayShell } from "./ui/OverlayShell";
 import { Button } from "./ui/Button";
@@ -38,6 +42,7 @@ export function ScanOverlay() {
   const { view, enqueue, cancel, reset } = useScanController();
   const [folder, setFolder] = useState("");
   const [strategy, setStrategy] = useState<ScanStrategy>(getDefaultStrategy);
+  const [intelligence, setIntelligence] = useState<boolean>(getDefaultEnableIntelligence);
   const [error, setError] = useState<string | null>(null);
   const [queued, setQueued] = useState(false);
   const [native, setNative] = useState(true);
@@ -46,6 +51,19 @@ export function ScanOverlay() {
   useEffect(() => {
     void isNativeRuntime().then(setNative);
   }, []);
+
+  // Opening the sheet after a finished (complete/failed/cancelled) job shows
+  // the NEW-scan form, not the stale progress screen. A running scan still
+  // opens onto its live progress. Keyed on `overlay` only: resetting must
+  // happen on open, never the moment a scan finishes while the sheet is up.
+  useEffect(() => {
+    if (overlay === "scan" && view.status !== "idle" && view.status !== "scanning") {
+      reset();
+      setQueued(false);
+      setError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlay]);
 
   // Phase timings arrive on the terminal job event; fetch them once the scan completes.
   useEffect(() => {
@@ -89,7 +107,7 @@ export function ScanOverlay() {
     setQueued(false);
     try {
       // Runs now if idle, otherwise joins the FIFO behind the active scan.
-      if (enqueue(trimmed, strategy) === "queued") setQueued(true);
+      if (enqueue(trimmed, strategy, intelligence) === "queued") setQueued(true);
     } catch (e) {
       setError(`Couldn't start scan: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -216,6 +234,42 @@ export function ScanOverlay() {
                 );
               })}
             </div>
+          </section>
+
+          <section>
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-[10px] border border-line-modal p-3 transition-colors hover:border-line-strong">
+              <input
+                type="checkbox"
+                checked={intelligence}
+                onChange={(e) => {
+                  setIntelligence(e.target.checked);
+                  setDefaultEnableIntelligence(e.target.checked); // remembered for next time
+                }}
+                className="mt-0.5 h-3.5 w-3.5 flex-none accent-[var(--color-primary)]"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5 text-12 font-medium text-ink-soft">
+                  Enable intelligence
+                  <span
+                    className="inline-flex text-dim"
+                    title={
+                      "Classifies every folder on-device — why it exists, what depends on it, what's reclaimable. " +
+                      "Unlocks safety verdicts, Board findings and cleanup recommendations. " +
+                      "Reads file contents (media metadata, image fingerprints) beyond names and sizes — " +
+                      "nothing ever leaves this machine. Runs at the end of this same scan."
+                    }
+                  >
+                    <Info size={12} strokeWidth={2} aria-hidden />
+                  </span>
+                </span>
+                <span className="text-105 leading-relaxed text-dim">
+                  Enrichment runs with this scan — no second pass needed.
+                  {intelligence && strategy === "metadata"
+                    ? " Note: this reads some file contents, which goes beyond metadata-only."
+                    : ""}
+                </span>
+              </span>
+            </label>
           </section>
         </div>
       )}

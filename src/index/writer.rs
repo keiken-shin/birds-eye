@@ -48,6 +48,11 @@ impl ScanMode {
     }
 }
 
+/// Cap issue rows per scan — enough to review, never a runaway table when a
+/// whole subtree is unreadable. Counts shown to the user come from this table,
+/// so the cap also caps the reported number.
+pub(crate) const SCAN_ISSUES_CAP: i64 = 500;
+
 pub struct IndexWriter {
     connection: Connection,
     session_id: Option<i64>,
@@ -64,6 +69,14 @@ pub struct FolderSummary {
     pub path: String,
     pub total_files: i64,
     pub total_bytes: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScanIssueSummary {
+    /// 'walk' (couldn't index) or 'hash' (couldn't verify content).
+    pub phase: String,
+    pub path: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -226,6 +239,9 @@ impl IndexWriter {
                 progress_stage(&mut progress, "Building extension statistics", 0, 1);
                 self.rebuild_extension_stats()?;
                 progress_stage(&mut progress, "Building extension statistics", 1, 1);
+                progress_stage(&mut progress, "Building overview statistics", 0, 1);
+                self.rebuild_derived_stats()?;
+                progress_stage(&mut progress, "Building overview statistics", 1, 1);
                 progress_stage(&mut progress, "Capturing timeline", 0, 1);
                 self.capture_timeline(&report.root, &report.stats)?;
                 progress_stage(&mut progress, "Capturing timeline", 1, 1);
@@ -235,7 +251,10 @@ impl IndexWriter {
                 self.finish_session("cancelled", stats)?;
                 self.commit_scan_transaction()
             }
-            ScanEvent::Error(_) | ScanEvent::Progress(_) | ScanEvent::Verbose { .. } => Ok(()),
+            ScanEvent::Error(error) => {
+                self.record_scan_issue("walk", &path_to_string(&error.path), &error.message)
+            }
+            ScanEvent::Progress(_) | ScanEvent::Verbose { .. } => Ok(()),
         }
     }
 
@@ -259,11 +278,16 @@ impl IndexWriter {
         Ok(mode.as_deref().map(ScanMode::from_id).unwrap_or_default())
     }
 
-    pub fn refine_duplicates_with_progress<F>(&mut self, mut progress: F) -> Result<(), IndexError>
+    pub fn refine_duplicates_with_progress<F, C>(
+        &mut self,
+        cancel: &C,
+        mut progress: F,
+    ) -> Result<(), IndexError>
     where
         F: FnMut(FinalizationProgress),
+        C: Fn() -> bool + Sync,
     {
-        if self.active_scan_mode == ScanMode::MetadataOnly {
+        if self.active_scan_mode == ScanMode::MetadataOnly || cancel() {
             return Ok(());
         }
 
@@ -276,10 +300,23 @@ impl IndexWriter {
         progress_stage(&mut progress, "Sampling duplicate candidates", 0, 1);
         self.mark_hash_jobs_running(scan_id, "sample")?;
         self.mark_duplicate_candidates_status(scan_id, "sampling")?;
+        // Re-runs re-hash every unfinished candidate, so start their issue
+        // slate clean instead of stacking duplicate rows.
+        self.connection.execute(
+            "DELETE FROM scan_issues WHERE scan_id = ?1 AND phase = 'hash'",
+            params![scan_id],
+        )?;
         crate::index::algorithms::update_hashes_for_duplicate_candidates(
             &mut self.connection,
+            scan_id,
+            cancel,
             &mut progress,
         )?;
+        // Cancelled mid-hash: skip group rebuilding, keep the jobs/candidates
+        // rows as-is so the next scan re-hashes whatever was left unfinished.
+        if cancel() {
+            return Ok(());
+        }
         self.mark_hash_jobs_completed(scan_id, "sample")?;
 
         self.record_completed_full_hash_jobs(scan_id)?;
@@ -293,7 +330,166 @@ impl IndexWriter {
     }
 
     pub fn refine_duplicates(&mut self) -> Result<(), IndexError> {
-        self.refine_duplicates_with_progress(|_| {})
+        self.refine_duplicates_with_progress(&|| false, |_| {})
+    }
+
+    /// Issues from the most recent scan session: what couldn't be read (walk)
+    /// or content-verified (hash), with the OS error message. Detail rows are
+    /// capped at `SCAN_ISSUES_CAP` per scan.
+    pub fn scan_issues(&self, limit: usize) -> Result<Vec<ScanIssueSummary>, IndexError> {
+        let scan_id = match self.current_scan_session_id() {
+            Ok(id) => id,
+            Err(IndexError::MissingSession) => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let mut statement = self.connection.prepare(
+            "SELECT phase, path, message FROM scan_issues
+             WHERE scan_id = ?1
+             ORDER BY phase, path
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![scan_id, limit as i64], |row| {
+            Ok(ScanIssueSummary {
+                phase: row.get(0)?,
+                path: row.get(1)?,
+                message: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// (walk, hash) issue counts for the most recent scan session. The walk
+    /// count comes from the session's uncapped `inaccessible_entries` tally;
+    /// the hash count from the (capped) issue rows.
+    pub fn scan_issue_counts(&self) -> Result<(i64, i64), IndexError> {
+        let scan_id = match self.current_scan_session_id() {
+            Ok(id) => id,
+            Err(IndexError::MissingSession) => return Ok((0, 0)),
+            Err(e) => return Err(e),
+        };
+        let walk: i64 = self.connection.query_row(
+            "SELECT inaccessible_entries FROM scan_sessions WHERE id = ?1",
+            params![scan_id],
+            |row| row.get(0),
+        )?;
+        let hash: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM scan_issues WHERE scan_id = ?1 AND phase = 'hash'",
+            params![scan_id],
+            |row| row.get(0),
+        )?;
+        Ok((walk, hash))
+    }
+
+    /// Re-walk just the given paths and fold what's found into the index — the
+    /// targeted fix for walk issues, without a full rescan. Each path's issue
+    /// slate is cleared first; whatever still fails re-records a fresh issue.
+    /// File paths (from per-entry metadata failures) probe their parent folder.
+    pub fn probe_folders(&mut self, paths: &[PathBuf]) -> Result<(), IndexError> {
+        let scan_id = self.current_scan_session_id()?;
+
+        // Dedup to directories: a file path retries via its parent.
+        let mut roots: Vec<PathBuf> = Vec::new();
+        for path in paths {
+            let dir = if std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(true) {
+                path.clone()
+            } else {
+                path.parent().map(Path::to_path_buf).unwrap_or_else(|| path.clone())
+            };
+            if !roots.iter().any(|r| dir.starts_with(r)) {
+                roots.retain(|r| !r.starts_with(&dir));
+                roots.push(dir);
+            }
+        }
+
+        for root in &roots {
+            self.connection.execute(
+                "DELETE FROM scan_issues
+                 WHERE scan_id = ?1 AND phase = 'walk' AND (path = ?2 OR path LIKE ?3 ESCAPE '\\')",
+                params![
+                    scan_id,
+                    path_to_string(root),
+                    format!("{}%", escape_like_pattern(&path_prefix(root)))
+                ],
+            )?;
+            self.probe_directory(root)?;
+        }
+
+        self.commit_scan_transaction()?; // flush any batched crawl commits
+        self.recompute_folder_rollups(&mut |_| {})?;
+        self.rebuild_extension_stats()?;
+        self.rebuild_derived_stats()?;
+        // The session's walk tally now reflects what is still unreadable.
+        self.connection.execute(
+            "UPDATE scan_sessions
+             SET inaccessible_entries =
+               (SELECT COUNT(*) FROM scan_issues WHERE scan_id = ?1 AND phase = 'walk')
+             WHERE id = ?1",
+            params![scan_id],
+        )?;
+        Ok(())
+    }
+
+    fn probe_directory(&mut self, dir: &Path) -> Result<(), IndexError> {
+        let read_dir = match std::fs::read_dir(dir) {
+            Ok(read_dir) => read_dir,
+            Err(error) => {
+                return self.record_scan_issue("walk", &path_to_string(dir), &error.to_string());
+            }
+        };
+
+        let mut direct_files = 0u64;
+        let mut direct_bytes = 0u64;
+        let mut subdirs = Vec::new();
+        for entry in read_dir {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    self.record_scan_issue("walk", &path_to_string(dir), &error.to_string())?;
+                    continue;
+                }
+            };
+            let path = entry.path();
+            let metadata = match entry.metadata() {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    self.record_scan_issue("walk", &path_to_string(&path), &error.to_string())?;
+                    continue;
+                }
+            };
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
+                subdirs.push(path);
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let extension = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_ascii_lowercase());
+            direct_files += 1;
+            direct_bytes += metadata.len();
+            self.index_file(&FileRecord {
+                parent: dir.to_path_buf(),
+                path,
+                name,
+                extension,
+                size: metadata.len(),
+                modified: metadata.modified().ok(),
+                accessed: metadata.accessed().ok(),
+                created: metadata.created().ok(),
+            })?;
+        }
+        self.index_folder(&FolderRecord {
+            path: dir.to_path_buf(),
+            direct_files,
+            direct_bytes,
+        })?;
+        for sub in subdirs {
+            self.probe_directory(&sub)?;
+        }
+        Ok(())
     }
 
     pub fn largest_folders(&self, limit: usize) -> Result<Vec<FolderSummary>, IndexError> {
@@ -305,6 +501,32 @@ impl IndexWriter {
              LIMIT ?1",
         )?;
         let rows = statement.query_map(params![limit as i64], |row| {
+            Ok(FolderSummary {
+                path: row.get(0)?,
+                total_files: row.get(1)?,
+                total_bytes: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Direct children of one folder, largest first. The overview's
+    /// `largest_folders` is a global top-N, so deep/small subtrees fall out of
+    /// it — this scoped query is how drill-down reaches everything else.
+    pub fn folder_children(
+        &self,
+        parent_path: &str,
+        limit: usize,
+    ) -> Result<Vec<FolderSummary>, IndexError> {
+        let mut statement = self.connection.prepare(
+            "SELECT f.path, f.total_files, f.total_bytes
+             FROM folders f
+             JOIN folders p ON f.parent_id = p.id
+             WHERE p.path = ?1 AND f.total_bytes > 0
+             ORDER BY f.total_bytes DESC
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![parent_path, limit as i64], |row| {
             Ok(FolderSummary {
                 path: row.get(0)?,
                 total_files: row.get(1)?,
@@ -337,7 +559,17 @@ impl IndexWriter {
     /// Monthly modified-time activity buckets (`YYYY-MM`) over the last `months`
     /// months, oldest first. Files with no modified timestamp are excluded.
     pub fn timeline_summaries(&self, months: usize) -> Result<Vec<TimelineBucket>, IndexError> {
-        let mut statement = self.connection.prepare(
+        let horizon = format!("-{months} months");
+        // 'YYYY-MM' strings compare chronologically, so the materialized table
+        // filters by plain string range.
+        let sql = if self.has_rows("month_stats")? {
+            "SELECT bucket, file_count, total_bytes
+             FROM month_stats
+             WHERE bucket != 'unknown'
+               AND bucket >= strftime('%Y-%m', 'now', ?1)
+               AND bucket <= strftime('%Y-%m', 'now', '+1 day')
+             ORDER BY bucket ASC"
+        } else {
             "SELECT strftime('%Y-%m', modified_at, 'unixepoch') AS bucket,
                     COUNT(*) AS file_count,
                     SUM(size) AS total_bytes
@@ -347,9 +579,9 @@ impl IndexWriter {
                AND modified_at >= strftime('%s', 'now', ?1)
                AND modified_at <= strftime('%s', 'now', '+1 day')
              GROUP BY bucket
-             ORDER BY bucket ASC",
-        )?;
-        let horizon = format!("-{months} months");
+             ORDER BY bucket ASC"
+        };
+        let mut statement = self.connection.prepare(sql)?;
         let rows = statement.query_map(params![horizon], |row| {
             Ok(TimelineBucket {
                 bucket: row.get(0)?,
@@ -363,6 +595,21 @@ impl IndexWriter {
     /// Staleness distribution: how many files (and bytes) were last modified
     /// within each fixed age band. Files with no modified timestamp land in `unknown`.
     pub fn age_summaries(&self) -> Result<Vec<AgeBucket>, IndexError> {
+        // Materialized bands are relative to the last scan — they describe the
+        // scanned snapshot, which is what the rest of the index shows anyway.
+        if self.has_rows("age_stats")? {
+            let mut statement = self
+                .connection
+                .prepare("SELECT bucket, file_count, total_bytes FROM age_stats")?;
+            let rows = statement.query_map([], |row| {
+                Ok(AgeBucket {
+                    bucket: row.get(0)?,
+                    file_count: row.get(1)?,
+                    total_bytes: row.get(2)?,
+                })
+            })?;
+            return Ok(rows.collect::<Result<Vec<_>, _>>()?);
+        }
         let mut statement = self.connection.prepare(
             "SELECT CASE
                       WHEN modified_at IS NULL THEN 'unknown'
@@ -651,14 +898,84 @@ impl IndexWriter {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Rebuild the materialized overview aggregates (media, per-folder media,
+    /// monthly activity, age bands). Runs once per scan finalization so the
+    /// startup overview reads small tables instead of full-scanning `files`.
+    fn rebuild_derived_stats(&mut self) -> Result<(), IndexError> {
+        let tx = self.connection.transaction()?;
+        tx.execute_batch(
+            "DELETE FROM media_stats;
+             INSERT INTO media_stats (media_kind, file_count, total_bytes)
+             SELECT media_kind, COUNT(*), COALESCE(SUM(size), 0)
+             FROM files
+             WHERE deleted_at IS NULL
+             GROUP BY media_kind;
+
+             DELETE FROM folder_media_stats;
+             INSERT INTO folder_media_stats (folder_path, media_kind, total_bytes)
+             SELECT f.path, files.media_kind, COALESCE(SUM(files.size), 0)
+             FROM files
+             JOIN folders f ON f.id = files.folder_id
+             WHERE files.deleted_at IS NULL
+             GROUP BY f.path, files.media_kind;
+
+             DELETE FROM month_stats;
+             INSERT INTO month_stats (bucket, file_count, total_bytes)
+             SELECT COALESCE(strftime('%Y-%m', modified_at, 'unixepoch'), 'unknown'),
+                    COUNT(*),
+                    COALESCE(SUM(size), 0)
+             FROM files
+             WHERE deleted_at IS NULL
+             GROUP BY 1;
+
+             DELETE FROM age_stats;
+             INSERT INTO age_stats (bucket, file_count, total_bytes)
+             SELECT CASE
+                      WHEN modified_at IS NULL THEN 'unknown'
+                      WHEN age < 2592000 THEN 'lt1mo'
+                      WHEN age < 7776000 THEN '1to3mo'
+                      WHEN age < 15552000 THEN '3to6mo'
+                      WHEN age < 31536000 THEN '6to12mo'
+                      WHEN age < 63072000 THEN '1to2yr'
+                      ELSE 'gt2yr'
+                    END AS bucket,
+                    COUNT(*),
+                    COALESCE(SUM(size), 0)
+             FROM (
+               SELECT modified_at,
+                      size,
+                      CAST(strftime('%s', 'now') AS INTEGER) - modified_at AS age
+               FROM files
+               WHERE deleted_at IS NULL
+             )
+             GROUP BY bucket;",
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn has_rows(&self, table: &str) -> Result<bool, IndexError> {
+        let count: i64 = self
+            .connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))?;
+        Ok(count > 0)
+    }
+
     pub fn media_summaries(&self) -> Result<Vec<MediaSummary>, IndexError> {
-        let mut statement = self.connection.prepare(
+        // Empty stats table = index last scanned before materialization landed
+        // (or an empty index) — fall back to the live aggregate.
+        let sql = if self.has_rows("media_stats")? {
+            "SELECT media_kind, file_count, total_bytes
+             FROM media_stats
+             ORDER BY total_bytes DESC"
+        } else {
             "SELECT media_kind, COUNT(*), COALESCE(SUM(size), 0)
              FROM files
              WHERE deleted_at IS NULL
              GROUP BY media_kind
-             ORDER BY SUM(size) DESC",
-        )?;
+             ORDER BY SUM(size) DESC"
+        };
+        let mut statement = self.connection.prepare(sql)?;
         let rows = statement.query_map([], |row| {
             Ok(MediaSummary {
                 media_kind: row.get(0)?,
@@ -673,15 +990,21 @@ impl IndexWriter {
         &self,
         limit: usize,
     ) -> Result<Vec<FolderMediaSummary>, IndexError> {
-        let mut statement = self.connection.prepare(
+        let sql = if self.has_rows("folder_media_stats")? {
+            "SELECT folder_path, media_kind, total_bytes
+             FROM folder_media_stats
+             ORDER BY total_bytes DESC
+             LIMIT ?1"
+        } else {
             "SELECT f.path, files.media_kind, COALESCE(SUM(files.size), 0) AS total_bytes
              FROM files
              JOIN folders f ON f.id = files.folder_id
              WHERE files.deleted_at IS NULL
              GROUP BY f.path, files.media_kind
              ORDER BY total_bytes DESC
-             LIMIT ?1",
-        )?;
+             LIMIT ?1"
+        };
+        let mut statement = self.connection.prepare(sql)?;
         let rows = statement.query_map(params![limit as i64], |row| {
             Ok(FolderMediaSummary {
                 folder_path: row.get(0)?,
@@ -773,6 +1096,11 @@ impl IndexWriter {
             ],
         )?;
         Ok(())
+    }
+
+    fn record_scan_issue(&mut self, phase: &str, path: &str, message: &str) -> Result<(), IndexError> {
+        let scan_id = self.current_scan_session_id()?;
+        insert_scan_issue(&self.connection, scan_id, phase, path, message)
     }
 
     fn current_scan_session_id(&self) -> Result<i64, IndexError> {
@@ -940,13 +1268,17 @@ impl IndexWriter {
                         CASE
                           WHEN full_hash IS NOT NULL THEN 1.0
                           WHEN sample_hash IS NOT NULL THEN 0.80
-                          WHEN partial_hash IS NOT NULL THEN 0.60
-                          ELSE 0.35
+                          ELSE 0.60
                         END AS confidence,
                         COUNT(*) AS file_count,
                         size * (COUNT(*) - 1) AS reclaimable_bytes
                  FROM files
-                 WHERE deleted_at IS NULL AND size > 0
+                 -- Files whose hashing failed or was skipped (locked, permission
+                 -- denied, cloud placeholders, vanished) keep NULL hashes; SQL
+                 -- GROUP BY treats NULLs as equal, so without this filter every
+                 -- same-size unhashed file — a video and a document alike —
+                 -- collapses into one phantom \"duplicate\" group.
+                 WHERE deleted_at IS NULL AND size > 0 AND partial_hash IS NOT NULL
                  GROUP BY size, partial_hash, sample_hash, full_hash
                  HAVING COUNT(*) > 1
                  ORDER BY reclaimable_bytes DESC",
@@ -1001,13 +1333,9 @@ impl IndexWriter {
                      SELECT ?1, id FROM files WHERE deleted_at IS NULL AND size = ?2 AND partial_hash = ?3",
                     params![group_id, size, partial_hash],
                 )?;
-            } else {
-                tx.execute(
-                    "INSERT INTO duplicate_group_files (group_id, file_id)
-                     SELECT ?1, id FROM files WHERE deleted_at IS NULL AND size = ?2 AND partial_hash IS NULL",
-                    params![group_id, size],
-                )?;
             }
+            // No hash at all never forms a group: the grouping query above
+            // requires partial_hash, so size-only coincidences are excluded.
         }
 
         tx.commit()?;
@@ -1193,6 +1521,24 @@ impl IndexWriter {
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+/// Insert one scan issue, silently dropping rows past the per-scan cap.
+/// Shared by the walk (writer) and hash (algorithms) phases.
+pub(crate) fn insert_scan_issue(
+    connection: &Connection,
+    scan_id: i64,
+    phase: &str,
+    path: &str,
+    message: &str,
+) -> Result<(), IndexError> {
+    connection.execute(
+        "INSERT INTO scan_issues (scan_id, phase, path, message, created_at)
+         SELECT ?1, ?2, ?3, ?4, ?5
+         WHERE (SELECT COUNT(*) FROM scan_issues WHERE scan_id = ?1) < ?6",
+        params![scan_id, phase, path, message, now_millis(), SCAN_ISSUES_CAP],
+    )?;
+    Ok(())
 }
 
 fn path_prefix(path: &Path) -> String {
@@ -1425,6 +1771,308 @@ mod tests {
                 .len(),
             2
         );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn unhashed_same_size_files_never_group_as_duplicates() {
+        // Files whose hashing failed (locked, permission denied, cloud
+        // placeholders) keep NULL hashes. Same size + NULL hashes must NOT
+        // form a group — that's how a video and a document got paired.
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        writer
+            .connection()
+            .execute_batch(
+                "INSERT INTO folders (id, path, name, depth, indexed_at) VALUES (1, '/r', 'r', 0, 0);
+                 INSERT INTO files (folder_id, path, name, size, indexed_at)
+                 VALUES (1, '/r/movie.mp4', 'movie.mp4', 4096, 0),
+                        (1, '/r/report.pdf', 'report.pdf', 4096, 0);",
+            )
+            .expect("failed to seed unhashed files");
+
+        writer
+            .rebuild_duplicate_size_groups()
+            .expect("failed to rebuild duplicate groups");
+
+        let group_count: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
+            .expect("failed to count duplicate groups");
+        assert_eq!(group_count, 0, "size-only coincidences are not duplicates");
+    }
+
+    #[test]
+    fn walk_errors_are_recorded_as_scan_issues() {
+        let root = test_root("issues-walk");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("one.bin"), &[1; 16]);
+
+        let scanner = Scanner::new(ScanOptions {
+            root: root.clone(),
+            workers: 1,
+        });
+        let events = scanner.scan();
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        for event in events {
+            let finished = matches!(event, ScanEvent::Finished(_));
+            if finished {
+                // Inject an unreadable-directory error the way a worker reports one.
+                writer
+                    .handle_event(&ScanEvent::Error(crate::scanner::ScanError {
+                        path: root.join("locked-folder"),
+                        message: "Access is denied. (os error 5)".to_owned(),
+                    }))
+                    .expect("failed to record error event");
+            }
+            writer.handle_event(&event).expect("failed to index event");
+            if finished {
+                break;
+            }
+        }
+
+        let issues = writer.scan_issues(10).expect("scan issues");
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].phase, "walk");
+        assert!(issues[0].path.ends_with("locked-folder"));
+        assert!(issues[0].message.contains("denied"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn hash_failures_surface_as_scan_issues() {
+        let root = test_root("issues-hash");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("real.bin"), &[7; 64]);
+
+        let scanner = Scanner::new(ScanOptions {
+            root: root.clone(),
+            workers: 1,
+        });
+        let events = scanner.scan();
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        for event in events {
+            writer.handle_event(&event).expect("failed to index event");
+            if matches!(event, ScanEvent::Finished(_)) {
+                break;
+            }
+        }
+
+        // Two same-size candidates whose backing files no longer exist —
+        // hashing must fail, record issues, and never group them.
+        writer
+            .connection()
+            .execute_batch(
+                "INSERT INTO files (folder_id, path, name, size, indexed_at)
+                 SELECT id, '/gone/movie.mp4', 'movie.mp4', 4096, 0 FROM folders LIMIT 1;
+                 INSERT INTO files (folder_id, path, name, size, indexed_at)
+                 SELECT id, '/gone/report.pdf', 'report.pdf', 4096, 0 FROM folders LIMIT 1;",
+            )
+            .expect("failed to seed phantom files");
+
+        writer.refine_duplicates().expect("failed to refine");
+
+        let issues = writer.scan_issues(10).expect("scan issues");
+        let hash_issues: Vec<_> = issues.iter().filter(|i| i.phase == "hash").collect();
+        assert_eq!(hash_issues.len(), 2, "both unreadable files reported");
+        let (_, hash_count) = writer.scan_issue_counts().expect("issue counts");
+        assert_eq!(hash_count, 2);
+        let groups: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| row.get(0))
+            .expect("group count");
+        assert_eq!(groups, 0, "unhashable files never form groups");
+        cleanup(&root);
+    }
+
+    /// Not a correctness test — a measurement harness for the startup "load
+    /// index" cost. Builds a ~700k-file index on disk (cold-cache HDD effects
+    /// excluded) and times every section the overview query runs.
+    /// Run: cargo test --release bench_overview -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_overview_sections_on_large_index() {
+        use std::time::Instant;
+        const FILES: i64 = 700_000;
+        const FOLDERS: i64 = 25_000;
+        const DUP_PAIRS: i64 = 3_000;
+
+        let dir = std::env::temp_dir().join("birdseye-bench");
+        fs::create_dir_all(&dir).expect("bench dir");
+        let db = dir.join("bench.sqlite");
+        let _ = fs::remove_file(&db);
+        let mut writer = IndexWriter::open(&db).expect("open bench index");
+
+        let build_start = Instant::now();
+        {
+            let tx = writer.connection.transaction().expect("tx");
+            tx.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at) VALUES (1, NULL, 'D:\\bench', 'bench', 1, 0)",
+                [],
+            )
+            .expect("root");
+            {
+                let mut stmt = tx
+                    .prepare("INSERT INTO folders (id, parent_id, path, name, depth, indexed_at) VALUES (?1, 1, ?2, ?3, 2, 0)")
+                    .expect("prep folders");
+                for i in 0..FOLDERS {
+                    stmt.execute(params![i + 2, format!("D:\\bench\\f{i}"), format!("f{i}")])
+                        .expect("folder row");
+                }
+            }
+            {
+                let exts = ["jpg", "mp4", "pdf", "rs", "zip", "exe", "txt", "png", "mp3", "bin"];
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT INTO files (folder_id, path, name, extension, size, modified_at, media_kind, indexed_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
+                    )
+                    .expect("prep files");
+                for i in 0..FILES {
+                    let h = (i.wrapping_mul(2654435761)) as u64;
+                    let ext = exts[(h % 10) as usize];
+                    stmt.execute(params![
+                        (i % FOLDERS) + 2,
+                        format!("D:\\bench\\f{}\\file{i}.{ext}", i % FOLDERS),
+                        format!("file{i}.{ext}"),
+                        ext,
+                        (h % 500_000_000) as i64,
+                        1_600_000_000_i64 + ((h % 94_608_000) as i64), // ~3yr spread
+                        classify_media_kind(Some(ext)),
+                    ])
+                    .expect("file row");
+                }
+            }
+            {
+                // Duplicate pairs: shared size+hashes so group rebuilding is exercised.
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT INTO files (folder_id, path, name, extension, size, modified_at, media_kind,
+                                            partial_hash, sample_hash, full_hash, hash_state, indexed_at)
+                         VALUES (?1, ?2, ?3, 'dup', ?4, 0, 'other', ?5, ?5, ?5, 4, 0)",
+                    )
+                    .expect("prep dups");
+                for i in 0..DUP_PAIRS {
+                    for copy in 0..2 {
+                        stmt.execute(params![
+                            (i % FOLDERS) + 2,
+                            format!("D:\\bench\\f{}\\dup{i}-{copy}.dup", i % FOLDERS),
+                            format!("dup{i}-{copy}.dup"),
+                            1_000_000 + i,
+                            format!("{i:032x}"),
+                        ])
+                        .expect("dup row");
+                    }
+                }
+            }
+            tx.commit().expect("commit");
+        }
+        writer
+            .recompute_folder_rollups(&mut |_| {})
+            .expect("rollups");
+        writer.rebuild_extension_stats().expect("ext stats");
+        writer
+            .rebuild_duplicate_size_groups()
+            .expect("dup groups");
+        writer.rebuild_derived_stats().expect("derived stats");
+        println!("build: {:?}", build_start.elapsed());
+
+        // Fresh writer = fresh connection + page cache like a real app start.
+        drop(writer);
+        let open_start = Instant::now();
+        let writer = IndexWriter::open(&db).expect("reopen");
+        println!("open+migrate: {:?}", open_start.elapsed());
+
+        let section = |name: &str, run: &mut dyn FnMut()| {
+            let t = Instant::now();
+            run();
+            println!("{name}: {:?}", t.elapsed());
+        };
+        section("largest_folders(4000)", &mut || {
+            writer.largest_folders(4000).expect("folders");
+        });
+        section("largest_files(4000)", &mut || {
+            writer.largest_files(4000).expect("files");
+        });
+        section("extension_summaries(4000)", &mut || {
+            writer.extension_summaries(4000).expect("ext");
+        });
+        section("duplicate_groups(4000)", &mut || {
+            writer.duplicate_groups(4000).expect("dups");
+        });
+        section("media_summaries", &mut || {
+            writer.media_summaries().expect("media");
+        });
+        section("folder_media_summaries(24000)", &mut || {
+            writer.folder_media_summaries(24000).expect("folder media");
+        });
+        section("timeline_summaries(24)", &mut || {
+            writer.timeline_summaries(24).expect("timeline");
+        });
+        section("age_summaries", &mut || {
+            writer.age_summaries().expect("age");
+        });
+        section("scan_issue_counts", &mut || {
+            writer.scan_issue_counts().ok();
+        });
+    }
+
+    #[test]
+    fn probe_folders_recovers_previously_unreadable_directories() {
+        let root = test_root("issues-probe");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("seen.bin"), &[1; 16]);
+
+        let scanner = Scanner::new(ScanOptions {
+            root: root.clone(),
+            workers: 1,
+        });
+        let events = scanner.scan();
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        for event in events {
+            writer.handle_event(&event).expect("failed to index event");
+            if matches!(event, ScanEvent::Finished(_)) {
+                break;
+            }
+        }
+
+        // A directory the walk couldn't read at scan time... that is readable now.
+        let locked = root.join("was-locked");
+        fs::create_dir_all(&locked).expect("failed to create folder");
+        write_file(&locked.join("recovered.bin"), &[2; 96]);
+        writer
+            .handle_event(&ScanEvent::Error(crate::scanner::ScanError {
+                path: locked.clone(),
+                message: "Access is denied. (os error 5)".to_owned(),
+            }))
+            .expect("failed to record error event");
+        assert_eq!(writer.scan_issues(10).expect("issues").len(), 1);
+
+        writer.probe_folders(&[locked.clone()]).expect("probe failed");
+
+        let issues = writer.scan_issues(10).expect("issues");
+        assert!(issues.is_empty(), "recovered directory clears its issue");
+        let (walk_count, _) = writer.scan_issue_counts().expect("counts");
+        assert_eq!(walk_count, 0, "session tally reconciled after probe");
+        let recovered: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL AND path LIKE '%recovered.bin'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("recovered file count");
+        assert_eq!(recovered, 1, "probed file lands in the index");
+        let rollup: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT total_bytes FROM folders WHERE path = ?1",
+                params![path_to_string(&root)],
+                |row| row.get(0),
+            )
+            .expect("root rollup");
+        assert_eq!(rollup, 16 + 96, "rollups fold in the probed subtree");
         cleanup(&root);
     }
 
@@ -1755,7 +2403,7 @@ mod tests {
         scan_into_index(&root, &mut writer);
 
         writer
-            .refine_duplicates_with_progress(|_| {})
+            .refine_duplicates_with_progress(&|| false, |_| {})
             .expect("failed to refine duplicates");
 
         let duplicate_groups: i64 = writer
@@ -1866,6 +2514,8 @@ mod tests {
         assert_eq!(ages[0].file_count, 2);
 
         // A file backdated two years lands in the oldest band and off the 24-month timeline.
+        // Summaries are materialized at scan finalization, so an out-of-band SQL
+        // mutation needs an explicit rebuild — a real rescan does this itself.
         writer
             .connection()
             .execute(
@@ -1874,6 +2524,7 @@ mod tests {
                 [],
             )
             .expect("failed to backdate file");
+        writer.rebuild_derived_stats().expect("rebuild stats");
         let ages = writer.age_summaries().expect("age summaries");
         assert!(ages.iter().any(|bucket| bucket.bucket == "gt2yr" && bucket.file_count == 1));
         let timeline = writer.timeline_summaries(24).expect("timeline summaries");

@@ -90,8 +90,12 @@ export function ScopeTree() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2">
         {rows.map(({ node, depth, parent }) => {
-          const active = scopePath.includes(node.path) || selected?.path === node.path;
+          // Only the node itself gets the full pill; ancestors on the scope
+          // chain read as quietly "on the path" without competing with it.
+          const active =
+            selected?.path === node.path || scopePath[scopePath.length - 1] === node.path;
           const expanded = scopePath.includes(node.path);
+          const onPath = expanded && !active;
           const Caret = expanded ? ChevronDown : ChevronRight;
           return (
             <div
@@ -99,7 +103,9 @@ export function ScopeTree() {
               className={`flex w-full items-center gap-1 rounded-[7px] border py-1 pr-2 text-125 transition-colors ${
                 active
                   ? "border-primary-edge bg-primary-dim text-ink"
-                  : "border-transparent text-muted hover:text-ink"
+                  : onPath
+                    ? "border-transparent text-ink-soft hover:text-ink"
+                    : "border-transparent text-muted hover:text-ink"
               }`}
               style={{ paddingLeft: 4 + depth * 14 }}
             >

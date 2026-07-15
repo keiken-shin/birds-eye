@@ -92,6 +92,9 @@ const file = (
 });
 
 const FILES: FileFix[] = [
+  // A file whose mtime was stripped in transfer (reads as the 1980 FAT epoch) —
+  // exercises the lost-date guard: shows "—", never "46y ago" / "Stale".
+  file(j("Photos", "Trips", "Rishikesh", "VID20240330154433.mp4"), 0.95, "mp4", "video", 16996),
   file(j("VMs", "win11-dev.vdi"), 22.4, "vdi", "other", 148),
   file(j("VMs", "ubuntu-lab.qcow2"), 12.8, "qcow2", "other", 411),
   file(j("Projects", "ml-lab", "checkpoints", "sdxl-base.safetensors"), 6.9, "safetensors", "model", 96),
@@ -556,6 +559,9 @@ type IndexFix = {
   folders_scanned: number;
   bytes_scanned: number;
   scan_strategy: string;
+  walk_issues: number;
+  hash_issues: number;
+  intelligence: boolean;
 };
 
 let INDEXES: IndexFix[] = [
@@ -568,6 +574,9 @@ let INDEXES: IndexFix[] = [
     folders_scanned: 24_618,
     bytes_scanned: FOLDERS[0].total_bytes,
     scan_strategy: "smart",
+    walk_issues: 3,
+    hash_issues: 2,
+    intelligence: true,
   },
   {
     index_path: MEDIA_INDEX,
@@ -578,8 +587,21 @@ let INDEXES: IndexFix[] = [
     folders_scanned: 1_240,
     bytes_scanned: Math.round(682.4 * GB),
     scan_strategy: "metadata",
+    walk_issues: 0,
+    hash_issues: 0,
+    intelligence: false,
   },
 ];
+
+const SCAN_ISSUES: Record<string, Array<{ phase: string; path: string; message: string }>> = {
+  [MAIN_INDEX]: [
+    { phase: "walk", path: `${ROOT}\\AppData\\Local\\Temp\\locked`, message: "Access is denied. (os error 5)" },
+    { phase: "walk", path: `${ROOT}\\Documents\\Outlook Files`, message: "The process cannot access the file because it is being used by another process. (os error 32)" },
+    { phase: "walk", path: `${ROOT}\\Videos\\.sync`, message: "Access is denied. (os error 5)" },
+    { phase: "hash", path: `${ROOT}\\Documents\\ledger-2024.xlsx`, message: "The process cannot access the file because it is being used by another process. (os error 32)" },
+    { phase: "hash", path: `${ROOT}\\Photos\\OneDrive\\IMG_8841.heic`, message: "online-only cloud file — make it available offline (e.g. OneDrive → 'Always keep on this device'), then retry verification" },
+  ],
+};
 
 /* ------------------------------------------------------------------ */
 /* Scan-job simulation (dev scan theater)                              */
@@ -638,6 +660,9 @@ function startMockScan(root: string): { job_id: number; index_path: string } {
           folders_scanned: 24_618,
           bytes_scanned: totalBytes,
           scan_strategy: "smart",
+          walk_issues: 3,
+          hash_issues: 2,
+          intelligence: ontologyEnabled,
         },
         ...INDEXES.filter((e) => e.index_path !== indexPath),
       ];
@@ -771,7 +796,10 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
 
   switch (cmd) {
     case "list_indexes":
-      return done(INDEXES);
+      // The main index mirrors the live ontology flag so enable/disable shows up.
+      return done(
+        INDEXES.map((e) => (e.index_path === MAIN_INDEX ? { ...e, intelligence: ontologyEnabled } : e))
+      );
     case "delete_index": {
       const path = (args as { indexPath: string }).indexPath;
       INDEXES = INDEXES.filter((e) => e.index_path !== path);
@@ -796,6 +824,39 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
         timeline: TIMELINE,
         age_buckets: AGE_BUCKETS,
       });
+    case "scan_issues":
+      return done(SCAN_ISSUES[String(request.index_path)] ?? []);
+    case "retry_scan_issues": {
+      // Simulate a retry where everything heals except the cloud placeholder
+      // (it stays online-only until the user hydrates it).
+      const key = String(request.index_path);
+      const remaining = (SCAN_ISSUES[key] ?? []).filter((i) => i.message.includes("cloud"));
+      SCAN_ISSUES[key] = remaining;
+      const walk = remaining.filter((i) => i.phase === "walk").length;
+      const hash = remaining.filter((i) => i.phase === "hash").length;
+      INDEXES = INDEXES.map((e) =>
+        e.index_path === key ? { ...e, walk_issues: walk, hash_issues: hash } : e
+      );
+      return done({ walk_issues: walk, hash_issues: hash });
+    }
+    case "file_lock_holders": {
+      const p = String(request.path).toLowerCase();
+      if (p.includes("outlook")) return done(["Microsoft Outlook"]);
+      if (p.includes("ledger")) return done(["Microsoft Excel"]);
+      return done([]);
+    }
+    case "folder_children": {
+      const parent = String(request.parent_path ?? "").replace(/[\\/]+$/, "");
+      const children = FOLDERS.filter((f) => {
+        if (!f.path.startsWith(parent)) return false;
+        const rest = f.path.slice(parent.length);
+        return /^[\\/][^\\/]+$/.test(rest);
+      })
+        .slice()
+        .sort((a, b) => b.total_bytes - a.total_bytes)
+        .slice(0, Number(request.limit) || 500);
+      return done(children);
+    }
     case "search_files":
       return done(searchFiles(request as Parameters<typeof searchFiles>[0]));
     case "duplicate_group_files": {
@@ -959,8 +1020,12 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       });
     case "allow_preview_root":
       return done(ROOT);
-    case "start_scan_job_for_root":
-      return done(startMockScan((args as { root: string }).root));
+    case "start_scan_job_for_root": {
+      const a = args as { root: string; enableIntelligence?: boolean | null };
+      // Mirror the real backend: the opt-in is applied with the scan itself.
+      if (typeof a.enableIntelligence === "boolean") ontologyEnabled = a.enableIntelligence;
+      return done(startMockScan(a.root));
+    }
     case "cancel_scan_job": {
       const jobId = (args as { jobId: number }).jobId;
       const timer = jobTimers.get(jobId);
