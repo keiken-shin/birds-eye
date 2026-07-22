@@ -21,16 +21,29 @@ const SECONDS_PER_DAY: i64 = 86_400;
 
 /// Abstraction over "send this path to the OS recycle bin". Production uses the
 /// `trash` crate; tests inject a fake that records calls / moves files aside.
+///
+/// `Ok(Some(path))` reports where the item landed in the recycle bin, when the
+/// platform can say (macOS receipt — see `native::macos_trash`); Windows/Linux
+/// restore via the recycle-bin API instead and report `Ok(None)`. `Err` means
+/// the item was NOT trashed.
 pub trait Trasher {
-    fn send_to_trash(&self, path: &Path) -> Result<(), String>;
+    fn send_to_trash(&self, path: &Path) -> Result<Option<std::path::PathBuf>, String>;
 }
 
-/// Production trasher — the OS recycle bin via the `trash` crate.
+/// Production trasher — the OS recycle bin via the `trash` crate, except on
+/// macOS where `trashItemAtURL` is called directly so the landed path (the
+/// only permission-free restore handle under TCC) isn't discarded.
 pub struct SystemTrasher;
 
 impl Trasher for SystemTrasher {
-    fn send_to_trash(&self, path: &Path) -> Result<(), String> {
-        trash::delete(path).map_err(|e| e.to_string())
+    #[cfg(not(target_os = "macos"))]
+    fn send_to_trash(&self, path: &Path) -> Result<Option<std::path::PathBuf>, String> {
+        trash::delete(path).map(|_| None).map_err(|e| e.to_string())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn send_to_trash(&self, path: &Path) -> Result<Option<std::path::PathBuf>, String> {
+        crate::native::macos_trash::trash_with_receipt(path)
     }
 }
 
@@ -101,11 +114,14 @@ pub fn execute_plan_with(
         let log_id = conn.last_insert_rowid();
 
         match trasher.send_to_trash(Path::new(&cand.path)) {
-            Ok(()) => {
+            Ok(trashed_path) => {
+                let trashed_path = trashed_path.map(|p| p.to_string_lossy().into_owned());
                 let bookkeeping = conn
                     .execute(
-                        "UPDATE ontology_cleanup_log SET restore_status = 'in_recycle_bin' WHERE id = ?1",
-                        params![log_id],
+                        "UPDATE ontology_cleanup_log
+                         SET restore_status = 'in_recycle_bin', trashed_path = ?2
+                         WHERE id = ?1",
+                        params![log_id, trashed_path],
                     )
                     .and_then(|_| {
                         conn.execute(
@@ -238,9 +254,9 @@ mod tests {
         }
     }
     impl Trasher for RecordingTrasher {
-        fn send_to_trash(&self, path: &Path) -> Result<(), String> {
+        fn send_to_trash(&self, path: &Path) -> Result<Option<std::path::PathBuf>, String> {
             self.seen.lock().unwrap().push(path.display().to_string());
-            Ok(())
+            Ok(None)
         }
     }
 
@@ -249,12 +265,21 @@ mod tests {
         fail_path: String,
     }
     impl Trasher for FlakyTrasher {
-        fn send_to_trash(&self, path: &Path) -> Result<(), String> {
+        fn send_to_trash(&self, path: &Path) -> Result<Option<std::path::PathBuf>, String> {
             if path.display().to_string() == self.fail_path {
                 Err("simulated trash failure".to_string())
             } else {
-                Ok(())
+                Ok(None)
             }
+        }
+    }
+
+    /// Reports a landed-in-trash receipt for every path (macOS behavior).
+    struct ReceiptTrasher;
+    impl Trasher for ReceiptTrasher {
+        fn send_to_trash(&self, path: &Path) -> Result<Option<std::path::PathBuf>, String> {
+            let name = path.file_name().unwrap().to_string_lossy();
+            Ok(Some(std::path::PathBuf::from(format!("/fake/trash/{name}"))))
         }
     }
 
@@ -321,6 +346,41 @@ mod tests {
             .query_row("SELECT file_id FROM ontology_cleanup_log", [], |r| r.get(0))
             .unwrap();
         assert_eq!(logged, 2);
+    }
+
+    #[test]
+    fn trash_receipt_is_persisted_when_reported() {
+        let mut conn = migrated_conn();
+        add_scratch_file(&conn, 1, "/root/dist/a.js", 100);
+        let plan_id = create_plan(&conn, &CleanupScope::default()).unwrap();
+
+        execute_plan_with(&mut conn, plan_id, &ReceiptTrasher, 90).unwrap();
+
+        let trashed_path: Option<String> = conn
+            .query_row("SELECT trashed_path FROM ontology_cleanup_log WHERE file_id=1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(trashed_path.as_deref(), Some("/fake/trash/a.js"));
+    }
+
+    #[test]
+    fn missing_trash_receipt_still_logs_the_cleanup() {
+        let mut conn = migrated_conn();
+        add_scratch_file(&conn, 1, "/root/dist/a.js", 100);
+        let plan_id = create_plan(&conn, &CleanupScope::default()).unwrap();
+
+        let trasher = RecordingTrasher::new();
+        let result = execute_plan_with(&mut conn, plan_id, &trasher, 90).unwrap();
+        assert_eq!(result.cleaned, 1);
+
+        let (status, trashed_path): (String, Option<String>) = conn
+            .query_row(
+                "SELECT restore_status, trashed_path FROM ontology_cleanup_log WHERE file_id=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "in_recycle_bin");
+        assert!(trashed_path.is_none());
     }
 
     #[test]

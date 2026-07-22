@@ -335,6 +335,9 @@ export type NativeCleanupLogEntry = {
   reason: string;
   restore_status: "pending" | "in_recycle_bin" | "restored" | "expired";
   expires_at: number | null;
+  /** Where the item landed in the recycle bin (macOS trash receipt); null on
+   * Windows/Linux and for entries cleaned before trash-receipt tracking. */
+  trashed_path: string | null;
 };
 
 export async function buildCleanupPlan(

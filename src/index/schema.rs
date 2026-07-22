@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 10;
+pub const CURRENT_SCHEMA_VERSION: u32 = 11;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -503,6 +503,17 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (10, strftime('%s', 'now'));
 "#;
 
+pub const MIGRATION_011: &str = r#"
+-- macOS restore-from-Trash: TCC forbids enumerating ~/.Trash without Full Disk
+-- Access, so the exact landed path reported by trashItemAtURL at delete time is
+-- the only reliable restore handle. NULL on Windows/Linux (they restore via the
+-- recycle-bin API) and for rows cleaned before this migration.
+ALTER TABLE ontology_cleanup_log ADD COLUMN trashed_path TEXT;
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (11, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -514,6 +525,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (8, MIGRATION_008),
     (9, MIGRATION_009),
     (10, MIGRATION_010),
+    (11, MIGRATION_011),
 ];
 
 #[cfg(test)]
@@ -522,8 +534,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 10);
-        assert_eq!(ALL_MIGRATIONS.len(), 10);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 11);
+        assert_eq!(ALL_MIGRATIONS.len(), 11);
     }
 
     #[test]

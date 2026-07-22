@@ -20,23 +20,28 @@ pub struct CleanupLogEntry {
     pub reason: String,
     pub restore_status: String,
     pub expires_at: Option<i64>,
+    /// Where the item landed in the recycle bin, when the platform reported it
+    /// at delete time (macOS receipt). NULL on Windows/Linux, which restore via
+    /// the recycle-bin API, and for rows cleaned before schema v11.
+    pub trashed_path: Option<String>,
 }
 
 /// Abstraction over "restore this path from the OS recycle bin to its original
-/// location". Production uses the `trash` crate's `os_limited` module where the
-/// platform supports it; tests inject a fake.
+/// location". Production uses the `trash` crate's `os_limited` module on
+/// Windows/Linux and the recorded trash receipt on macOS; tests inject a fake.
 pub trait Restorer {
-    fn restore(&self, original_path: &Path) -> Result<(), String>;
+    fn restore(&self, original_path: &Path, trashed_path: Option<&Path>) -> Result<(), String>;
 }
 
 /// Production restorer. On Windows and Linux (freedesktop) it finds the most
 /// recently trashed item whose original location matches and restores it. On
-/// platforms without `os_limited` support (e.g. macOS) it returns an error.
+/// macOS (no `os_limited` support) it moves the exact path recorded at delete
+/// time back — the only handle TCC lets us use without Full Disk Access.
 pub struct SystemRestorer;
 
 impl Restorer for SystemRestorer {
     #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
-    fn restore(&self, original_path: &Path) -> Result<(), String> {
+    fn restore(&self, original_path: &Path, _trashed_path: Option<&Path>) -> Result<(), String> {
         use trash::os_limited;
         let items = os_limited::list().map_err(|e| e.to_string())?;
         // Match by reconstructed original path (original_parent + name).
@@ -56,8 +61,22 @@ impl Restorer for SystemRestorer {
         os_limited::restore_all([newest]).map_err(|e| e.to_string())
     }
 
-    #[cfg(not(any(target_os = "windows", all(unix, not(target_os = "macos")))))]
-    fn restore(&self, _original_path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    fn restore(&self, original_path: &Path, trashed_path: Option<&Path>) -> Result<(), String> {
+        let trashed = trashed_path.ok_or_else(|| {
+            "no Trash location was recorded for this item (cleaned before trash-receipt \
+             tracking) — drag it out of the Trash manually"
+                .to_string()
+        })?;
+        crate::native::macos_trash::restore_by_receipt(trashed, original_path)
+    }
+
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(unix, not(target_os = "macos"))
+    )))]
+    fn restore(&self, _original_path: &Path, _trashed_path: Option<&Path>) -> Result<(), String> {
         Err("restore-from-recycle-bin is not supported on this platform".to_string())
     }
 }
@@ -69,7 +88,7 @@ pub fn recently_cleaned(
 ) -> Result<Vec<CleanupLogEntry>, OntologyError> {
     let mut stmt = conn.prepare_cached(
         "SELECT id, cleanup_plan_id, file_id, original_path, size, cleaned_at, reason,
-                restore_status, expires_at
+                restore_status, expires_at, trashed_path
          FROM ontology_cleanup_log
          ORDER BY cleaned_at DESC
          LIMIT ?1 OFFSET ?2",
@@ -86,7 +105,7 @@ pub fn get_log_entry(
 ) -> Result<Option<CleanupLogEntry>, OntologyError> {
     let mut stmt = conn.prepare_cached(
         "SELECT id, cleanup_plan_id, file_id, original_path, size, cleaned_at, reason,
-                restore_status, expires_at
+                restore_status, expires_at, trashed_path
          FROM ontology_cleanup_log WHERE id = ?1",
     )?;
     Ok(stmt.query_row(params![entry_id], row_to_entry).optional()?)
@@ -108,7 +127,10 @@ pub fn restore_with(
     }
 
     restorer
-        .restore(Path::new(&entry.original_path))
+        .restore(
+            Path::new(&entry.original_path),
+            entry.trashed_path.as_deref().map(Path::new),
+        )
         .map_err(OntologyError::Populator)?;
 
     conn.execute(
@@ -154,6 +176,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanupLogEntry> {
         reason: row.get(6)?,
         restore_status: row.get(7)?,
         expires_at: row.get(8)?,
+        trashed_path: row.get(9)?,
     })
 }
 
@@ -212,8 +235,12 @@ mod tests {
         }
     }
     impl Restorer for OkRestorer {
-        fn restore(&self, original_path: &Path) -> Result<(), String> {
-            self.seen.lock().unwrap().push(original_path.display().to_string());
+        fn restore(&self, original_path: &Path, trashed_path: Option<&Path>) -> Result<(), String> {
+            self.seen.lock().unwrap().push(format!(
+                "{}|{}",
+                original_path.display(),
+                trashed_path.map(|p| p.display().to_string()).unwrap_or_default()
+            ));
             Ok(())
         }
     }
@@ -236,6 +263,23 @@ mod tests {
             .query_row("SELECT deleted_at FROM files WHERE id=1", [], |r| r.get(0))
             .unwrap();
         assert!(deleted_at.is_none(), "deleted_at must be cleared on restore");
+    }
+
+    #[test]
+    fn restore_forwards_the_recorded_trash_receipt() {
+        let mut conn = migrated_conn();
+        let entry_id = seed_cleaned_file(&conn, Some(i64::MAX));
+        conn.execute(
+            "UPDATE ontology_cleanup_log SET trashed_path='/fake/trash/a.js' WHERE id=?1",
+            params![entry_id],
+        )
+        .unwrap();
+
+        let restorer = OkRestorer::new();
+        restore_with(&mut conn, entry_id, &restorer).unwrap();
+
+        let seen = restorer.seen.lock().unwrap();
+        assert_eq!(seen.as_slice(), ["/root/dist/a.js|/fake/trash/a.js"]);
     }
 
     #[test]
