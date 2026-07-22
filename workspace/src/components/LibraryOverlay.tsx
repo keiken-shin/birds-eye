@@ -88,7 +88,7 @@ export function LibraryOverlay() {
     >
       <div className="px-4.5 py-3.5">
         <div className="mb-3 text-105 leading-relaxed text-dim">
-          Everything Bird's Eye cleans goes to the Windows Recycle Bin first and is tracked here
+          Everything Bird's Eye cleans goes to the OS recycle bin first and is tracked here
           for 30 days — restore it with one click. Files deleted outside Bird's Eye don't appear.
         </div>
         {loading && <div className="py-6 text-center text-12 text-muted">Loading cleaned items…</div>}

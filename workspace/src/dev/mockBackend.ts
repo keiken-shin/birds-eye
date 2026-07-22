@@ -515,6 +515,7 @@ type CleanupLogFix = {
   reason: string;
   restore_status: "pending" | "in_recycle_bin" | "restored" | "expired";
   expires_at: number | null;
+  trashed_path: string | null;
 };
 
 let CLEANUP_LOG: CleanupLogFix[] = [
@@ -528,6 +529,7 @@ let CLEANUP_LOG: CleanupLogFix[] = [
     reason: "scratch",
     restore_status: "in_recycle_bin",
     expires_at: NOW + 24 * DAY,
+    trashed_path: null,
   },
   {
     id: 2,
@@ -539,6 +541,7 @@ let CLEANUP_LOG: CleanupLogFix[] = [
     reason: "safe-derivative",
     restore_status: "in_recycle_bin",
     expires_at: NOW + 24 * DAY,
+    trashed_path: null,
   },
 ];
 
@@ -964,6 +967,7 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
               reason: c.reason,
               restore_status: "in_recycle_bin",
               expires_at: cleanedAt + 30 * DAY,
+              trashed_path: null,
             },
             ...CLEANUP_LOG,
           ];

@@ -1,9 +1,11 @@
 //! Cleanup engine: candidate predicate, plan model, recycle-bin-first executor,
 //! restore path. See spec §7 and the constitutional defenses in §3.
 //!
-//! All platform-specific recycle-bin calls live in `executor.rs` / `restore.rs`.
-//! No code path in this module (or anywhere in `src/ontology/`) hard-deletes or
-//! renames files via `std::fs` — invariant #1.
+//! All platform-specific recycle-bin calls live in `executor.rs` / `restore.rs`,
+//! delegating to the `trash` crate (Windows/Linux) or `native::macos_trash`
+//! (macOS trash receipt). No code path in this module (or anywhere in
+//! `src/ontology/`) hard-deletes or renames files via `std::fs` — invariant #1;
+//! the platform modules own the filesystem mechanics.
 
 pub mod executor;
 pub mod plans;

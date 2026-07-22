@@ -169,7 +169,7 @@ export function ReviewModal() {
       clearStaged();
       closeReview();
       // Undo covers only the audited cleanup-log entries — recycled overrides
-      // are restored from the Windows Recycle Bin, not from here.
+      // are restored from the OS recycle bin, not from here.
       if (entryIds.length > 0 || freed > 0) setUndo({ entryIds, freed });
       await refreshData();
     } catch (e) {
@@ -353,7 +353,7 @@ export function ReviewModal() {
                 ) : (
                   <div className="mb-4.5 flex flex-col gap-2">
                     <div className="text-105 leading-relaxed text-dim">
-                      Overrides skip the safety predicate. Files go to the Windows Recycle Bin;
+                      Overrides skip the safety predicate. Files go to the OS recycle bin;
                       restore them from there, not from Recently cleaned.
                     </div>
                     {heldBack.map((s) => {

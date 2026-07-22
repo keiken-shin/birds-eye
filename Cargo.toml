@@ -18,6 +18,16 @@ trash = "3"
 # Restart Manager: name the processes holding a locked file.
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_RestartManager"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# trashItemAtURL with a non-nil resultingItemURL: the `trash` crate discards the
+# landed path, which restore-from-Trash needs. Same objc the crate already pulls in.
+objc = "0.2"
+
+[lints.rust]
+# objc 0.2's macros expand a `cfg(feature = "cargo-clippy")` probe; declare it
+# expected so `unexpected_cfgs` stays active for everything else.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+
 [lib]
 name = "birds_eye"
 path = "src/lib.rs"
