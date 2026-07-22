@@ -67,8 +67,9 @@ from [GitHub Releases](https://github.com/keiken-shin/birds-eye/releases/latest)
 
 ## Build from source
 
-Prereqs: [Rust](https://rustup.rs/), [Node 20+](https://nodejs.org/), and on Windows the
-[Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/).
+Prereqs: [Rust](https://rustup.rs/), [Node 20+](https://nodejs.org/), and the platform's
+[Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) (Xcode Command Line
+Tools on macOS, WebView2 on Windows).
 
 ```powershell
 git clone https://github.com/keiken-shin/birds-eye.git
@@ -78,8 +79,13 @@ npm run tauri:dev        # dev desktop shell (vite + Rust backend)
 npm run tauri:build:app  # release executable (no installer bundling)
 ```
 
-The executable lands at `src-tauri/target/release/birds-eye-desktop.exe`. Full installer
-bundling (`npm run tauri:build`) needs the WiX toolchain on Windows.
+On Windows the executable lands at `src-tauri/target/release/birds-eye-desktop.exe`;
+full installer bundling (`npm run tauri:build`) needs the WiX toolchain.
+
+On macOS, `scripts/build-macos.sh` produces the app bundle and a DMG
+(`src-tauri/target/release/bundle/macos/Birds Eye.app` and
+`.../bundle/dmg/birds-eye-macos-<arch>.dmg`). The build is unsigned — first launch
+on another machine needs the standard right-click → Open Gatekeeper bypass.
 
 Frontend-only development works in a plain browser — `npm run dev` serves the workspace against
 a deterministic mock backend with realistic fixture data.
@@ -87,8 +93,8 @@ a deterministic mock backend with realistic fixture data.
 ## Verify
 
 ```powershell
-cargo test                                        # Rust: scanner, index, ontology (190+ tests)
-cargo check --manifest-path src-tauri\Cargo.toml  # desktop shell
+cargo test                                        # Rust: scanner, index, ontology (200+ tests)
+cargo check --manifest-path src-tauri/Cargo.toml  # desktop shell
 cd workspace
 npm run build                                     # tsc + vite
 npx vitest run                                    # frontend unit tests
