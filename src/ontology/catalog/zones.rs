@@ -16,15 +16,40 @@ pub fn is_drive_root(path: &str) -> bool {
 /// True when `path` is the zone itself or lives underneath it. Prefix matching
 /// alone would put `DownloadsOld` inside `Downloads`, so a separator boundary is
 /// required.
+///
+/// Depth is asymmetric by design: a drive-root zone (e.g. `D:\`) means "files
+/// dumped loose at the root of the drive", so it matches only the root itself
+/// or a *direct* child (`D:\installer.exe`), never anything nested further down
+/// — otherwise the entire drive would count as one giant inbox. Every other
+/// zone (Downloads, Desktop, ...) matches at any depth, because a subfolder of
+/// Downloads is still Downloads.
+///
+/// Comparisons are done on byte slices rather than `str` indices, so a zone
+/// whose byte length happens to land mid-character in a non-ASCII `path`
+/// cannot panic on a char-boundary violation.
 pub fn is_in_zone(path: &str, zones: &[String]) -> bool {
+    let path = path.as_bytes();
     zones.iter().any(|zone| {
-        let zone = zone.trim_end_matches(['\\', '/']);
+        let zone_str = zone.trim_end_matches(['\\', '/']);
+        let zone = zone_str.as_bytes();
+
         if path.len() == zone.len() {
             return path.eq_ignore_ascii_case(zone);
         }
-        path.len() > zone.len()
-            && path[..zone.len()].eq_ignore_ascii_case(zone)
-            && matches!(path.as_bytes()[zone.len()], b'\\' | b'/')
+        if path.len() < zone.len()
+            || !path[..zone.len()].eq_ignore_ascii_case(zone)
+            || !matches!(path[zone.len()], b'\\' | b'/')
+        {
+            return false;
+        }
+
+        if is_drive_root(zone_str) {
+            // Direct child only: no further separator past the zone prefix.
+            let remainder = &path[zone.len() + 1..];
+            !remainder.contains(&b'\\') && !remainder.contains(&b'/')
+        } else {
+            true
+        }
     })
 }
 
@@ -114,5 +139,49 @@ mod tests {
             !zones.iter().any(|z| z == "D:\\Projects"),
             "a deep scan root is not a drive root: {zones:?}"
         );
+    }
+
+    #[test]
+    fn non_ascii_paths_do_not_panic() {
+        // The exact case that used to panic: a zone byte length ("C:\ab", 5 bytes)
+        // that lands mid-character in a non-ASCII path ('日' is 3 bytes, occupying
+        // path bytes 3..6 of "C:\日x").
+        let zones = vec!["C:\\ab".to_string()];
+        assert!(!is_in_zone("C:\\日x", &zones));
+
+        // Non-ASCII folder names still compare correctly when they do match.
+        let zones = vec!["C:\\日".to_string()];
+        assert!(is_in_zone("C:\\日", &zones));
+        assert!(is_in_zone("C:\\日\\x.txt", &zones));
+        // A sibling that merely shares the byte prefix is still excluded.
+        assert!(!is_in_zone("C:\\日ese\\x.txt", &zones));
+    }
+
+    #[test]
+    fn drive_root_zone_only_matches_root_and_direct_children() {
+        let zones = vec!["D:\\".to_string()];
+        assert!(is_in_zone("D:\\", &zones));
+        assert!(is_in_zone("D:\\loose.exe", &zones));
+        assert!(!is_in_zone("D:\\Projects\\x.txt", &zones));
+    }
+
+    #[test]
+    fn non_drive_root_zone_matches_any_depth() {
+        let zones = vec!["C:\\Users\\a\\Downloads".to_string()];
+        assert!(is_in_zone("C:\\Users\\a\\Downloads\\sub\\x.pdf", &zones));
+    }
+
+    #[test]
+    fn trailing_separator_on_zone_behaves_like_no_trailing_separator() {
+        // Drive root, with and without a trailing separator.
+        assert!(is_in_zone("D:\\loose.exe", &["D:\\".to_string()]));
+        assert!(is_in_zone("D:\\loose.exe", &["D:".to_string()]));
+        assert!(!is_in_zone("D:\\Projects\\x.txt", &["D:\\".to_string()]));
+        assert!(!is_in_zone("D:\\Projects\\x.txt", &["D:".to_string()]));
+
+        // A regular zone, with and without a trailing separator.
+        let path = "C:\\Users\\a\\Downloads\\x.exe";
+        assert!(is_in_zone(path, &["C:\\Users\\a\\Downloads".to_string()]));
+        assert!(is_in_zone(path, &["C:\\Users\\a\\Downloads\\".to_string()]));
     }
 }
