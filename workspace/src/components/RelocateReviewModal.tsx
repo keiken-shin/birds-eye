@@ -21,7 +21,8 @@ import { SectionLabel } from "./ui/Card";
  * per-file failures without losing the ones that succeeded.
  */
 export function RelocateReviewModal() {
-  const { review, closeReview, stagedMoves, clearStagedMoves, indexPath, setUndo } = useWorkspace();
+  const { review, closeReview, stagedMoves, toggleStagedMove, clearStagedMoves, indexPath, setUndo } =
+    useWorkspace();
   const { activeEntry, refreshData } = useIndexData();
   const { view: scanView, enqueue } = useScanController();
 
@@ -32,11 +33,11 @@ export function RelocateReviewModal() {
   const [failures, setFailures] = useState<Array<{ path: string; reason: string }>>([]);
   const reqId = useRef(0);
   // Snapshot, read only when the build effect fires — NOT a dependency of that
-  // effect. execute() clears stagedMoves on completion (including on partial
-  // failure, so a spent plan can't be re-submitted); if the effect depended on
-  // stagedMoves directly, that clear would re-trigger it while the modal is
-  // still showing the failure list, wiping setFailures(...) and rebuilding an
-  // empty plan out from under the user.
+  // effect. execute() mutates stagedMoves on completion (fully clears on total
+  // success, prunes only the succeeded entries on partial failure); if the
+  // effect depended on stagedMoves directly, that mutation would re-trigger it
+  // while the modal is still showing the failure list, wiping setFailures(...)
+  // and rebuilding a plan out from under the user.
   const stagedMovesRef = useRef(stagedMoves);
   stagedMovesRef.current = stagedMoves;
 
@@ -84,7 +85,20 @@ export function RelocateReviewModal() {
       if (result.pairs.length) {
         setUndo({ kind: "relocate", pairs: result.pairs });
       }
-      clearStagedMoves();
+      if (result.failed.length) {
+        // Partial failure: only drop the moves that actually landed on disk,
+        // so the still-unmoved files stay staged and the tray stays reopenable
+        // for a retry. This can't double-move a file — reopening the review
+        // re-runs buildRelocationPlan, which re-verifies each staged path
+        // against the index's deleted_at column and drops anything already
+        // moved into `plan.dropped` instead of feeding it to execute again.
+        const movedFrom = new Set(result.pairs.map((p) => p.from));
+        for (const m of stagedMoves) {
+          if (movedFrom.has(m.path)) toggleStagedMove(m);
+        }
+      } else {
+        clearStagedMoves();
+      }
       await refreshData();
       // Unlike MoveDialog, always enqueue — the scan queue FIFOs rather than
       // requiring idle, so a heal is always in line once files move. Root must
@@ -99,17 +113,37 @@ export function RelocateReviewModal() {
     } finally {
       setBusy(false);
     }
-  }, [plan, indexPath, setUndo, clearStagedMoves, refreshData, enqueue, activeEntry, closeReview]);
+  }, [
+    plan,
+    indexPath,
+    setUndo,
+    stagedMoves,
+    toggleStagedMove,
+    clearStagedMoves,
+    refreshData,
+    enqueue,
+    activeEntry,
+    closeReview,
+  ]);
 
   if (review !== "relocate") return null;
 
   const scanning = scanView.status === "scanning";
 
+  // Guard the header's X the same way Cancel already is: closeReview alone
+  // would let the X unmount the modal mid-execute, so a partial-failure
+  // result lands in setFailures(...) on a component that no longer renders —
+  // the failure list the user is meant to see is silently lost. Mirrors
+  // ReviewModal's `close` and MoveDialog's guarded onClose.
+  const close = () => {
+    if (!busy) closeReview();
+  };
+
   return (
     <OverlayShell
       title="Review before moving"
       meta={plan ? `${plan.total_files} file${plan.total_files === 1 ? "" : "s"} · ${formatBytes(plan.total_bytes)}` : undefined}
-      onClose={closeReview}
+      onClose={close}
       width={640}
       locked={busy}
       footer={
@@ -120,7 +154,7 @@ export function RelocateReviewModal() {
               : "Nothing is deleted — files are moved, and Undo puts them back."}
           </p>
           <div className="flex flex-none gap-1.5">
-            <Button variant="ghost" disabled={busy} onClick={closeReview}>
+            <Button variant="ghost" disabled={busy} onClick={close}>
               Cancel
             </Button>
             <Button
