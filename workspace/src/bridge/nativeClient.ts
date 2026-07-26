@@ -504,6 +504,128 @@ export async function treemapLensData(indexPath: string) {
   });
 }
 
+// ---- Ontology: cataloging ----
+
+export type NativeRelocationMember = {
+  file_id: number;
+  path: string;
+  name: string;
+  size: number;
+};
+
+export type NativeRelocationPayload = {
+  fingerprint: string;
+  member_hash: string;
+  destination: string;
+  destination_exists: boolean;
+  source: "rule" | "learned" | "template";
+  reason: string;
+  zone: string;
+  kind: string;
+  member_count: number;
+  total_bytes: number;
+  members: NativeRelocationMember[];
+};
+
+export type NativeRelocationPlanItem = {
+  id: number;
+  file_id: number;
+  from_path: string;
+  to_path: string;
+  size: number;
+  status: string;
+  note: string | null;
+};
+
+export type NativeRelocationPlan = {
+  plan_id: number;
+  total_files: number;
+  total_bytes: number;
+  items: NativeRelocationPlanItem[];
+  dropped: Array<{ path: string; reason: string }>;
+};
+
+export type NativeRelocationResult = {
+  plan_id: number;
+  moved: number;
+  bytes_moved: number;
+  pairs: Array<{ from: string; to: string }>;
+  failed: Array<{ path: string; reason: string }>;
+};
+
+export type NativeCatalogRule = {
+  id: number;
+  name: string;
+  criteria: { kind: string | null; name_contains: string | null; zone: string | null };
+  destination: string;
+  source: string;
+  enabled: boolean;
+};
+
+/** Pending relocation cards. Reuses the discoveries queue, filtered by kind. */
+export async function relocationCards(indexPath: string, limit = 50) {
+  return invoke<NativeDiscovery[]>("discoveries", {
+    request: { index_path: indexPath, kind: "relocation", limit },
+  });
+}
+
+/** The full member list for one card — the payload embeds only the first 50. */
+export async function relocationMembers(indexPath: string, discoveryId: number) {
+  return invoke<NativeRelocationMember[]>("relocation_members", {
+    request: { index_path: indexPath, discovery_id: discoveryId },
+  });
+}
+
+/** Re-verify the staged moves and persist a draft plan. */
+export async function buildRelocationPlan(
+  indexPath: string,
+  moves: Array<{ file_id: number; from: string; to: string; discovery_id: number | null }>
+) {
+  return invoke<NativeRelocationPlan>("relocation_plan", {
+    request: { index_path: indexPath, moves },
+  });
+}
+
+export async function executeRelocationPlan(indexPath: string, planId: number) {
+  return invoke<NativeRelocationResult>("execute_relocation_plan", {
+    request: { index_path: indexPath, plan_id: planId },
+  });
+}
+
+export async function catalogRules(indexPath: string) {
+  return invoke<NativeCatalogRule[]>("catalog_rules", {
+    request: { index_path: indexPath },
+  });
+}
+
+export async function saveCatalogRule(
+  indexPath: string,
+  rule: {
+    name: string;
+    kind?: string | null;
+    nameContains?: string | null;
+    zone?: string | null;
+    destination: string;
+    source: "saved-after-move" | "saved-after-edit";
+  }
+) {
+  return invoke<number>("save_catalog_rule", {
+    request: {
+      index_path: indexPath,
+      name: rule.name,
+      kind: rule.kind ?? null,
+      name_contains: rule.nameContains ?? null,
+      zone: rule.zone ?? null,
+      destination: rule.destination,
+      source: rule.source,
+    },
+  });
+}
+
+export async function deleteCatalogRule(indexPath: string, id: number) {
+  await invoke("delete_catalog_rule", { request: { index_path: indexPath, id } });
+}
+
 // ---- Shared display constants ----
 
 export const REASON_LABELS: Record<string, string> = {

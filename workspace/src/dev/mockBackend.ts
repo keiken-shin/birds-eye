@@ -502,6 +502,75 @@ let DISCOVERIES: DiscoveryFix[] = [
 let ontologyEnabled = true;
 
 /* ------------------------------------------------------------------ */
+/* Relocation cards / catalog rules                                    */
+/* ------------------------------------------------------------------ */
+
+// Relocation cards are Discovery rows (kind: "relocation") — `status` mirrors
+// the real DiscoveryStatus enum's serde-default casing ("Pending"), same as
+// DISCOVERIES above, so both share the "discoveries" case's filter.
+let RELOCATION_CARDS = [
+  {
+    id: 9001,
+    kind: "relocation",
+    status: "Pending",
+    confidence: 0.91,
+    potential_bytes_unlocked: 4_812_000_000,
+    created_at: 1_800_000_000,
+    resolved_at: null,
+    payload: JSON.stringify({
+      fingerprint: "fp-installers",
+      member_hash: "mh-1",
+      destination: "D:\\Software\\Installers",
+      destination_exists: true,
+      source: "learned",
+      reason: "87% of your installers already live here",
+      zone: j("Downloads"),
+      kind: "installer",
+      member_count: 14,
+      total_bytes: 4_812_000_000,
+      members: Array.from({ length: 14 }, (_, i) => ({
+        file_id: 5000 + i,
+        path: `${j("Downloads")}\\setup-${i}.exe`,
+        name: `setup-${i}.exe`,
+        size: 343_714_285,
+      })),
+    }),
+  },
+  {
+    id: 9002,
+    kind: "relocation",
+    status: "Pending",
+    confidence: 0.55,
+    potential_bytes_unlocked: 92_000_000,
+    created_at: 1_800_000_000,
+    resolved_at: null,
+    payload: JSON.stringify({
+      fingerprint: "fp-shots",
+      member_hash: "mh-2",
+      // Destination doesn't exist yet — exercises the "will be created" path.
+      destination: j("Pictures", "Screenshots"),
+      destination_exists: false,
+      source: "template",
+      reason: "screenshots usually belong together",
+      zone: j("Desktop"),
+      kind: "screenshot",
+      member_count: 31,
+      total_bytes: 92_000_000,
+      members: Array.from({ length: 31 }, (_, i) => ({
+        file_id: 6000 + i,
+        path: `${j("Desktop")}\\Screenshot ${i}.png`,
+        name: `Screenshot ${i}.png`,
+        size: 2_967_741,
+      })),
+    }),
+  },
+];
+
+let CATALOG_RULES: Array<Record<string, unknown>> = [];
+/** Flip to true in the browser console to exercise the review gate's error path. */
+export let mockRelocationFails = false;
+
+/* ------------------------------------------------------------------ */
 /* Cleanup log                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -883,9 +952,9 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       return done({ ran: true });
     case "discoveries":
       return done(
-        DISCOVERIES.filter((d) => d.status === "Pending" && d.kind === request.kind).sort(
-          (a, b) => b.potential_bytes_unlocked - a.potential_bytes_unlocked
-        )
+        [...DISCOVERIES, ...RELOCATION_CARDS]
+          .filter((d) => d.status === "Pending" && d.kind === request.kind)
+          .sort((a, b) => b.potential_bytes_unlocked - a.potential_bytes_unlocked)
       );
     case "confirm_discovery":
     case "reject_discovery": {
@@ -895,7 +964,92 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
           ? { ...d, status: cmd === "confirm_discovery" ? "Confirmed" : "Rejected", resolved_at: NOW }
           : d
       );
+      RELOCATION_CARDS = RELOCATION_CARDS.filter((c) => c.id !== id);
       return done(null);
+    }
+    case "relocation_members": {
+      const id = Number(request.discovery_id);
+      const card = RELOCATION_CARDS.find((c) => c.id === id);
+      if (!card) return done([]);
+      return done(JSON.parse(card.payload).members);
+    }
+    case "relocation_plan": {
+      const moves = (request.moves ?? []) as Array<{
+        file_id: number;
+        from: string;
+        to: string;
+        discovery_id: number | null;
+      }>;
+      // One dropped item whenever more than three are staged, so the "dropped"
+      // branch of the review gate is reachable in the browser.
+      const dropped = moves.length > 3 ? [{ path: moves[0].from, reason: "no longer on disk" }] : [];
+      const kept = moves.slice(dropped.length);
+      return done({
+        plan_id: 4242,
+        total_files: kept.length,
+        total_bytes: kept.length * 100_000_000,
+        items: kept.map((m, i) => ({
+          id: i + 1,
+          file_id: m.file_id,
+          from_path: m.from,
+          to_path: m.to,
+          size: 100_000_000,
+          status: "planned",
+          note: null,
+        })),
+        dropped,
+      });
+    }
+    case "execute_relocation_plan": {
+      const planId = Number(request.plan_id);
+      if (mockRelocationFails) {
+        return done({
+          plan_id: planId,
+          moved: 0,
+          bytes_moved: 0,
+          pairs: [],
+          failed: [{ path: `${j("Downloads")}\\setup-0.exe`, reason: "locked by another process" }],
+        });
+      }
+      const card = RELOCATION_CARDS[0];
+      const payload = JSON.parse(card.payload);
+      const pairs = payload.members.slice(0, 3).map((m: { path: string; name: string }) => ({
+        from: m.path,
+        to: `${payload.destination}\\${m.name}`,
+      }));
+      RELOCATION_CARDS = RELOCATION_CARDS.filter((c) => c.id !== card.id);
+      return done({
+        plan_id: planId,
+        moved: pairs.length,
+        bytes_moved: pairs.length * 100_000_000,
+        pairs,
+        failed: [],
+      });
+    }
+    case "catalog_rules":
+      return done(CATALOG_RULES);
+    case "save_catalog_rule": {
+      const id = CATALOG_RULES.length + 1;
+      CATALOG_RULES = [
+        ...CATALOG_RULES,
+        {
+          id,
+          name: request.name,
+          criteria: {
+            kind: request.kind ?? null,
+            name_contains: request.name_contains ?? null,
+            zone: request.zone ?? null,
+          },
+          destination: request.destination,
+          source: request.source,
+          enabled: true,
+        },
+      ];
+      return done(id);
+    }
+    case "delete_catalog_rule": {
+      CATALOG_RULES = CATALOG_RULES.filter((r) => r.id !== Number(request.id));
+      return done(undefined);
     }
     case "confirm_discovery_pattern":
     case "reject_discovery_pattern": {
