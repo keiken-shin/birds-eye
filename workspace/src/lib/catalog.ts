@@ -6,15 +6,19 @@ export type RelocationCard = {
   payload: NativeRelocationPayload;
 };
 
-/** A row whose payload will not parse is dropped, never rendered half-built. */
+/** A row whose payload will not parse — or parses to something other than an object — is dropped, never rendered half-built. */
 export function parseCards(rows: NativeDiscovery[]): RelocationCard[] {
   const cards: RelocationCard[] = [];
   for (const row of rows) {
     try {
+      const payload: unknown = JSON.parse(row.payload);
+      if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+        continue;
+      }
       cards.push({
         id: row.id,
         confidence: row.confidence,
-        payload: JSON.parse(row.payload) as NativeRelocationPayload,
+        payload: payload as NativeRelocationPayload,
       });
     } catch {
       // Unparseable payload — skip it rather than break the view.
