@@ -249,4 +249,91 @@ mod tests {
             "9 files is under the 10-file floor"
         );
     }
+
+    #[test]
+    fn learned_home_threshold_is_inclusive_at_exactly_10_files() {
+        // MIN_LEARNED_FILES rejects on `<`, so exactly 10 files must still
+        // qualify (the floor is inclusive, not exclusive).
+        let conn = migrated_conn();
+        add_folder(&conn, 1, "D:\\Docs");
+        add_files(&conn, 1, "D:\\Docs", "model", 10, 100);
+
+        let zones = vec!["C:\\Inbox".to_string()];
+        let got = infer(&conn, &zones, "C:\\Inbox", "model", "m.gguf", "model")
+            .unwrap()
+            .expect("a destination");
+        assert_eq!(got.path, "D:\\Docs");
+        assert_eq!(got.source, "learned");
+    }
+
+    #[test]
+    fn learned_home_threshold_is_inclusive_at_exactly_60_percent_share() {
+        // MIN_LEARNED_SHARE rejects on `<`, so a share of exactly 60% must
+        // still qualify (30 of 50 outside files = 0.6 exactly).
+        let conn = migrated_conn();
+        add_folder(&conn, 1, "D:\\Docs");
+        add_folder(&conn, 2, "D:\\Stray");
+        add_files(&conn, 1, "D:\\Docs", "document", 30, 100);
+        add_files(&conn, 2, "D:\\Stray", "document", 20, 300);
+
+        let zones = vec!["C:\\Inbox".to_string()];
+        let got = infer(&conn, &zones, "C:\\Inbox", "document", "a.pdf", "document")
+            .unwrap()
+            .expect("a destination");
+        assert_eq!(got.path, "D:\\Docs");
+        assert_eq!(got.source, "learned");
+        assert!(got.reason.contains("60%"), "reason states the evidence: {}", got.reason);
+    }
+
+    #[test]
+    fn learned_home_denominator_excludes_zone_resident_files() {
+        // Pins the outside-only denominator. `C:\Inbox` holds 30 zone-resident
+        // `document` files that must NOT count toward the share: with them
+        // folded in, share would be 18 / (18 + 2 + 30) = 36%, below the 60%
+        // floor, and this would return a template instead of `D:\Docs`. Only
+        // the correct (outside-only) denominator of 18/20 = 90% passes.
+        let conn = migrated_conn();
+        add_folder(&conn, 1, "C:\\Inbox");
+        add_folder(&conn, 2, "D:\\Docs");
+        add_folder(&conn, 3, "D:\\Stray");
+        add_files(&conn, 1, "C:\\Inbox", "document", 30, 100);
+        add_files(&conn, 2, "D:\\Docs", "document", 18, 200);
+        add_files(&conn, 3, "D:\\Stray", "document", 2, 300);
+
+        let zones = vec!["C:\\Inbox".to_string()];
+        let got = infer(&conn, &zones, "C:\\Inbox", "document", "a.pdf", "document")
+            .unwrap()
+            .expect("a destination");
+        assert_eq!(got.path, "D:\\Docs");
+        assert_eq!(got.source, "learned");
+        assert!(got.reason.contains("90%"), "reason states the evidence: {}", got.reason);
+    }
+
+    #[test]
+    fn malformed_rule_row_does_not_hijack_inference() {
+        // A corrupt `catalog_rules` row (unparseable `criteria`) must not fail
+        // open into a wildcard rule. If it did, being a user rule it would
+        // outrank the learned home below and hijack every suggestion with
+        // `D:\Hijacked`. It must be skipped so inference falls through to
+        // whatever the valid inference would have been.
+        let conn = migrated_conn();
+        conn.execute(
+            "INSERT INTO catalog_rules (name, criteria, destination, source, enabled, created_at)
+             VALUES ('Corrupt', 'not-json', 'D:\\Hijacked', 'saved-after-move', 1, 0)",
+            [],
+        )
+        .unwrap();
+
+        add_folder(&conn, 1, "D:\\Docs");
+        add_folder(&conn, 2, "D:\\Stray");
+        add_files(&conn, 1, "D:\\Docs", "document", 18, 100);
+        add_files(&conn, 2, "D:\\Stray", "document", 2, 300);
+
+        let zones = vec!["C:\\Inbox".to_string()];
+        let got = infer(&conn, &zones, "C:\\Inbox", "document", "a.pdf", "document")
+            .unwrap()
+            .expect("a destination");
+        assert_eq!(got.path, "D:\\Docs");
+        assert_eq!(got.source, "learned");
+    }
 }

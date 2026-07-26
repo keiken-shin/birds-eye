@@ -63,10 +63,18 @@ pub fn list_rules(conn: &Connection) -> Result<Vec<CatalogRule>, OntologyError> 
     let mut out = Vec::new();
     for row in rows {
         let (id, name, criteria, destination, source, enabled) = row?;
+        // Fail closed: `RuleCriteria::default()` is all-`None`, which `matches()`
+        // treats as a wildcard. Defaulting a corrupt row would turn it into a
+        // rule that matches every cluster and (being a user rule) outranks
+        // everything else. Skip the row instead of returning an error, so one
+        // bad row can't abort the whole inference pass.
+        let Ok(criteria) = serde_json::from_str(&criteria) else {
+            continue;
+        };
         out.push(CatalogRule {
             id,
             name,
-            criteria: serde_json::from_str(&criteria).unwrap_or_default(),
+            criteria,
             destination,
             source,
             enabled: enabled != 0,
@@ -171,5 +179,50 @@ mod tests {
             ..rule
         };
         assert!(matches(&broad, "anywhere", "anything", "any.txt"));
+    }
+
+    #[test]
+    fn a_disabled_rule_never_matches() {
+        // Even a rule whose criteria would otherwise match everything must not
+        // fire once disabled.
+        let rule = CatalogRule {
+            id: 1,
+            name: "Disabled".to_string(),
+            criteria: RuleCriteria { kind: None, name_contains: None, zone: None },
+            destination: "D:\\Anywhere".to_string(),
+            source: "saved-after-move".to_string(),
+            enabled: false,
+        };
+        assert!(!matches(&rule, "anywhere", "anything", "any.txt"));
+    }
+
+    #[test]
+    fn malformed_criteria_row_is_skipped_not_wildcarded() {
+        // A row whose `criteria` column fails to parse must fail closed: it is
+        // dropped, not defaulted to `RuleCriteria::default()`. Defaulting would
+        // produce an all-wildcard rule that matches every cluster and, being a
+        // user rule, outranks both the learned home and the template.
+        let conn = migrated_conn();
+        conn.execute(
+            "INSERT INTO catalog_rules (name, criteria, destination, source, enabled, created_at)
+             VALUES ('Corrupt', 'not-json', 'D:\\Anywhere', 'saved-after-move', 1, 0)",
+            [],
+        )
+        .unwrap();
+        let id = create_rule(
+            &conn,
+            &NewCatalogRule {
+                name: "Valid",
+                criteria: &RuleCriteria { kind: Some("invoice".to_string()), name_contains: None, zone: None },
+                destination: "D:\\Finance",
+                source: "saved-after-move",
+            },
+        )
+        .unwrap();
+
+        let rules = list_rules(&conn).unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].id, id);
+        assert_eq!(rules[0].destination, "D:\\Finance");
     }
 }
