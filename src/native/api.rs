@@ -311,9 +311,15 @@ pub fn move_files(request: MoveFilesRequest) -> MoveFilesResponse {
             }
         }
         let result = std::fs::rename(&spec.from, to).or_else(|_| {
-            // Cross-volume move: copy then remove the source.
-            std::fs::copy(&spec.from, to)
-                .and_then(|_| std::fs::remove_file(&spec.from))
+            // Cross-volume move: copy then remove the source. If the source
+            // cannot be removed (commonly a Windows lock), roll the copy back —
+            // otherwise the file exists at BOTH paths while we report failure,
+            // and the retry hits `to.exists()` forever.
+            std::fs::copy(&spec.from, to).and_then(|_| {
+                std::fs::remove_file(&spec.from).inspect_err(|_| {
+                    let _ = std::fs::remove_file(to);
+                })
+            })
         });
         match result {
             Ok(()) => moved_sources.push(spec.from.clone()),
@@ -1637,6 +1643,39 @@ mod tests {
             windows_explorer_path(Path::new(r"\\?\UNC\server\share\photo.jpg")),
             r"\\server\share\photo.jpg"
         );
+    }
+
+    #[test]
+    fn move_reports_failure_without_leaving_a_destination_copy() {
+        let root = test_root("move-orphan");
+        let source_dir = root.join("src");
+        let dest_dir = root.join("dst");
+        fs::create_dir_all(&source_dir).expect("create source dir");
+        fs::create_dir_all(&dest_dir).expect("create dest dir");
+
+        let from = source_dir.join("a.bin");
+        write_file(&from, b"payload");
+
+        // A destination whose parent is a FILE, not a directory: create_dir_all
+        // fails, so nothing may be written and nothing may be reported as moved.
+        let blocker = dest_dir.join("blocker");
+        write_file(&blocker, b"x");
+        let to = blocker.join("a.bin");
+
+        let response = move_files(MoveFilesRequest {
+            moves: vec![MoveSpec {
+                from: from.to_string_lossy().to_string(),
+                to: to.to_string_lossy().to_string(),
+            }],
+            index_path: None,
+        });
+
+        assert_eq!(response.moved, 0);
+        assert_eq!(response.failed.len(), 1);
+        assert!(from.exists(), "the source must survive a failed move");
+        assert!(!to.exists(), "no orphan copy may remain at the destination");
+
+        cleanup(&root);
     }
 
     fn test_root(name: &str) -> PathBuf {
