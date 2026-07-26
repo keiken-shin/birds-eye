@@ -76,11 +76,20 @@ export function RelocateReviewModal() {
   }, [review, indexPath]);
 
   const execute = useCallback(async () => {
-    if (!plan || !indexPath) return;
+    // Once this plan has recorded a failure the button below is disabled, so
+    // this guard only protects against some other trigger re-running it —
+    // re-executing a spent plan (every item already "moved"/"failed", none
+    // "planned") is a no-op on the Rust side ({moved: 0, pairs: [], failed:
+    // []}), and that no-op must never be read as a fresh success.
+    if (!plan || !indexPath || failures.length) return;
     setBusy(true);
     setError(null);
     try {
       const result = await executeRelocationPlan(indexPath, plan.plan_id);
+      if (result.moved === 0 && result.pairs.length === 0 && result.failed.length === 0) {
+        setError("Nothing was moved. Close this review and reopen it from the tray to retry.");
+        return;
+      }
       setFailures(result.failed);
       if (result.pairs.length) {
         setUndo({ kind: "relocate", pairs: result.pairs });
@@ -116,6 +125,7 @@ export function RelocateReviewModal() {
   }, [
     plan,
     indexPath,
+    failures,
     setUndo,
     stagedMoves,
     toggleStagedMove,
@@ -151,6 +161,8 @@ export function RelocateReviewModal() {
           <p className="min-w-0 flex-1 truncate text-105 text-faint">
             {scanning
               ? "A scan is running — wait for it to finish before moving files."
+              : failures.length
+              ? "Some files couldn't be moved. Close this review and reopen it from the tray to retry them."
               : "Nothing is deleted — files are moved, and Undo puts them back."}
           </p>
           <div className="flex flex-none gap-1.5">
@@ -160,7 +172,13 @@ export function RelocateReviewModal() {
             <Button
               variant="primary"
               icon={ArrowRight}
-              disabled={busy || loading || !plan || plan.total_files === 0 || scanning}
+              // Once a partial failure lands, this exact plan is spent — every
+              // item is now "moved" or "failed", none "planned" — so re-running
+              // it would be a silent no-op (see the guard in execute()).
+              // Disabling here means the user always closes and reopens for a
+              // fresh plan built from the files still staged, rather than
+              // hitting that no-op at all.
+              disabled={busy || loading || !plan || plan.total_files === 0 || scanning || failures.length > 0}
               onClick={() => void execute()}
             >
               {busy ? "Moving…" : scanning ? "Scan running" : "Move files"}

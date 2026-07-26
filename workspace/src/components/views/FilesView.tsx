@@ -577,12 +577,12 @@ export function FilesView() {
           <Button
             onClick={() => {
               if (indexPath) {
-                void saveCatalogRule(indexPath, {
+                saveCatalogRule(indexPath, {
                   name: `Files matching “${rulePrompt.text}”`,
                   nameContains: rulePrompt.text,
                   destination: rulePrompt.destination,
                   source: "saved-after-move",
-                });
+                }).catch((e) => setError(e instanceof Error ? e.message : String(e)));
               }
               setRulePrompt(null);
             }}

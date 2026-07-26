@@ -16,8 +16,6 @@ import { OverlayShell } from "./ui/OverlayShell";
 import { Button } from "./ui/Button";
 import { SectionLabel } from "./ui/Card";
 
-const SHOWN_LIMIT = 5;
-
 export type MoveDialogProps = {
   paths: string[];
   onClose: () => void;
@@ -86,8 +84,6 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
 
   const failureByPath = useMemo(() => new Map(failures.map((f) => [f.path, f.reason])), [failures]);
 
-  const shown = remaining.slice(0, SHOWN_LIMIT);
-  const extra = remaining.length - shown.length;
   const trimmedDest = dest.trim();
   // The destination field is readOnly in native mode (picked via the OS dialog),
   // so an optional subfolder name is the only way to type a new folder there.
@@ -178,8 +174,13 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
       <div className="flex flex-col gap-4 px-4.5 py-4">
         <section>
           <SectionLabel className="mb-2">Files to move</SectionLabel>
-          <div className="overflow-hidden rounded-[9px] border border-line">
-            {shown.map((p) => {
+          {/* A large "Select all N loaded" selection (up to SEARCH_LIMIT in
+              FilesView) must tell the same story as the relocate gate: every
+              name reachable, not just a handful plus a "+N more" count. A
+              max-height scroll container over the full list is enough — no
+              virtualization, no dialog restructuring. */}
+          <div className="max-h-[280px] overflow-y-auto rounded-[9px] border border-line">
+            {remaining.map((p) => {
               const reason = failureByPath.get(p);
               const size = sizeByPath.get(p);
               return (
@@ -201,9 +202,6 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
                 </div>
               );
             })}
-            {extra > 0 ? (
-              <div className="px-3 py-1.5 text-105 text-faint">+{extra} more</div>
-            ) : null}
           </div>
         </section>
 
