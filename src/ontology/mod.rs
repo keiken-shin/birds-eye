@@ -4,6 +4,7 @@
 //! for the full design rationale.
 
 pub mod attrs;
+pub mod catalog;
 pub mod cleanup;
 pub mod discoveries;
 pub mod discoveries_resolve;
