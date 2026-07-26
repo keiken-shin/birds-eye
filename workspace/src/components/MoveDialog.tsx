@@ -21,8 +21,14 @@ const SHOWN_LIMIT = 5;
 export type MoveDialogProps = {
   paths: string[];
   onClose: () => void;
-  /** Fired once every file landed in the destination (just before the dialog closes). */
-  onMoved: (destination: string) => void;
+  /**
+   * Fired whenever files land in the destination, with the subset that moved
+   * this round and whether the whole request finished clean. On a partial
+   * failure this fires with just the moved subset and `allMoved: false`
+   * while the dialog stays open showing the rest; `allMoved: true` always
+   * fires right before the dialog closes.
+   */
+  onMoved: (destination: string, movedPaths: string[], allMoved: boolean) => void;
 };
 
 /** Join destination + basename using the separator style the destination uses (default \). */
@@ -106,20 +112,21 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
     try {
       const moves = remaining.map((from) => ({ from, to: joinDest(target, baseName(from)) }));
       const result = await moveFiles(moves, indexPath);
-      if (result.failed.length < remaining.length) {
+      const failedPaths = new Set(result.failed.map((f) => f.path));
+      const movedPaths = remaining.filter((p) => !failedPaths.has(p));
+      if (movedPaths.length > 0) {
         // Something moved on disk — repaint every lens, and (when nothing is
         // scanning) queue an incremental metadata rescan so rollup sizes self-heal.
         void refreshData();
         if (scanView.status === "idle" && activeEntry?.root_path) {
           enqueue(activeEntry.root_path, "metadata");
         }
+        onMoved(target, movedPaths, result.failed.length === 0);
       }
       if (result.failed.length === 0) {
-        onMoved(target);
         onClose();
         return;
       }
-      const failedPaths = new Set(result.failed.map((f) => f.path));
       setRemaining((prev) => prev.filter((p) => failedPaths.has(p)));
       setFailures(result.failed);
     } catch (e) {

@@ -77,6 +77,10 @@ export function FilesView() {
   const reqId = useRef(0);
   /** The last committed selection key — a change means clear old rows and show loading. */
   const lastSel = useRef("");
+  /** Content signature of the last query the selection-clearing effect saw. */
+  const lastQuerySig = useRef("");
+  /** Paths that have actually moved so far in the open move dialog's session. */
+  const movedPathsRef = useRef<string[]>([]);
 
   const togglePick = useCallback((path: string) => {
     setPicked((prev) => {
@@ -88,8 +92,14 @@ export function FilesView() {
   }, []);
 
   // A different query invalidates any in-progress bulk selection — the rows
-  // it referred to are no longer the ones on screen.
+  // it referred to are no longer the ones on screen. Compared by content, not
+  // object identity: `runQuery` always hands back a fresh literal, so
+  // re-clicking the active view chip or re-submitting the same search text
+  // must not wipe a selection the visible rows haven't actually changed under.
   useEffect(() => {
+    const sig = JSON.stringify(resultsQuery);
+    if (sig === lastQuerySig.current) return;
+    lastQuerySig.current = sig;
     setPicked(new Set());
   }, [resultsQuery]);
 
@@ -418,7 +428,10 @@ export function FilesView() {
                         variant="primary"
                         size="sm"
                         icon={FolderInput}
-                        onClick={() => setMoveOpen(true)}
+                        onClick={() => {
+                          movedPathsRef.current = [];
+                          setMoveOpen(true);
+                        }}
                       >
                         Move to…
                       </Button>
@@ -526,9 +539,30 @@ export function FilesView() {
         <MoveDialog
           paths={[...picked]}
           onClose={() => setMoveOpen(false)}
-          onMoved={(destination) => {
-            setPicked(new Set());
-            if (resultsQuery?.kind === "search" && destination && indexPath) {
+          onMoved={(destination, movedPaths, allMoved) => {
+            // Drop only the paths that actually moved — a partial failure
+            // leaves the still-selected failures at their original location.
+            movedPathsRef.current.push(...movedPaths);
+            setPicked((prev) => {
+              const next = new Set(prev);
+              for (const p of movedPaths) next.delete(p);
+              return next;
+            });
+            if (!allMoved) return;
+            const moved = movedPathsRef.current;
+            movedPathsRef.current = [];
+            // Only offer the rule when it would actually fire: the backend
+            // matcher tests the file's own name, never its containing path,
+            // so a search that matched some files only via their folder path
+            // (e.g. "Invoices" matching everything under a `\Invoices\`
+            // folder) must not save a rule that can never apply to them.
+            if (
+              resultsQuery?.kind === "search" &&
+              destination &&
+              indexPath &&
+              moved.length > 0 &&
+              moved.every((p) => fileName(p).toLowerCase().includes(resultsQuery.text.toLowerCase()))
+            ) {
               setRulePrompt({ text: resultsQuery.text, destination });
             }
           }}
