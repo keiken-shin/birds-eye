@@ -17,7 +17,7 @@ use crate::ontology::catalog::payload::{
 };
 use crate::ontology::catalog::zones::inbox_zones;
 use crate::ontology::discoveries::{
-    insert_discovery, list_by_kind_and_status, DiscoveryStatus, NewDiscovery,
+    expire_discovery, insert_discovery, list_by_kind_and_status, DiscoveryStatus, NewDiscovery,
 };
 use crate::ontology::populators::{
     CostTier, Populator, PopulatorContext, PopulatorError, PopulatorOutcome,
@@ -78,6 +78,12 @@ impl Populator for CatalogPopulator {
         // actually executes, the source rows get `deleted_at` set and the
         // cluster falls out of `candidates()` entirely, so this is self-limiting.
         let mut seen: HashSet<(String, String)> = HashSet::new();
+        // Still-pending cards, tracked separately by (id, fingerprint, member_hash):
+        // if a fresh cluster shares a pending card's fingerprint but not its
+        // member_hash, the zone changed underneath that card and it must be
+        // superseded (see the emit loop below) so at most one pending card
+        // exists per fingerprint.
+        let mut pending: Vec<(i64, String, String)> = Vec::new();
         for status in [
             DiscoveryStatus::Rejected,
             DiscoveryStatus::Pending,
@@ -85,6 +91,9 @@ impl Populator for CatalogPopulator {
         ] {
             for existing in list_by_kind_and_status(conn, RELOCATION_KIND, status)? {
                 if let Ok(payload) = serde_json::from_str::<RelocationPayload>(&existing.payload) {
+                    if status == DiscoveryStatus::Pending {
+                        pending.push((existing.id, payload.fingerprint.clone(), payload.member_hash.clone()));
+                    }
                     seen.insert((payload.fingerprint, payload.member_hash));
                 }
             }
@@ -109,6 +118,18 @@ impl Populator for CatalogPopulator {
             let mh = member_hash(&ids);
             if seen.contains(&(fp.clone(), mh.clone())) {
                 continue;
+            }
+
+            // A pending card for this exact cluster (same fingerprint) already
+            // exists but with different membership: a file landed or left since
+            // it was asked. Expire it before emitting the replacement so the two
+            // never coexist — `relocation_members` recomputes membership live
+            // and would otherwise disagree with the older card's frozen
+            // `member_count`/`total_bytes`.
+            for (id, existing_fp, existing_mh) in &pending {
+                if *existing_fp == fp && *existing_mh != mh {
+                    expire_discovery(conn, *id)?;
+                }
             }
 
             let total_bytes: u64 = members.iter().map(|m| m.size.max(0) as u64).sum();
@@ -159,7 +180,7 @@ mod tests {
     use super::*;
     use crate::index::schema::ALL_MIGRATIONS;
     use crate::ontology::catalog::payload::{RelocationPayload, RELOCATION_KIND};
-    use crate::ontology::discoveries::list_pending_by_kind;
+    use crate::ontology::discoveries::{get_discovery, list_pending_by_kind};
     use crate::ontology::discoveries_resolve::{confirm_discovery, reject_discovery};
     use crate::ontology::populators::{BudgetTier, PopulatorContext};
     use rusqlite::Connection;
@@ -265,6 +286,46 @@ mod tests {
         CatalogPopulator::new().run(&mut conn, &mut ctx(), None).unwrap();
         let second = list_pending_by_kind(&conn, RELOCATION_KIND, 10).unwrap();
         assert_eq!(second.len(), 1, "changed membership re-opens the question");
+    }
+
+    #[test]
+    fn supersedes_a_still_pending_card_when_membership_changes_underneath_it() {
+        let mut conn = migrated_conn();
+        seed(&conn, 3);
+
+        CatalogPopulator::new().run(&mut conn, &mut ctx(), None).unwrap();
+        let first = list_pending_by_kind(&conn, RELOCATION_KIND, 10).unwrap();
+        assert_eq!(first.len(), 1);
+        let first_id = first[0].id;
+        let first_payload: RelocationPayload = serde_json::from_str(&first[0].payload).unwrap();
+
+        // A new download lands in the same zone while the first card is still
+        // pending and unresolved. The cluster's fingerprint (zone+kind+destination)
+        // is unchanged, but its member_hash now differs.
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+             VALUES (99, 1, 'C:\\new-setup.exe', 'new-setup.exe', 100, 'installer', 0)",
+            [],
+        )
+        .unwrap();
+
+        CatalogPopulator::new().run(&mut conn, &mut ctx(), None).unwrap();
+
+        let pending = list_pending_by_kind(&conn, RELOCATION_KIND, 10).unwrap();
+        assert_eq!(pending.len(), 1, "at most one pending card per fingerprint");
+        assert_ne!(pending[0].id, first_id, "the surviving card is a fresh row");
+        let second_payload: RelocationPayload = serde_json::from_str(&pending[0].payload).unwrap();
+        assert_eq!(second_payload.fingerprint, first_payload.fingerprint);
+        assert_ne!(second_payload.member_hash, first_payload.member_hash);
+
+        let old = get_discovery(&conn, first_id)
+            .unwrap()
+            .expect("the superseded row must still exist, not be deleted");
+        assert_eq!(
+            old.status,
+            crate::ontology::discoveries::DiscoveryStatus::Expired,
+            "the superseded card is expired, not left pending"
+        );
     }
 
     #[test]

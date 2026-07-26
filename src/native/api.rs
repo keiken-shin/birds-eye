@@ -1367,7 +1367,8 @@ pub fn relocation_plan(request: RelocationPlanRequest) -> Result<RelocationPlanR
                 rusqlite::params![input.file_id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
-            .ok();
+            .optional()
+            .map_err(|e| e.to_string())?;
 
         let Some((size, deleted_at)) = row else {
             dropped.push(DroppedMove {
@@ -1499,6 +1500,7 @@ pub fn catalog_rules(
 pub fn save_catalog_rule(request: SaveCatalogRuleRequest) -> Result<i64, String> {
     use crate::ontology::catalog::rules::{create_rule, NewCatalogRule, RuleCriteria};
 
+    let source = parse_catalog_rule_source(&request.source)?;
     let conn =
         crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     let criteria = RuleCriteria {
@@ -1512,10 +1514,20 @@ pub fn save_catalog_rule(request: SaveCatalogRuleRequest) -> Result<i64, String>
             name: &request.name,
             criteria: &criteria,
             destination: &request.destination,
-            source: &request.source,
+            source,
         },
     )
     .map_err(|e| e.to_string())
+}
+
+/// The schema's `catalog_rules.source` CHECK only accepts these two values;
+/// validate here so a bad value surfaces as a clean message instead of raw
+/// SQLite constraint text.
+fn parse_catalog_rule_source(value: &str) -> Result<&str, String> {
+    match value {
+        "saved-after-move" | "saved-after-edit" => Ok(value),
+        other => Err(format!("unknown catalog rule source: {other}")),
+    }
 }
 
 /// Forget a saved rule.
@@ -2326,6 +2338,161 @@ mod tests {
         cleanup(&root);
     }
 
+    /// The highest-risk behaviour in `relocation_plan`: two staged moves in ONE
+    /// request that target the same destination path. Exactly one must survive —
+    /// not both dropped, not both persisted.
+    #[test]
+    fn relocation_plan_keeps_exactly_one_of_two_moves_aimed_at_the_same_destination() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("relocation-dup-destination");
+        let inbox = root.join("inbox");
+        let dest = root.join("dest");
+        fs::create_dir_all(&inbox).expect("create inbox");
+        fs::create_dir_all(&dest).expect("create dest");
+
+        let from_a = inbox.join("a.exe");
+        let from_b = inbox.join("b.exe");
+        write_file(&from_a, b"payload-a");
+        write_file(&from_b, b"payload-b");
+        let to = dest.join("shared.exe");
+        let index_path = root.join("index.sqlite");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, ?1, 'inbox', 0, 0)",
+                rusqlite::params![inbox.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (1, 1, ?1, 'a.exe', 9, 'installer', 0)",
+                rusqlite::params![from_a.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (2, 1, ?1, 'b.exe', 9, 'installer', 0)",
+                rusqlite::params![from_b.to_string_lossy()],
+            )
+            .unwrap();
+        }
+
+        let plan = relocation_plan(RelocationPlanRequest {
+            index_path,
+            moves: vec![
+                RelocationMoveInput {
+                    file_id: 1,
+                    from: from_a.to_string_lossy().to_string(),
+                    to: to.to_string_lossy().to_string(),
+                    discovery_id: None,
+                },
+                RelocationMoveInput {
+                    file_id: 2,
+                    from: from_b.to_string_lossy().to_string(),
+                    to: to.to_string_lossy().to_string(),
+                    discovery_id: None,
+                },
+            ],
+        })
+        .expect("relocation_plan");
+
+        assert_eq!(plan.total_files, 1, "exactly one of the two moves is persisted");
+        assert_eq!(plan.items.len(), 1);
+        assert_eq!(plan.items[0].from_path, from_a.to_string_lossy());
+        assert_eq!(plan.dropped.len(), 1, "exactly one of the two moves is dropped");
+        assert_eq!(plan.dropped[0].path, from_b.to_string_lossy());
+        assert!(plan.dropped[0].reason.contains("already claims"));
+
+        cleanup(&root);
+    }
+
+    /// A move dropped for an unrelated reason (a vanished source) must not
+    /// consume the destination claim — a later, legitimate move to that same
+    /// destination path must still go through. This is the ordering property
+    /// that makes the duplicate-destination guard correct: the vanished-source
+    /// check must run, and `continue`, before `claimed.insert()` is ever reached.
+    #[test]
+    fn relocation_plan_drop_for_a_vanished_source_does_not_block_a_later_move_to_the_same_destination(
+    ) {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("relocation-dup-destination-unblocked");
+        let inbox = root.join("inbox");
+        let dest = root.join("dest");
+        fs::create_dir_all(&inbox).expect("create inbox");
+        fs::create_dir_all(&dest).expect("create dest");
+
+        let ghost_from = inbox.join("ghost.exe"); // indexed, but never written to disk
+        let live_from = inbox.join("live.exe");
+        write_file(&live_from, b"payload");
+        let to = dest.join("shared.exe");
+        let index_path = root.join("index.sqlite");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, ?1, 'inbox', 0, 0)",
+                rusqlite::params![inbox.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (1, 1, ?1, 'ghost.exe', 9, 'installer', 0)",
+                rusqlite::params![ghost_from.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (2, 1, ?1, 'live.exe', 9, 'installer', 0)",
+                rusqlite::params![live_from.to_string_lossy()],
+            )
+            .unwrap();
+        }
+
+        let plan = relocation_plan(RelocationPlanRequest {
+            index_path,
+            moves: vec![
+                RelocationMoveInput {
+                    file_id: 1,
+                    from: ghost_from.to_string_lossy().to_string(),
+                    to: to.to_string_lossy().to_string(),
+                    discovery_id: None,
+                },
+                RelocationMoveInput {
+                    file_id: 2,
+                    from: live_from.to_string_lossy().to_string(),
+                    to: to.to_string_lossy().to_string(),
+                    discovery_id: None,
+                },
+            ],
+        })
+        .expect("relocation_plan");
+
+        assert_eq!(
+            plan.total_files, 1,
+            "the legitimate move still lands despite an earlier drop targeting the same destination"
+        );
+        assert_eq!(plan.items[0].from_path, live_from.to_string_lossy());
+        assert_eq!(plan.items[0].to_path, to.to_string_lossy());
+        assert_eq!(plan.dropped.len(), 1);
+        assert_eq!(plan.dropped[0].path, ghost_from.to_string_lossy());
+        assert!(plan.dropped[0].reason.contains("no longer on disk"));
+
+        cleanup(&root);
+    }
+
     #[test]
     fn catalog_rules_crud_round_trips() {
         use crate::index::schema::ALL_MIGRATIONS;
@@ -2360,6 +2527,44 @@ mod tests {
         delete_catalog_rule(DeleteCatalogRuleRequest { index_path: index_path.clone(), id })
             .expect("delete_catalog_rule");
         assert!(catalog_rules(CatalogRulesRequest { index_path }).unwrap().is_empty());
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn save_catalog_rule_rejects_an_unknown_source_and_inserts_nothing() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("catalog-rules-bad-source");
+        fs::create_dir_all(&root).expect("create root");
+        let index_path = root.join("index.sqlite");
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+        }
+
+        let err = save_catalog_rule(SaveCatalogRuleRequest {
+            index_path: index_path.clone(),
+            name: "Invoices".to_string(),
+            kind: Some("invoice".to_string()),
+            name_contains: None,
+            zone: None,
+            destination: "D:\\Finance".to_string(),
+            source: "made-up-source".to_string(),
+        })
+        .expect_err("an unrecognized source must be rejected before it reaches sqlite");
+
+        assert!(
+            err.contains("made-up-source"),
+            "the error must name the bad value, got: {err}"
+        );
+        assert!(
+            catalog_rules(CatalogRulesRequest { index_path }).unwrap().is_empty(),
+            "the rejected rule must not be inserted"
+        );
 
         cleanup(&root);
     }

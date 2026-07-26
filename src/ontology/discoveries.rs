@@ -143,6 +143,17 @@ pub fn count_pending_by_kind(conn: &Connection, kind: &str) -> Result<u64, Ontol
     Ok(count as u64)
 }
 
+/// Mark a discovery `expired` — used when a populator supersedes a still-pending
+/// card with a fresh one for the same cluster (e.g. membership changed). Unlike
+/// confirm/reject this carries no user decision and graduates no facts.
+pub fn expire_discovery(conn: &Connection, id: i64) -> Result<(), OntologyError> {
+    conn.execute(
+        "UPDATE ontology_discoveries SET status = ?1, resolved_at = ?2 WHERE id = ?3",
+        params![DiscoveryStatus::Expired.as_str(), unix_now(), id],
+    )?;
+    Ok(())
+}
+
 /// Rows of one kind in one status — the read path rejection-suppression needs,
 /// since `list_pending_by_kind` hardcodes `status = 'pending'`.
 pub fn list_by_kind_and_status(
