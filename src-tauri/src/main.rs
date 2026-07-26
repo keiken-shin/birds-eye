@@ -38,6 +38,16 @@ use birds_eye::native::api::{
     DuplicateFileSummaryDto, DuplicateGroupFilesRequest,
     FileSearchResultDto, FolderChildrenRequest, FolderSummaryDto, IndexMetadataDto,
     IndexOverviewDto, IndexQueryRequest, SearchFilesRequest,
+    // Cataloging
+    relocation_plan as do_relocation_plan,
+    execute_relocation_plan as do_execute_relocation_plan,
+    relocation_members as do_relocation_members,
+    catalog_rules as do_catalog_rules,
+    save_catalog_rule as do_save_catalog_rule,
+    delete_catalog_rule as do_delete_catalog_rule,
+    CatalogRulesRequest, DeleteCatalogRuleRequest, ExecuteRelocationPlanRequest,
+    RelocationMembersRequest, RelocationPlanRequest, RelocationPlanResponse,
+    SaveCatalogRuleRequest,
 };
 use birds_eye::ontology::cleanup::executor::CleanupResult;
 use birds_eye::ontology::cleanup::restore::CleanupLogEntry;
@@ -270,6 +280,42 @@ fn execute_cleanup_plan(request: ExecuteCleanupPlanRequest) -> Result<CleanupRes
 }
 
 #[tauri::command(async)]
+fn relocation_plan(request: RelocationPlanRequest) -> Result<RelocationPlanResponse, String> {
+    do_relocation_plan(request)
+}
+
+#[tauri::command(async)]
+fn execute_relocation_plan(
+    request: ExecuteRelocationPlanRequest,
+) -> Result<birds_eye::ontology::catalog::executor::RelocationResult, String> {
+    do_execute_relocation_plan(request)
+}
+
+#[tauri::command(async)]
+fn relocation_members(
+    request: RelocationMembersRequest,
+) -> Result<Vec<birds_eye::ontology::catalog::payload::RelocationMember>, String> {
+    do_relocation_members(request)
+}
+
+#[tauri::command(async)]
+fn catalog_rules(
+    request: CatalogRulesRequest,
+) -> Result<Vec<birds_eye::ontology::catalog::rules::CatalogRule>, String> {
+    do_catalog_rules(request)
+}
+
+#[tauri::command(async)]
+fn save_catalog_rule(request: SaveCatalogRuleRequest) -> Result<i64, String> {
+    do_save_catalog_rule(request)
+}
+
+#[tauri::command(async)]
+fn delete_catalog_rule(request: DeleteCatalogRuleRequest) -> Result<(), String> {
+    do_delete_catalog_rule(request)
+}
+
+#[tauri::command(async)]
 fn recently_cleaned(request: RecentlyCleanedRequest) -> Result<Vec<CleanupLogEntry>, String> {
     do_recently_cleaned_log(request)
 }
@@ -389,6 +435,12 @@ fn main() {
             move_files,
             cleanup_plan,
             execute_cleanup_plan,
+            relocation_plan,
+            execute_relocation_plan,
+            relocation_members,
+            catalog_rules,
+            save_catalog_rule,
+            delete_catalog_rule,
             recently_cleaned,
             restore_from_cleanup_log,
             pin_file,
