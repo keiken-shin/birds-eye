@@ -1,8 +1,14 @@
 //! Relocation-suggestion populator.
 //!
-//! Reads the index only. One cluster of stray files in an inbox zone becomes one
-//! `relocation` discovery, carrying the destination, the evidence for it, and a
-//! capped member list.
+//! Reads the index, plus exactly one `is_dir()` filesystem probe per emitted
+//! cluster (see `destination_exists` below) — not index-only. One cluster of
+//! stray files in an inbox zone becomes one `relocation` discovery, carrying
+//! the destination, the evidence for it, and a capped member list.
+//!
+//! Known risk: this populator is tagged `CostTier::Cheap`, but if a
+//! user-authored rule points its destination at an unreachable network path,
+//! that one `is_dir()` stat can block for the OS network timeout — stalling a
+//! tier the budget system otherwise treats as free.
 
 use crate::ontology::catalog::cluster::{candidates, cluster};
 use crate::ontology::catalog::infer::infer;
@@ -65,10 +71,18 @@ impl Populator for CatalogPopulator {
             ctx.note_file();
         }
 
-        // Suppression keys: a cluster already answered (rejected) or already
-        // asked (pending) with the same membership is not asked again.
+        // Suppression keys: a cluster already answered (rejected), already
+        // asked (pending), or already confirmed (but not yet moved — confirming
+        // only flips the status column, the physical move is a separate later
+        // step) with the same membership is not asked again. Once the move
+        // actually executes, the source rows get `deleted_at` set and the
+        // cluster falls out of `candidates()` entirely, so this is self-limiting.
         let mut seen: HashSet<(String, String)> = HashSet::new();
-        for status in [DiscoveryStatus::Rejected, DiscoveryStatus::Pending] {
+        for status in [
+            DiscoveryStatus::Rejected,
+            DiscoveryStatus::Pending,
+            DiscoveryStatus::Confirmed,
+        ] {
             for existing in list_by_kind_and_status(conn, RELOCATION_KIND, status)? {
                 if let Ok(payload) = serde_json::from_str::<RelocationPayload>(&existing.payload) {
                     seen.insert((payload.fingerprint, payload.member_hash));
@@ -146,7 +160,7 @@ mod tests {
     use crate::index::schema::ALL_MIGRATIONS;
     use crate::ontology::catalog::payload::{RelocationPayload, RELOCATION_KIND};
     use crate::ontology::discoveries::list_pending_by_kind;
-    use crate::ontology::discoveries_resolve::reject_discovery;
+    use crate::ontology::discoveries_resolve::{confirm_discovery, reject_discovery};
     use crate::ontology::populators::{BudgetTier, PopulatorContext};
     use rusqlite::Connection;
     use std::sync::atomic::AtomicBool;
@@ -265,6 +279,25 @@ mod tests {
     }
 
     #[test]
+    fn does_not_re_nag_a_confirmed_cluster_before_the_move_lands() {
+        let mut conn = migrated_conn();
+        seed(&conn, 3);
+
+        CatalogPopulator::new().run(&mut conn, &mut ctx(), None).unwrap();
+        let first = list_pending_by_kind(&conn, RELOCATION_KIND, 10).unwrap();
+        confirm_discovery(&conn, first[0].id).unwrap();
+
+        // Confirming a relocation only flips its status column; the physical
+        // move is a separate, later step, so the same files are still sitting
+        // in the zone when the populator runs again.
+        CatalogPopulator::new().run(&mut conn, &mut ctx(), None).unwrap();
+        assert!(
+            list_pending_by_kind(&conn, RELOCATION_KIND, 10).unwrap().is_empty(),
+            "a confirmed cluster awaiting its physical move must not re-nag"
+        );
+    }
+
+    #[test]
     fn caps_the_embedded_member_list() {
         let mut conn = migrated_conn();
         seed(&conn, 120);
@@ -295,5 +328,58 @@ mod tests {
 
         CatalogPopulator::new().run(&mut conn, &mut ctx(), None).unwrap();
         assert!(list_pending_by_kind(&conn, RELOCATION_KIND, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_cluster_with_no_inferable_destination_is_silently_skipped_alongside_a_good_one() {
+        let mut conn = migrated_conn();
+        seed(&conn, 3); // "installer" cluster: infers a learned destination.
+
+        // A second cluster in the same zone that `infer` cannot place: media_kind
+        // "other" has no template fallback, and no learned home exists for it
+        // anywhere in the index, so `infer` returns `None` for it.
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+             VALUES (500, 1, 'C:\\weird.xyz', 'weird.xyz', 10, 'other', 0)",
+            [],
+        )
+        .unwrap();
+
+        let mut context = ctx();
+        let outcome = CatalogPopulator::new().run(&mut conn, &mut context, None).unwrap();
+        assert!(matches!(outcome, PopulatorOutcome::Completed(_)));
+
+        let cards = list_pending_by_kind(&conn, RELOCATION_KIND, 10).unwrap();
+        assert_eq!(cards.len(), 1, "the inferable cluster still emits a card");
+        let payload: RelocationPayload = serde_json::from_str(&cards[0].payload).unwrap();
+        assert_eq!(payload.kind, "installer");
+
+        let total_rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_discoveries", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(total_rows, 1, "the un-inferable cluster leaves no partial row");
+        assert_eq!(
+            context.snapshot().discoveries_emitted,
+            1,
+            "only the good cluster is counted as a discovery"
+        );
+    }
+
+    #[test]
+    fn honors_an_already_paused_context_before_emitting_anything() {
+        let mut conn = migrated_conn();
+        seed(&conn, 3);
+
+        let pause = Arc::new(AtomicBool::new(true));
+        let mut paused_ctx = PopulatorContext::new(BudgetTier::Standard, pause);
+
+        let outcome = CatalogPopulator::new().run(&mut conn, &mut paused_ctx, None).unwrap();
+        assert!(matches!(outcome, PopulatorOutcome::Paused { .. }));
+        assert!(
+            list_pending_by_kind(&conn, RELOCATION_KIND, 10).unwrap().is_empty(),
+            "a paused run must not emit any card"
+        );
+        assert_eq!(paused_ctx.snapshot().files_visited, 0);
+        assert_eq!(paused_ctx.snapshot().discoveries_emitted, 0);
     }
 }
