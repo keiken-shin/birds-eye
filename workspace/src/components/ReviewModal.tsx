@@ -51,7 +51,7 @@ export function ReviewModal() {
   const reqId = useRef(0);
 
   useEffect(() => {
-    if (!review || !indexPath) return;
+    if (review !== "clean" || !indexPath) return;
     const id = ++reqId.current;
     setLoading(true);
     setError(null);

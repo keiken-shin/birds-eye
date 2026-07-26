@@ -13,6 +13,7 @@ import { MiscOverlay } from "./MiscOverlay";
 import { SettingsOverlay } from "./SettingsOverlay";
 import { LibraryOverlay } from "./LibraryOverlay";
 import { ReviewModal } from "./ReviewModal";
+import { RelocateReviewModal } from "./RelocateReviewModal";
 import { UndoToast } from "./UndoToast";
 import { EnableIntelligence } from "./EnableIntelligence";
 import { SidePanel, usePanelState } from "./ui/SidePanel";
@@ -118,6 +119,7 @@ export function WorkspaceShell() {
       <SettingsOverlay />
       <LibraryOverlay />
       <ReviewModal />
+      <RelocateReviewModal />
       <UndoToast />
       <EnableIntelligence />
     </div>

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { CircleCheck, TriangleAlert, X } from "lucide-react";
 import { formatBytes } from "@bridge/domain";
-import { restoreCleanupEntry } from "@bridge/nativeClient";
+import { moveFiles, restoreCleanupEntry } from "@bridge/nativeClient";
+import { reversePairs } from "../lib/undo";
 import { useIndexData } from "../state/indexData";
 import { useWorkspace } from "../state/workspaceStore";
 import { Button, IconButton } from "./ui/Button";
@@ -13,9 +14,23 @@ export function UndoToast() {
   const [error, setError] = useState<string | null>(null);
 
   const onUndo = useCallback(async () => {
-    if (!indexPath || busy || !undo || undo.kind !== "clean") return;
+    if (!indexPath || busy || !undo) return;
     setBusy(true);
     try {
+      if (undo.kind === "relocate") {
+        // No dedicated undo command — move_files takes (from, to) pairs, so
+        // undo is just the executed pairs reversed.
+        const result = await moveFiles(reversePairs(undo.pairs), indexPath);
+        if (result.failed.length) {
+          setError(
+            `${result.failed.length} of ${undo.pairs.length} files could not be moved back — see their original folders`
+          );
+        } else {
+          setUndo(null);
+        }
+        await refreshData();
+        return;
+      }
       let failures = 0;
       for (const id of undo.entryIds) {
         try {
@@ -63,8 +78,9 @@ export function UndoToast() {
     return () => document.removeEventListener("keydown", onKey);
   }, [undo, onUndo]);
 
-  // Relocate undo lands in a later task — the toast stays hidden for it until then.
-  if (!undo || undo.kind !== "clean") return null;
+  if (!undo) return null;
+
+  const nothingToUndo = undo.kind === "relocate" ? !undo.pairs.length : !undo.entryIds.length;
 
   return (
     <div className="be-in absolute bottom-[74px] left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2.5 rounded-[10px] border border-line-modal bg-overlay px-3.5 py-2.5 shadow-[0_14px_40px_-10px_rgba(0,0,0,0.7)]">
@@ -74,18 +90,19 @@ export function UndoToast() {
         <CircleCheck size={15} className="flex-none text-primary-ink" aria-hidden />
       )}
       <span className="text-125 text-ink-soft">
-        {error ?? (
-          <>
-            Cleaned <b className="mono text-ink">{formatBytes(undo.freed)}</b> — moved to recycle bin
-          </>
-        )}
+        {error ??
+          (undo.kind === "relocate" ? (
+            <>
+              Moved <b className="mono text-ink">{undo.pairs.length}</b> file
+              {undo.pairs.length === 1 ? "" : "s"}
+            </>
+          ) : (
+            <>
+              Cleaned <b className="mono text-ink">{formatBytes(undo.freed)}</b> — moved to recycle bin
+            </>
+          ))}
       </span>
-      <Button
-        variant="subtle"
-        size="sm"
-        disabled={busy || !undo.entryIds.length}
-        onClick={() => void onUndo()}
-      >
+      <Button variant="subtle" size="sm" disabled={busy || nothingToUndo} onClick={() => void onUndo()}>
         {busy ? "Restoring…" : "Undo"}
       </Button>
       <IconButton icon={X} label="Dismiss" size={13} onClick={() => setUndo(null)} />
