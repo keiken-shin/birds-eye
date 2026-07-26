@@ -90,7 +90,7 @@ export function ReviewModal() {
     })();
   }, [review, indexPath, staged]);
 
-  if (!review) return null;
+  if (review !== "clean") return null;
 
   const count = plan?.candidates.length ?? 0;
   const totalBytes = plan?.totalBytes ?? 0;
@@ -153,7 +153,7 @@ export function ReviewModal() {
         // retry doesn't re-recycle what already went through.
         const failedSet = new Set(trashFailed.map((f) => f.path));
         setOverrides(new Set(overriddenItems.filter((s) => failedSet.has(s.path)).map((s) => s.path)));
-        if (entryIds.length > 0) setUndo({ entryIds, freed });
+        if (entryIds.length > 0) setUndo({ kind: "clean", entryIds, freed });
         setError(
           `${formatCount(trashFailed.length)} of ${formatCount(overrideCount)} overrides could not be recycled — ` +
             trashFailed
@@ -170,7 +170,7 @@ export function ReviewModal() {
       closeReview();
       // Undo covers only the audited cleanup-log entries — recycled overrides
       // are restored from the Windows Recycle Bin, not from here.
-      if (entryIds.length > 0 || freed > 0) setUndo({ entryIds, freed });
+      if (entryIds.length > 0 || freed > 0) setUndo({ kind: "clean", entryIds, freed });
       await refreshData();
     } catch (e) {
       setError(String(e));

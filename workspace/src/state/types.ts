@@ -12,7 +12,8 @@ export type StageView =
   | "duplicates"
   | "cleanup"
   | "timeline"
-  | "scans";
+  | "scans"
+  | "catalog";
 
 export type Overlay = "scan" | "settings" | "shortcuts" | "library" | null;
 
@@ -38,7 +39,29 @@ export type StagedItem = {
   kind: "folder" | "file";
 };
 
-export type UndoState = { entryIds: number[]; freed: number } | null;
+/**
+ * A staged relocation. Deliberately NOT a StagedItem: that type has no action
+ * discriminant and no destination, and ReviewModal feeds every staged path to
+ * cleanup_plan as a delete scope prefix.
+ */
+export type StagedMove = {
+  path: string;
+  name: string;
+  bytes: number;
+  /** Absolute destination path for this one file. */
+  to: string;
+  destinationExists: boolean;
+  fileId: number;
+  discoveryId: number | null;
+};
+
+/** Which review gate is open. Both kinds can be staged at once. */
+export type ReviewMode = "clean" | "relocate" | null;
+
+export type UndoState =
+  | { kind: "clean"; entryIds: number[]; freed: number }
+  | { kind: "relocate"; pairs: Array<{ from: string; to: string }> }
+  | null;
 
 /** A folder collected onto the Board (the selection→board glue). */
 export type PinnedCard = { path: string; name: string; bytes: number };

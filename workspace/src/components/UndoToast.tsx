@@ -13,7 +13,7 @@ export function UndoToast() {
   const [error, setError] = useState<string | null>(null);
 
   const onUndo = useCallback(async () => {
-    if (!indexPath || busy || !undo) return;
+    if (!indexPath || busy || !undo || undo.kind !== "clean") return;
     setBusy(true);
     try {
       let failures = 0;
@@ -63,7 +63,8 @@ export function UndoToast() {
     return () => document.removeEventListener("keydown", onKey);
   }, [undo, onUndo]);
 
-  if (!undo) return null;
+  // Relocate undo lands in a later task — the toast stays hidden for it until then.
+  if (!undo || undo.kind !== "clean") return null;
 
   return (
     <div className="be-in absolute bottom-[74px] left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2.5 rounded-[10px] border border-line-modal bg-overlay px-3.5 py-2.5 shadow-[0_14px_40px_-10px_rgba(0,0,0,0.7)]">
