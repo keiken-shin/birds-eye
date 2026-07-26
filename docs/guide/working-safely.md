@@ -6,16 +6,18 @@ shouldn't have to be certain before you act — you should be able to undo.
 
 ## Nothing moves without review
 
-There is exactly one path from the workspace to your disk:
+There is exactly one path from the workspace to your disk, for either kind of change you
+can stage:
 
 ```
-Cleanup Tray  →  Review gate  →  OS Recycle Bin
+Cleanup tray  →  Review gate  →  OS Recycle Bin
+Move tray     →  Review gate  →  the destination you chose
 ```
 
-You stage candidates from any view into the Tray. When you're ready, the **Review gate**
-re-verifies the batch against the current index — sizes, verdicts, and paths — and shows
-you precisely what will happen. Only after you confirm does anything move. No view has a
-shortcut around this gate.
+You stage candidates from any view — including a **Catalog** suggestion — into the tray.
+When you're ready, the **Review gate** re-verifies the batch against the current index —
+sizes, verdicts, and paths — and shows you precisely what will happen. Only after you
+confirm does anything move. No view has a shortcut around this gate.
 
 ## Everything is reversible
 
@@ -24,8 +26,10 @@ shortcut around this gate.
 - **Restorable for 30 days** from **Recently cleaned**, or reverted instantly with
   **Undo** right after the action.
 - **Move instead of delete.** Sometimes the right answer isn't deletion — it's putting a
-  file somewhere sensible. Bird's Eye can relocate it and then **heal the index** with a
-  background rescan, so your map stays accurate.
+  file somewhere sensible. The **Catalog** view surfaces these candidates on its own, or
+  move files by hand; either way Bird's Eye relocates them and **heals the index** with a
+  background rescan. A move is undoable right after it happens — it never touches the
+  Recycle Bin, so there's no 30-day window the way a clean has.
 
 ## Verdicts, and what they mean
 

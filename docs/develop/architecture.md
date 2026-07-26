@@ -61,8 +61,9 @@ The opt-in reasoning that turns an index into verdicts:
 ```text
 ontology/
   populators/     heuristics, metadata extractors, perceptual-hash near-dupes
-  discoveries*    findings surfaced to the Board and Cleanup views
+  discoveries*    findings surfaced to the Board, Cleanup, and Catalog views
   cleanup/        plans → predicate (safety) → executor (recycle bin) → restore
+  catalog/        inference (zones, rules, learned homes) → plans → executor (mover)
   saved_views     the curated Files presets
   entities, relations, vocabulary, sensitivity, pinning, …
 ```

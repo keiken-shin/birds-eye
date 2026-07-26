@@ -56,16 +56,17 @@ When the scan settles, the **Overview** greets you with a headline like
 *“42 GB can likely be freed,”* a capacity bar, a category donut, and your top space
 consumers. This is the map of where you stand before you touch anything.
 
-From here, switch lenses with the top-bar view switcher (or number keys **1–7**) —
+From here, switch lenses with the top-bar view switcher (or number keys **1–8**) —
 each is a different way of looking at the *same* index, never a page reload. See
-[The workspace](the-workspace.md) for a tour of all seven.
+[The workspace](the-workspace.md) for a tour of all eight.
 
 ## Turn on the intelligence layer
 
-The safety verdicts and cleanup recommendations come from an **intelligence layer** that
-you enable **per index** — it's opt-in by design. Once on, it classifies each folder
-(what it is, whether it's regenerable, what depends on it) using on-device heuristics,
-and attaches a verdict and a plain-language reason to every candidate.
+The safety verdicts, cleanup recommendations, and relocation suggestions all come from an
+**intelligence layer** that you enable **per index** — it's opt-in by design. Once on, it
+classifies each folder (what it is, whether it's regenerable, what depends on it) using
+on-device heuristics, and attaches a verdict and a plain-language reason to every
+candidate.
 
 It's entirely local and heuristic — no machine learning, no cloud, no guessing. If it
 can't classify something, it says so rather than inventing an answer.
@@ -81,7 +82,9 @@ destroyed outright:
   instantly).
 
 Prefer to keep a file but move it somewhere sensible? Bird's Eye can **relocate** it
-instead of deleting, then heal the index with a background rescan.
+instead of deleting, then heal the index with a background rescan. The **Catalog** view
+finds these candidates for you — files sitting in Downloads, Desktop, or a drive root that
+look like they belong wherever you already keep similar ones.
 
 The full model — verdicts, overrides, and what "reversible" guarantees — is in
 [Working safely](working-safely.md).

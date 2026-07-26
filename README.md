@@ -23,7 +23,7 @@
 Bird's Eye is an offline desktop app that scans local folders into a persistent SQLite index,
 then (optionally) runs an on-device **intelligence layer** that classifies every folder — why it
 exists, whether it's regenerable, what depends on it — and turns that into safety verdicts,
-reclaimable-space estimates, and a reviewed, reversible cleanup flow.
+reclaimable-space estimates, relocation suggestions, and a reviewed, reversible cleanup flow.
 
 **Everything runs locally. Nothing ever leaves your machine.**
 
@@ -41,6 +41,7 @@ One persistent workspace — the top-bar switcher flips between views of the sam
 | **Duplicates** | Waste-ranked groups with side-by-side previews — keep the newest, stage the rest, or move a copy where it belongs. |
 | **Cleanup** | Risk-labeled recommendations (safe / review / caution) with multi-select staging. |
 | **Timeline** | Monthly activity, file-age distribution, and "large & untouched" candidates. |
+| **Catalog** | Grouped "these files belong somewhere else" suggestions — learned from where you already keep things, reviewed before anything moves. |
 
 Around every view: an **Inspector** (why it exists · composition · safety verdict), a **Cleanup
 Tray** that collects from anywhere, and a **Review gate** that re-verifies before anything moves.
@@ -51,6 +52,8 @@ background rescan.
 
 - Nothing is deleted without an explicit review step; every clean goes to the **OS Recycle Bin**
   with a tracked entry, restorable for 30 days from **Recently cleaned** (or instantly via Undo).
+- Relocating a file goes through the same review step — nothing moves until you confirm the
+  plan, and a move is undoable in-session.
 - Items the safety predicate holds back are shown — never silently dropped — and *you* can still
   remove them through an explicit, clearly-marked override.
 - The intelligence layer is **opt-in per index**, heuristic (no ML, no cloud), and shows its

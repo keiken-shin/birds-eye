@@ -1,16 +1,16 @@
 # The workspace
 
 Bird's Eye is **one persistent workspace**, not a stack of pages. A single index sits
-underneath, and the top-bar switcher flips between seven views of it. Three things travel
+underneath, and the top-bar switcher flips between eight views of it. Three things travel
 with you across every view:
 
 - **The Inspector** — select anything and it explains *why it exists*, its composition,
   and its safety verdict.
 - **The Cleanup Tray** — collects candidates from anywhere you find them.
 - **The Review gate** — the one and only path to disk mutation. Tray → Review → Recycle
-  Bin. Nothing skips it.
+  Bin, or a relocation's destination. Nothing skips it.
 
-Switch views with the top-bar segments or number keys **1–7**. `Ctrl+I` toggles the
+Switch views with the top-bar segments or number keys **1–8**. `Ctrl+I` toggles the
 Inspector.
 
 ## 1 · Overview
@@ -57,7 +57,9 @@ and use the minimap and fit-to-view to navigate a large board.
 Ranked search over the whole index: category chips, size bars, sort by size or date, and
 staleness tags. Curated **saved views** — *“Large & regenerable,” “Finished & untouched”*
 — turn common questions into one click, and a large-files preset gets you to the heavy
-hitters immediately.
+hitters immediately. Select several rows to move them together, and if the files you moved
+share a name pattern, Bird's Eye offers to save the move as a rule so the same match is
+handled automatically next time.
 
 <figure markdown="span">
   ![Files — ranked search with category chips, size bars, staleness tags, and saved views](../assets/screenshots/files.png){ .be-shot }
@@ -97,6 +99,18 @@ candidates that are usually the easiest, safest wins.
   <figcaption>Timeline — monthly activity, age distribution, and the “large & untouched” candidates.</figcaption>
 </figure>
 
+## 8 · Catalog
+
+Grouped suggestions for files that look like they belong somewhere else. Bird's Eye only
+looks at **inbox zones** — Downloads, Desktop, drive roots — and leaves folders you've
+deliberately organized alone. Each card proposes a destination, in order of trust: a rule
+you've taught the app, a **learned home** (wherever you already keep most files of that
+kind), or a sensible fallback — with the reasoning shown alongside. Accept a card and its
+files stage into the same tray as Cleanup; nothing moves until you confirm it in review.
+
+Catalog needs the intelligence layer turned on. With it off, the view shows a prompt to
+enable it instead of an empty list.
+
 ---
 
 ## Around every view
@@ -110,12 +124,14 @@ organized around. Drag-resize it, or collapse it with `Ctrl+I`.
 ### Cleanup Tray
 
 A staging area that follows you. Add candidates from the Overview, a treemap cell, a
-search result, or a duplicate group — they all land in the same tray, ready for one
-reviewed pass.
+search result, a duplicate group, or a Catalog suggestion — they all land in the same
+tray, ready for one reviewed pass. Cleanups and relocations stage side by side, each
+reviewed on its own path.
 
 ### Review gate
 
 The single disk-mutating path. Before anything moves, the gate **re-verifies** the batch
-against the current index, shows you exactly what will happen, and only then sends items
-to the Recycle Bin. This is what makes "clean" safe to click. Details in
+against the current index, shows you exactly what will happen, and only then acts — sending
+items to the Recycle Bin, or moving them to the destination a Catalog suggestion proposed.
+This is what makes "clean" (and "move") safe to click. Details in
 [Working safely](working-safely.md).

@@ -32,7 +32,7 @@ hide:
 <div class="be-stats">
   <div class="be-stat"><span class="be-stat__num">100%</span><span class="be-stat__label">offline, always</span></div>
   <div class="be-stat"><span class="be-stat__num">0 bytes</span><span class="be-stat__label">ever uploaded</span></div>
-  <div class="be-stat"><span class="be-stat__num">7 views</span><span class="be-stat__label">one persistent index</span></div>
+  <div class="be-stat"><span class="be-stat__num">8 views</span><span class="be-stat__label">one persistent index</span></div>
   <div class="be-stat"><span class="be-stat__num">30-day</span><span class="be-stat__label">restore window</span></div>
   <div class="be-stat"><span class="be-stat__num">190+</span><span class="be-stat__label">Rust tests</span></div>
 </div>
@@ -53,7 +53,7 @@ actually unblocks you: **which of this is safe to remove, and on what evidence?*
 It scans your folders into a persistent on-device index, then runs an opt-in
 **intelligence layer** that reasons about every folder — why it exists, whether it's
 regenerable, what depends on it — and turns that into safety verdicts, reclaimable-space
-estimates, and a reviewed, fully reversible cleanup flow.
+estimates, relocation suggestions, and a reviewed, fully reversible cleanup flow.
 
 No accounts. No telemetry. No upload. The index, the reasoning, and every decision stay on
 your disk.
@@ -102,7 +102,7 @@ your disk.
 
 <p class="be-eyebrow">The workspace</p>
 
-## One workspace, seven lenses
+## One workspace, eight lenses
 
 There are no “pages.” A single persistent workspace holds one index, and the top-bar
 switcher flips between views of it — the Inspector, Cleanup Tray, and Review gate stay
@@ -158,6 +158,13 @@ with you the whole time.
 
     Monthly activity, file-age distribution, and *“large & untouched”* candidates.
 
+-   :material-folder-move-outline:{ .lg .middle } **Catalog**
+
+    ---
+
+    Grouped "these files belong somewhere else" suggestions — learned from where you
+    already keep things, reviewed before anything moves.
+
 </div>
 
 [Tour the workspace :material-arrow-right:](guide/the-workspace.md){ .md-button }
@@ -171,6 +178,8 @@ pressures you toward a “clean now” button.
 
 - **Recycle bin first, always.** Every clean goes to the OS Recycle Bin with a tracked
   entry, restorable for 30 days from *Recently cleaned* — or reverted instantly with Undo.
+- **Moves get the same gate.** Relocating a file is reviewed and re-verified just like a
+  clean, and it's undoable in-session.
 - **Held-back items are shown, never dropped.** If the safety predicate holds something
   back, you see it and its reason — and you can still remove it through an explicit,
   clearly-marked override.

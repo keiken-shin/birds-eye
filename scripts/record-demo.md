@@ -10,7 +10,7 @@ at a native 16:9 size) so nothing is stretched.
 
 ## What to record
 
-A calm ~15–25 s walk through the seven views, in this order — it mirrors the product's own
+A calm ~15–25 s walk through the eight views, in this order — it mirrors the product's own
 loop (scan → understand → decide → clean):
 
 1. **Overview** — land on the headline (*“X GB can likely be freed”*), capacity bar, donut.
@@ -20,6 +20,7 @@ loop (scan → understand → decide → clean):
 5. **Duplicates** — expand a waste-ranked group.
 6. **Cleanup** — multi-select a couple of safe items into the tray.
 7. **Timeline** — the age distribution / “large & untouched”.
+8. **Catalog** — expand a suggestion to show the files it groups.
 
 Move deliberately. Let each view settle for a beat before switching — a demo that races is
 harder to read than one that breathes.

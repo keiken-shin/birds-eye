@@ -86,7 +86,7 @@ the reserved **Birds Eye** name.
 ## Regenerating the demo
 
 The demo on the README and docs landing page is `docs/assets/demo.gif`. Overwrite that one
-file to refresh it everywhere. The full recipe — resolutions, the seven-view walkthrough,
+file to refresh it everywhere. The full recipe — resolutions, the eight-view walkthrough,
 and export settings — is in
 [`scripts/record-demo.md`](https://github.com/keiken-shin/birds-eye/blob/main/scripts/record-demo.md).
 Record at a real 16:9 resolution so it isn't squashed.
