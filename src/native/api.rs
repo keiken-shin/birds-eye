@@ -261,6 +261,34 @@ fn mark_deleted_in_index(index_path: &Path, paths: &[String]) {
     }
 }
 
+/// Reconciles the index after a batch of successful `move_files` moves:
+/// sources get `deleted_at` set, same as any other delete-from-index call
+/// (`mark_deleted_in_index` above); destinations get `deleted_at` CLEARED
+/// wherever a row already sits at that exact path.
+///
+/// That second half is what makes a relocate's undo — reversed pairs run back
+/// through this same function — leave the index consistent immediately,
+/// rather than only after the next rescan. Undo's destination is the file's
+/// original path, and that row was soft-deleted when the forward move ran;
+/// moving the file back there un-deletes it as the exact inverse of that
+/// step. Scoped to `deleted_at IS NOT NULL` so a live row already occupying
+/// that path (an unrelated, current file) is never touched.
+fn reconcile_index_after_move(index_path: &Path, sources: &[String], destinations: &[String]) {
+    mark_deleted_in_index(index_path, sources);
+    if destinations.is_empty() {
+        return;
+    }
+    let Ok(conn) = crate::index::open_index_connection(index_path) else {
+        return;
+    };
+    for path in destinations {
+        let _ = conn.execute(
+            "UPDATE files SET deleted_at = NULL WHERE path = ?1 AND deleted_at IS NOT NULL",
+            rusqlite::params![path],
+        );
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct MoveSpec {
     pub from: String,
@@ -292,6 +320,7 @@ pub struct MoveFilesResponse {
 pub fn move_files(request: MoveFilesRequest) -> MoveFilesResponse {
     let mut failed = Vec::new();
     let mut moved_sources = Vec::new();
+    let mut moved_destinations = Vec::new();
 
     for spec in &request.moves {
         let to = Path::new(&spec.to);
@@ -311,19 +340,13 @@ pub fn move_files(request: MoveFilesRequest) -> MoveFilesResponse {
                 continue;
             }
         }
-        let result = std::fs::rename(&spec.from, to).or_else(|_| {
-            // Cross-volume move: copy then remove the source. If the source
-            // cannot be removed (commonly a Windows lock), roll the copy back —
-            // otherwise the file exists at BOTH paths while we report failure,
-            // and the retry hits `to.exists()` forever.
-            std::fs::copy(&spec.from, to).and_then(|_| {
-                std::fs::remove_file(&spec.from).inspect_err(|_| {
-                    let _ = std::fs::remove_file(to);
-                })
-            })
-        });
+        let from = Path::new(&spec.from);
+        let result = std::fs::rename(from, to).or_else(|_| copy_then_remove(from, to));
         match result {
-            Ok(()) => moved_sources.push(spec.from.clone()),
+            Ok(()) => {
+                moved_sources.push(spec.from.clone());
+                moved_destinations.push(spec.to.clone());
+            }
             Err(error) => failed.push(MoveFailure {
                 path: spec.from.clone(),
                 reason: error.to_string(),
@@ -332,12 +355,25 @@ pub fn move_files(request: MoveFilesRequest) -> MoveFilesResponse {
     }
 
     if let Some(index_path) = &request.index_path {
-        mark_deleted_in_index(index_path, &moved_sources);
+        reconcile_index_after_move(index_path, &moved_sources, &moved_destinations);
     }
     MoveFilesResponse {
         moved: moved_sources.len() as i64,
         failed,
     }
+}
+
+/// Cross-volume fallback: copy then remove the source, rolling back whatever
+/// landed at `to` if EITHER step fails. Rolling back only the remove-failed
+/// case (the original shape here) misses the copy itself failing partway —
+/// e.g. a full destination disk — which leaves a truncated file at `to`, and
+/// every retry then fails forever on the `to.exists()` guard above. Wrapping
+/// `inspect_err` around the whole chain (rather than nesting it inside the
+/// `remove_file` call alone) catches both arms with the same cleanup.
+fn copy_then_remove(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::copy(from, to).and_then(|_| std::fs::remove_file(from)).inspect_err(|_| {
+        let _ = std::fs::remove_file(to);
+    })
 }
 
 /// Build a draft cleanup plan from a scope and return its live candidate preview.
@@ -1443,7 +1479,16 @@ pub fn relocation_plan(request: RelocationPlanRequest) -> Result<RelocationPlanR
     })
 }
 
-/// Execute a draft relocation plan and mark its source discoveries confirmed.
+/// Execute a draft relocation plan and mark its source discoveries confirmed
+/// — but only discoveries whose moves actually landed. Confirming
+/// unconditionally is wrong: the populator's suppression treats `Confirmed`
+/// as "no need to ask again" specifically because a successful move
+/// soft-deletes the sources, dropping the cluster out of `candidates()`. If
+/// every item for a discovery fails, no source is soft-deleted, the cluster's
+/// membership is unchanged, and confirming it anyway would suppress that card
+/// forever even though nothing happened. A discovery with at least one moved
+/// item is still confirmed, matching the populator's existing
+/// "confirmed-but-not-yet-fully-moved" tolerance for the rest.
 pub fn execute_relocation_plan(
     request: ExecuteRelocationPlanRequest,
 ) -> Result<crate::ontology::catalog::executor::RelocationResult, String> {
@@ -1452,12 +1497,15 @@ pub fn execute_relocation_plan(
     let mut conn =
         crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
 
-    let discovery_ids: Vec<i64> = {
+    let result = execute_plan_with(&mut conn, request.plan_id, &SystemMover)
+        .map_err(|e| e.to_string())?;
+
+    let confirmable_ids: Vec<i64> = {
         let mut stmt = conn
             .prepare(
                 "SELECT DISTINCT discovery_id
                  FROM ontology_relocation_plan_items
-                 WHERE plan_id = ?1 AND discovery_id IS NOT NULL",
+                 WHERE plan_id = ?1 AND discovery_id IS NOT NULL AND status = 'moved'",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -1466,10 +1514,7 @@ pub fn execute_relocation_plan(
         rows.filter_map(Result::ok).collect()
     };
 
-    let result = execute_plan_with(&mut conn, request.plan_id, &SystemMover)
-        .map_err(|e| e.to_string())?;
-
-    for id in discovery_ids {
+    for id in confirmable_ids {
         let _ = crate::ontology::discoveries_resolve::confirm_discovery(&conn, id);
     }
 
@@ -1953,6 +1998,84 @@ mod tests {
         assert_eq!(response.failed.len(), 1);
         assert!(from.exists(), "the source must survive a failed move");
         assert!(!to.exists(), "no orphan copy may remain at the destination");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn copy_then_remove_rolls_back_whatever_is_at_the_destination_when_copy_fails() {
+        let root = test_root("copy-rollback-on-copy-failure");
+        fs::create_dir_all(&root).expect("create root");
+
+        let from = root.join("missing-source.bin"); // never created: copy fails immediately.
+        let to = root.join("dest.bin");
+        // Simulate a truncated file left behind by an earlier failed attempt —
+        // exactly what a mid-copy failure (e.g. a full destination disk) can
+        // leave. Before this fix, a copy error never ran the rollback (it was
+        // nested inside the remove_file call, which a copy error short-circuits
+        // past), so this garbage would still be sitting at `to` afterward.
+        write_file(&to, b"partial-garbage");
+
+        let result = copy_then_remove(&from, &to);
+
+        assert!(result.is_err(), "copying a missing source must fail");
+        assert!(!to.exists(), "a stale/partial destination must be rolled back when copy fails");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn a_relocate_undo_clears_deleted_at_on_the_restored_row() {
+        let root = test_root("undo-heals-index");
+        fs::create_dir_all(&root).expect("create root");
+        let index_path = root.join("index.sqlite");
+        let conn = rusqlite::Connection::open(&index_path).expect("open index");
+        for (_, sql) in crate::index::schema::ALL_MIGRATIONS {
+            conn.execute_batch(sql).expect("migrate");
+        }
+
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (1, NULL, ?1, 'root', 0, 0)",
+            rusqlite::params![root.to_string_lossy()],
+        )
+        .expect("seed folder");
+
+        let original = root.join("setup.exe");
+        // The row is left exactly as the catalog executor's `record_move`
+        // leaves it after a forward relocation: `path` still the original
+        // location, `deleted_at` set.
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at, deleted_at)
+             VALUES (1, 1, ?1, 'setup.exe', 8, 'installer', 0, 1)",
+            rusqlite::params![original.to_string_lossy()],
+        )
+        .expect("seed soft-deleted row");
+        drop(conn);
+
+        // Undo physically moving the file back to `original`, through the same
+        // generic `move_files` the frontend's undo toast calls.
+        let elsewhere = root.join("elsewhere.exe");
+        write_file(&elsewhere, b"payload");
+        let response = move_files(MoveFilesRequest {
+            moves: vec![MoveSpec {
+                from: elsewhere.to_string_lossy().to_string(),
+                to: original.to_string_lossy().to_string(),
+            }],
+            index_path: Some(index_path.clone()),
+        });
+        assert_eq!(response.moved, 1);
+
+        let conn = rusqlite::Connection::open(&index_path).expect("reopen index");
+        let deleted_at: Option<i64> = conn
+            .query_row(
+                "SELECT deleted_at FROM files WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("row still present");
+        assert!(deleted_at.is_none(), "moving a file back to its original path must heal deleted_at");
+        drop(conn);
 
         cleanup(&root);
     }

@@ -42,7 +42,7 @@ pub fn infer(
         return Ok(Some(learned));
     }
 
-    Ok(template_for(kind, media_kind))
+    Ok(template_for(zones, kind, media_kind))
 }
 
 /// The folder outside every inbox zone already holding the dominant share of
@@ -78,7 +78,7 @@ fn learned_home(
     if total == 0 {
         return Ok(None);
     }
-    let Some((path, count)) = outside.into_iter().max_by_key(|(_, n)| *n) else {
+    let Some((path, count)) = pick_dominant(outside) else {
         return Ok(None);
     };
     if count < MIN_LEARNED_FILES {
@@ -100,10 +100,31 @@ fn learned_home(
     }))
 }
 
+/// Picks the dominant `(path, count)` pair: highest count wins, ties broken on
+/// the path. `GROUP BY`'s row order is unspecified for equal counts, so a
+/// tie-agnostic pick (e.g. `max_by_key`) could hand back a different folder on
+/// a later run with the exact same data — and since the destination feeds the
+/// cluster fingerprint, that churns a card's identity and defeats rejection
+/// suppression. Sorting on path for ties makes the winner a pure function of
+/// the data, not of `GROUP BY`'s iteration order.
+fn pick_dominant(mut candidates: Vec<(String, i64)>) -> Option<(String, i64)> {
+    candidates.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    candidates.into_iter().next()
+}
+
 /// Cold-start conventions, relative to the user's home. Returns None when there
 /// is no sensible convention for the kind — an unclassifiable pile is left alone
-/// rather than swept somewhere arbitrary.
-fn template_for(kind: &str, media_kind: &str) -> Option<Destination> {
+/// rather than swept somewhere arbitrary — or when the conventional destination
+/// itself falls inside an inbox zone.
+///
+/// That last check matters: `learned_home` already refuses to adopt a folder
+/// inside a zone (see `ignores_a_home_that_is_itself_inside_a_zone` above), and
+/// this enforces the same invariant for templates. Without it, a template
+/// destination inside e.g. Downloads would immediately become a candidate
+/// again on the next scan, `learned_home` could never adopt it (it's in a
+/// zone), and the same template would fire forever — a suggestion that can
+/// never be actioned or permanently dismissed.
+fn template_for(zones: &[String], kind: &str, media_kind: &str) -> Option<Destination> {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .ok()
@@ -115,7 +136,11 @@ fn template_for(kind: &str, media_kind: &str) -> Option<Destination> {
         ("camera-photo", _) => ("Pictures\\Camera", "camera files usually belong together"),
         ("invoice", _) => ("Documents\\Invoices", "invoices usually belong together"),
         ("resume", _) => ("Documents\\Resume", "resumes usually belong together"),
-        (_, "installer") => ("Downloads\\Installers", "installers pile up in one place"),
+        // NOT Downloads\Installers: Downloads is an inbox zone (zones.rs), so a
+        // destination there would be indistinguishable from the mess it's meant
+        // to clear. Software\Installers, alongside the other conventional
+        // per-kind homes below, keeps installers out of the zone entirely.
+        (_, "installer") => ("Software\\Installers", "installers pile up in one place"),
         (_, "photo") => ("Pictures", "the conventional home for photos"),
         (_, "video") => ("Videos", "the conventional home for video"),
         (_, "music") => ("Music", "the conventional home for audio"),
@@ -123,12 +148,16 @@ fn template_for(kind: &str, media_kind: &str) -> Option<Destination> {
         _ => return None,
     };
 
-    Some(Destination {
+    let destination = Destination {
         path: format!("{home}\\{suffix}"),
         source: "template",
         reason: why.to_string(),
         confidence: 0.5,
-    })
+    };
+    if is_in_zone(&destination.path, zones) {
+        return None;
+    }
+    Some(destination)
 }
 
 #[cfg(test)]
@@ -335,5 +364,71 @@ mod tests {
             .expect("a destination");
         assert_eq!(got.path, "D:\\Docs");
         assert_eq!(got.source, "learned");
+    }
+
+    #[test]
+    fn pick_dominant_breaks_ties_on_path_deterministically() {
+        let winner = |order: Vec<(&str, i64)>| {
+            pick_dominant(order.into_iter().map(|(p, n)| (p.to_string(), n)).collect())
+                .unwrap()
+                .0
+        };
+        // Same data, opposite input order: the winner must not depend on which
+        // row `GROUP BY` happened to emit first for the tied count.
+        assert_eq!(winner(vec![("D:\\B", 10), ("D:\\A", 10)]), "D:\\A");
+        assert_eq!(winner(vec![("D:\\A", 10), ("D:\\B", 10)]), "D:\\A");
+        // A clear (non-tied) winner still wins regardless of tie-break.
+        assert_eq!(winner(vec![("D:\\A", 5), ("D:\\B", 9)]), "D:\\B");
+    }
+
+    #[test]
+    fn no_template_destination_ever_lands_inside_an_inbox_zone() {
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .expect("USERPROFILE/HOME must be set to run this test");
+        let home = home.trim_end_matches(['\\', '/']).to_string();
+        let zones = vec![format!("{home}\\Downloads"), format!("{home}\\Desktop")];
+
+        // Every (kind, media_kind) combination `template_for` knows a convention
+        // for — installers specifically used to point inside Downloads.
+        let cases = [
+            ("screenshot", "photo"),
+            ("camera-photo", "photo"),
+            ("invoice", "document"),
+            ("resume", "document"),
+            ("x", "installer"),
+            ("x", "photo"),
+            ("x", "video"),
+            ("x", "music"),
+            ("x", "document"),
+        ];
+        for (kind, media_kind) in cases {
+            if let Some(dest) = template_for(&zones, kind, media_kind) {
+                assert!(
+                    !is_in_zone(&dest.path, &zones),
+                    "{media_kind}/{kind} template destination {} is inside an inbox zone",
+                    dest.path
+                );
+            }
+        }
+
+        let installer = template_for(&zones, "x", "installer").expect("installer destination");
+        assert!(installer.path.ends_with("Software\\Installers"), "{}", installer.path);
+        assert!(!is_in_zone(&installer.path, &zones));
+    }
+
+    #[test]
+    fn a_zone_swallowing_the_template_destination_falls_through_to_none() {
+        // A pathological but possible configuration: the user's whole home
+        // drive is itself a scan root and thus a zone (e.g. `C:\` with no
+        // Downloads/Desktop split out). Every template destination lives under
+        // home, so all of them are swallowed — `template_for` must return None
+        // rather than propose a destination it just proved is inside a zone.
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .expect("USERPROFILE/HOME must be set to run this test");
+        let zones = vec![home];
+        assert!(template_for(&zones, "x", "installer").is_none());
+        assert!(template_for(&zones, "screenshot", "photo").is_none());
     }
 }
