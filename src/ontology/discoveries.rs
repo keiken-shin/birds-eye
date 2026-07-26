@@ -132,6 +132,34 @@ pub fn count_pending(conn: &Connection) -> Result<u64, OntologyError> {
     Ok(count as u64)
 }
 
+/// Pending count for one kind. `count_pending` spans every kind, which would
+/// make a relocation card inflate the Board's finding badge.
+pub fn count_pending_by_kind(conn: &Connection, kind: &str) -> Result<u64, OntologyError> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ontology_discoveries WHERE status = 'pending' AND kind = ?1",
+        params![kind],
+        |row| row.get(0),
+    )?;
+    Ok(count as u64)
+}
+
+/// Rows of one kind in one status — the read path rejection-suppression needs,
+/// since `list_pending_by_kind` hardcodes `status = 'pending'`.
+pub fn list_by_kind_and_status(
+    conn: &Connection,
+    kind: &str,
+    status: DiscoveryStatus,
+) -> Result<Vec<Discovery>, OntologyError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, kind, payload, status, confidence, potential_bytes_unlocked, created_at, resolved_at
+         FROM ontology_discoveries
+         WHERE kind = ?1 AND status = ?2
+         ORDER BY id ASC",
+    )?;
+    let rows = stmt.query_map(params![kind, status.as_str()], row_to_discovery)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(OntologyError::from)
+}
+
 fn row_to_discovery(row: &rusqlite::Row<'_>) -> rusqlite::Result<Discovery> {
     let status_str: String = row.get(3)?;
     let status = DiscoveryStatus::from_str(&status_str).map_err(|_| {
@@ -361,5 +389,38 @@ mod tests {
             }
             other => panic!("expected invalid column type, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn counts_and_lists_are_kind_scoped() {
+        let conn = migrated_conn();
+        for (kind, conf) in [("relocation", 0.9_f32), ("relocation", 0.5), ("backupOf-pair", 0.7)] {
+            insert_discovery(
+                &conn,
+                &NewDiscovery {
+                    kind,
+                    payload_json: "{}",
+                    confidence: conf,
+                    potential_bytes_unlocked: 0,
+                },
+            )
+            .unwrap();
+        }
+
+        assert_eq!(count_pending_by_kind(&conn, "relocation").unwrap(), 2);
+        assert_eq!(count_pending_by_kind(&conn, "backupOf-pair").unwrap(), 1);
+        assert_eq!(count_pending(&conn).unwrap(), 3);
+
+        let rejected_before =
+            list_by_kind_and_status(&conn, "relocation", DiscoveryStatus::Rejected).unwrap();
+        assert!(rejected_before.is_empty());
+
+        let first = list_pending_by_kind(&conn, "relocation", 10).unwrap()[0].id;
+        crate::ontology::discoveries_resolve::reject_discovery(&conn, first, None).unwrap();
+
+        let rejected_after =
+            list_by_kind_and_status(&conn, "relocation", DiscoveryStatus::Rejected).unwrap();
+        assert_eq!(rejected_after.len(), 1);
+        assert_eq!(rejected_after[0].id, first);
     }
 }
