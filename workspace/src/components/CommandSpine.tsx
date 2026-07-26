@@ -51,7 +51,8 @@ export function CommandSpine() {
   };
 
   const running = scan.view.status === "scanning" ? scan.view : null;
-  const boardBadge = (ontology?.pending_discoveries ?? 0) + pinned.length;
+  const boardBadge = (ontology?.pending_findings ?? 0) + pinned.length;
+  const catalogBadge = ontology?.pending_relocations ?? 0;
 
   return (
     <div className="flex h-[54px] flex-none items-center gap-3 border-b border-line bg-bar px-3.5">
@@ -112,6 +113,9 @@ export function CommandSpine() {
               <Icon size={14} strokeWidth={active ? 2.2 : 1.8} aria-hidden />
               {active ? <span>{item.label}</span> : null}
               {item.view === "board" && boardBadge > 0 && !active ? (
+                <span className="absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
+              ) : null}
+              {item.view === "catalog" && catalogBadge > 0 && !active ? (
                 <span className="absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
               ) : null}
             </button>

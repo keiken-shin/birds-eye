@@ -934,10 +934,14 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
     }
     case "treemap_lens_data":
       return done(ontologyEnabled ? LENS : []);
-    case "ontology_status":
+    case "ontology_status": {
+      const pendingFindings = DISCOVERIES.filter((d) => d.status === "Pending").length;
+      const pendingRelocations = RELOCATION_CARDS.filter((c) => c.status === "Pending").length;
       return done({
         enabled: ontologyEnabled,
-        pending_discoveries: DISCOVERIES.filter((d) => d.status === "Pending").length,
+        pending_discoveries: pendingFindings + pendingRelocations,
+        pending_findings: pendingFindings,
+        pending_relocations: pendingRelocations,
         total_files: 391_208,
         populators: [
           { name: "heuristics", status: "completed", files_visited: 391_208, discoveries_emitted: 4, last_error: null },
@@ -945,6 +949,7 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
           { name: "perceptual-hash", status: "completed", files_visited: 96_204, discoveries_emitted: 2, last_error: null },
         ],
       });
+    }
     case "set_ontology_enabled":
       ontologyEnabled = Boolean(request.enabled);
       return done(null);

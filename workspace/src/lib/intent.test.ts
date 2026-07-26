@@ -33,4 +33,14 @@ describe("parseIntent", () => {
     // "orphan sources" view absent from this list → must search, not invent it.
     expect(parseIntent("orphan sources", VIEWS)).toEqual({ kind: "search", text: "orphan sources" });
   });
+
+  it("routes organizing words to the catalog view", () => {
+    for (const text of ["catalog", "organize", "tidy", "sort", "misplaced", "arrange"]) {
+      expect(parseIntent(text, [])).toEqual({ kind: "stage", view: "catalog" });
+    }
+  });
+
+  it("does not hijack a filename that merely contains an organizing word", () => {
+    expect(parseIntent("sorted-report.pdf", [])).toEqual({ kind: "search", text: "sorted-report.pdf" });
+  });
 });

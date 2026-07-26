@@ -1213,6 +1213,11 @@ pub struct OntologyStatusRequest {
 pub struct OntologyStatusDto {
     pub enabled: bool,
     pub pending_discoveries: u64,
+    /// Pending discoveries excluding relocations — what the Board renders
+    /// (`derivedFrom-pattern`, `backupOf-pair`, etc).
+    pub pending_findings: u64,
+    /// Pending relocation cards — what the Catalog view renders.
+    pub pending_relocations: u64,
     /// Live files in the index — the denominator for populator progress.
     pub total_files: u64,
     /// Per-populator progress so the UI can say "enrichment incomplete" honestly
@@ -1234,6 +1239,10 @@ pub fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusD
     let enabled = enabled::is_enabled(&conn).map_err(|e| e.to_string())?;
     let pending_discoveries =
         crate::ontology::discoveries::count_pending(&conn).map_err(|e| e.to_string())?;
+    let pending_relocations =
+        crate::ontology::discoveries::count_pending_by_kind(&conn, "relocation")
+            .map_err(|e| e.to_string())?;
+    let pending_findings = pending_discoveries.saturating_sub(pending_relocations);
     let total_files: i64 = conn
         .query_row("SELECT COUNT(*) FROM files WHERE deleted_at IS NULL", [], |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -1259,6 +1268,8 @@ pub fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusD
     Ok(OntologyStatusDto {
         enabled,
         pending_discoveries,
+        pending_findings,
+        pending_relocations,
         total_files: total_files.max(0) as u64,
         populators,
     })

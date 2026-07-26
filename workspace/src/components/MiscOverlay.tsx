@@ -32,10 +32,11 @@ const GROUPS: Array<{ title: string; rows: Row[] }> = [
     ],
   },
   {
-    title: "Cleanup",
+    title: "Staging",
     rows: [
       { label: "Stage selection", keys: isMac ? "⇧↵" : "Shift+Enter" },
       { label: "Review & clean", keys: isMac ? "⌘↵" : "Ctrl+Enter" },
+      { label: "Review & move", keys: isMac ? "⌘↵" : "Ctrl+Enter" },
       { label: "Undo last clean", keys: `${MOD}Z` },
     ],
   },

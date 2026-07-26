@@ -4,6 +4,7 @@ import {
   Copy,
   Database,
   Files as FilesIcon,
+  FolderInput,
   FolderTree,
   HardDrive,
   Recycle,
@@ -200,6 +201,7 @@ export function OverviewView() {
               <QuickAction icon={Sparkles} tint="var(--color-primary)" title="Clean up" sub={`${formatBytes(reclaimableTotal)} reclaimable`} onClick={() => setView("cleanup")} />
               <QuickAction icon={FolderTree} tint="var(--color-cat-archive)" title="Explore treemap" sub="visual space map" onClick={() => setView("treemap")} />
               <QuickAction icon={Database} tint="var(--color-cat-document)" title="Largest files" sub="top space hogs" onClick={() => setView("files")} />
+              <QuickAction icon={FolderInput} tint="var(--color-cat-model)" title="Catalog" sub="files that belong elsewhere" onClick={() => setView("catalog")} />
             </div>
           </Card>
 

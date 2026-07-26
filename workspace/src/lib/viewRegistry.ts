@@ -2,6 +2,7 @@ import {
   CalendarClock,
   Copy,
   Files,
+  FolderTree,
   Gauge,
   LayoutGrid,
   Network,
@@ -13,8 +14,8 @@ import type { StageView } from "../state/types";
 export type StageViewEntry = { view: StageView; label: string; icon: LucideIcon; key: string };
 
 /**
- * The seven analysis views shown in the top-bar switcher, in shortcut order
- * (1–7). The "scans" system view lives on the rail, not here.
+ * The eight analysis views shown in the top-bar switcher, in shortcut order
+ * (1–8). The "scans" system view lives on the rail, not here.
  */
 export const STAGE_VIEWS: StageViewEntry[] = [
   { view: "overview", label: "Overview", icon: Gauge, key: "1" },
@@ -24,4 +25,5 @@ export const STAGE_VIEWS: StageViewEntry[] = [
   { view: "duplicates", label: "Duplicates", icon: Copy, key: "5" },
   { view: "cleanup", label: "Cleanup", icon: Sparkles, key: "6" },
   { view: "timeline", label: "Timeline", icon: CalendarClock, key: "7" },
+  { view: "catalog", label: "Catalog", icon: FolderTree, key: "8" },
 ];
