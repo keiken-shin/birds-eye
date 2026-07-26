@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 10;
+pub const CURRENT_SCHEMA_VERSION: u32 = 11;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -503,6 +503,56 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (10, strftime('%s', 'now'));
 "#;
 
+pub const MIGRATION_011: &str = r#"
+-- Cataloging: relocation suggestions and their reviewed execution.
+-- `catalog_rules` holds user-taught destinations (saved after a manual move or
+-- an edited suggestion) and outranks every inferred destination.
+-- Relocation plans mirror ontology_cleanup_plans, except a relocation is an
+-- explicit per-file (from, to) list rather than a recomputable scope predicate,
+-- so the destinations live in the items table.
+CREATE TABLE IF NOT EXISTS catalog_rules (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  criteria TEXT NOT NULL,
+  destination TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('saved-after-move', 'saved-after-edit')),
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ontology_relocation_plans (
+  id INTEGER PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  executed_at INTEGER,
+  status TEXT NOT NULL CHECK (status IN ('draft', 'executed', 'cancelled'))
+);
+
+CREATE TABLE IF NOT EXISTS ontology_relocation_plan_items (
+  id INTEGER PRIMARY KEY,
+  plan_id INTEGER NOT NULL REFERENCES ontology_relocation_plans(id) ON DELETE CASCADE,
+  discovery_id INTEGER,
+  file_id INTEGER NOT NULL,
+  from_path TEXT NOT NULL,
+  to_path TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('planned', 'moved', 'skipped', 'failed')) DEFAULT 'planned',
+  note TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_relocation_items_plan ON ontology_relocation_plan_items(plan_id, status);
+
+-- Learned-home inference groups files by media_kind per folder; without this the
+-- pass is a full scan of `files` for every kind on every enrichment run.
+CREATE INDEX IF NOT EXISTS idx_files_kind_folder ON files(media_kind, folder_id);
+
+-- Rejection suppression reads rejected rows of one kind; idx_discoveries_status_roi
+-- leads with status and cannot serve a kind lookup.
+CREATE INDEX IF NOT EXISTS idx_discoveries_kind_status ON ontology_discoveries(kind, status);
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (11, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -514,6 +564,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (8, MIGRATION_008),
     (9, MIGRATION_009),
     (10, MIGRATION_010),
+    (11, MIGRATION_011),
 ];
 
 #[cfg(test)]
@@ -522,8 +573,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 10);
-        assert_eq!(ALL_MIGRATIONS.len(), 10);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 11);
+        assert_eq!(ALL_MIGRATIONS.len(), 11);
     }
 
     #[test]
@@ -542,6 +593,43 @@ mod tests {
                 )
                 .expect("query sqlite_master");
             assert_eq!(count, 1, "{table} must exist after migrations");
+        }
+    }
+
+    #[test]
+    fn migration_011_creates_catalog_tables() {
+        use rusqlite::Connection;
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).expect("migration applies");
+        }
+        for table in [
+            "catalog_rules",
+            "ontology_relocation_plans",
+            "ontology_relocation_plan_items",
+        ] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |r| r.get(0),
+                )
+                .expect("query sqlite_master");
+            assert_eq!(count, 1, "{table} must exist after migrations");
+        }
+        for index in [
+            "idx_files_kind_folder",
+            "idx_discoveries_kind_status",
+            "idx_relocation_items_plan",
+        ] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                    [index],
+                    |r| r.get(0),
+                )
+                .expect("query sqlite_master");
+            assert_eq!(count, 1, "{index} must exist after migrations");
         }
     }
 
