@@ -939,7 +939,6 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       const pendingRelocations = RELOCATION_CARDS.filter((c) => c.status === "Pending").length;
       return done({
         enabled: ontologyEnabled,
-        pending_discoveries: pendingFindings + pendingRelocations,
         pending_findings: pendingFindings,
         pending_relocations: pendingRelocations,
         total_files: 391_208,

@@ -7,7 +7,7 @@ import { Kbd } from "./ui/Chip";
 
 type Row = { label: string; keys: string };
 
-/** Derived from STAGE_VIEWS so the 1–7 bindings can never drift from the switcher. */
+/** Derived from STAGE_VIEWS so the 1–8 bindings can never drift from the switcher. */
 const GROUPS: Array<{ title: string; rows: Row[] }> = [
   {
     title: "Views",

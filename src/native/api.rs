@@ -1,6 +1,7 @@
 use crate::index::writer::ScanMode;
 use crate::index::IndexWriter;
 use crate::ontology::attrs::{assert_attr, get_attrs, NewAssertion};
+use crate::ontology::catalog::payload::RELOCATION_KIND;
 use crate::ontology::cleanup::executor::{execute_plan_with, CleanupResult, SystemTrasher, DEFAULT_RETENTION_DAYS};
 use crate::ontology::cleanup::plans::{candidates_for_plan, create_plan, CleanupScope};
 use crate::ontology::cleanup::predicate::list_all_candidates;
@@ -1212,9 +1213,11 @@ pub struct OntologyStatusRequest {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct OntologyStatusDto {
     pub enabled: bool,
-    pub pending_discoveries: u64,
-    /// Pending discoveries excluding relocations — what the Board renders
-    /// (`derivedFrom-pattern`, `backupOf-pair`, etc).
+    /// Sum of only the discovery kinds the Board actually renders. This must
+    /// stay in step with `FINDING_KINDS` in
+    /// `workspace/src/lib/discoveries.ts` — any kind not listed there (e.g.
+    /// `near-duplicate-cluster`, emitted by `PerceptualHashPopulator`) must
+    /// stay out of this sum, or the badge overcounts what the Board draws.
     pub pending_findings: u64,
     /// Pending relocation cards — what the Catalog view renders.
     pub pending_relocations: u64,
@@ -1237,12 +1240,20 @@ pub struct PopulatorStateDto {
 pub fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusDto, String> {
     let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     let enabled = enabled::is_enabled(&conn).map_err(|e| e.to_string())?;
-    let pending_discoveries =
-        crate::ontology::discoveries::count_pending(&conn).map_err(|e| e.to_string())?;
-    let pending_relocations =
-        crate::ontology::discoveries::count_pending_by_kind(&conn, "relocation")
+    // Explicit sum over the Board-rendered kinds — see the doc comment on
+    // `pending_findings` above. Do not swap this for `count_pending` minus
+    // relocations: any third kind (e.g. `near-duplicate-cluster`) would
+    // silently re-inflate the Board's badge again.
+    let pending_findings = crate::ontology::discoveries::count_pending_by_kind(
+        &conn,
+        "derivedFrom-pattern",
+    )
+    .map_err(|e| e.to_string())?
+        + crate::ontology::discoveries::count_pending_by_kind(&conn, "backupOf-pair")
             .map_err(|e| e.to_string())?;
-    let pending_findings = pending_discoveries.saturating_sub(pending_relocations);
+    let pending_relocations =
+        crate::ontology::discoveries::count_pending_by_kind(&conn, RELOCATION_KIND)
+            .map_err(|e| e.to_string())?;
     let total_files: i64 = conn
         .query_row("SELECT COUNT(*) FROM files WHERE deleted_at IS NULL", [], |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -1267,7 +1278,6 @@ pub fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusD
         .map_err(|e| e.to_string())?;
     Ok(OntologyStatusDto {
         enabled,
-        pending_discoveries,
         pending_findings,
         pending_relocations,
         total_files: total_files.max(0) as u64,
@@ -2236,6 +2246,59 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ontology_status_pending_findings_excludes_non_board_kinds() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use crate::ontology::discoveries::{insert_discovery, NewDiscovery};
+        use rusqlite::Connection;
+
+        let root = test_root("ontology-status-findings");
+        fs::create_dir_all(&root).expect("create root");
+        let index_path = root.join("index.sqlite");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            // One pending discovery of every live kind: the two the Board
+            // renders, plus a `near-duplicate-cluster` (emitted by
+            // PerceptualHashPopulator) and a relocation — neither of which
+            // the Board draws.
+            for kind in [
+                "derivedFrom-pattern",
+                "backupOf-pair",
+                "near-duplicate-cluster",
+                RELOCATION_KIND,
+            ] {
+                insert_discovery(
+                    &conn,
+                    &NewDiscovery {
+                        kind,
+                        payload_json: "{}",
+                        confidence: 0.8,
+                        potential_bytes_unlocked: 0,
+                    },
+                )
+                .expect("insert discovery");
+            }
+        }
+
+        let status = ontology_status(OntologyStatusRequest {
+            index_path: index_path.clone(),
+        })
+        .expect("ontology_status command failed");
+
+        assert_eq!(
+            status.pending_findings, 2,
+            "pending_findings must count only derivedFrom-pattern + backupOf-pair, \
+             not near-duplicate-cluster or relocation"
+        );
+        assert_eq!(status.pending_relocations, 1);
+
+        cleanup(&root);
     }
 
     #[test]

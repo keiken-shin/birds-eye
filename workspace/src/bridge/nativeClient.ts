@@ -466,7 +466,6 @@ export type NativePopulatorState = {
 
 export type NativeOntologyStatus = {
   enabled: boolean;
-  pending_discoveries: number;
   pending_findings: number;
   pending_relocations: number;
   total_files: number;
