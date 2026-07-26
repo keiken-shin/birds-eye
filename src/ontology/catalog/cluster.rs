@@ -143,7 +143,12 @@ pub fn cluster(candidates: Vec<Candidate>) -> Vec<(String, String, Vec<Candidate
         .into_iter()
         .map(|((zone, kind), members)| (zone, kind, members))
         .collect();
-    out.sort_by(|a, b| b.2.len().cmp(&a.2.len()).then_with(|| a.1.cmp(&b.1)));
+    out.sort_by(|a, b| {
+        b.2.len()
+            .cmp(&a.2.len())
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.0.cmp(&b.0))
+    });
     out
 }
 
@@ -288,5 +293,115 @@ mod tests {
                 ("invoice".to_string(), 1),
             ]
         );
+    }
+
+    #[test]
+    fn cluster_order_is_deterministic_and_total() {
+        let make = |id: i64, name: &str, kind: &str, zone: &str| Candidate {
+            file_id: id,
+            path: format!("{zone}\\{name}"),
+            name: name.to_string(),
+            size: 10,
+            media_kind: kind.to_string(),
+            zone: zone.to_string(),
+        };
+
+        // Two zones each produce a 3-member "screenshot" cluster (ties on both
+        // size and refined kind — the exact collision `inbox_zones()` hits every
+        // time, since it always returns Downloads and Desktop). A same-size
+        // "camera-photo" cluster and a smaller "document" cluster round it out so
+        // all three sort levels (size desc, kind asc, zone asc) get exercised.
+        let fresh_input = || {
+            vec![
+                make(1, "Screenshot 1.png", "photo", "C:\\Downloads"),
+                make(2, "Screenshot 2.png", "photo", "C:\\Downloads"),
+                make(3, "Screenshot 3.png", "photo", "C:\\Downloads"),
+                make(4, "Screenshot 4.png", "photo", "C:\\Desktop"),
+                make(5, "Screenshot 5.png", "photo", "C:\\Desktop"),
+                make(6, "Screenshot 6.png", "photo", "C:\\Desktop"),
+                make(7, "IMG_1.jpg", "photo", "C:\\Desktop"),
+                make(8, "IMG_2.jpg", "photo", "C:\\Desktop"),
+                make(9, "IMG_3.jpg", "photo", "C:\\Desktop"),
+                make(10, "notes1.md", "document", "C:\\Downloads"),
+                make(11, "notes2.md", "document", "C:\\Downloads"),
+            ]
+        };
+
+        let expected = vec![
+            ("C:\\Desktop".to_string(), "camera-photo".to_string()),
+            ("C:\\Desktop".to_string(), "screenshot".to_string()),
+            ("C:\\Downloads".to_string(), "screenshot".to_string()),
+            ("C:\\Downloads".to_string(), "document".to_string()),
+        ];
+
+        for _ in 0..5 {
+            // Fresh input each time so a fresh HashMap (and its randomized
+            // iteration order) is built underneath `cluster()`.
+            let clusters = cluster(fresh_input());
+            let order: Vec<(String, String)> = clusters
+                .iter()
+                .map(|(zone, kind, _)| (zone.clone(), kind.clone()))
+                .collect();
+            assert_eq!(order, expected, "cluster() order must be total and stable");
+        }
+    }
+
+    #[test]
+    fn candidates_attribute_the_correct_zone_across_multiple_zones() {
+        let conn = migrated_conn(); // folder 1 = 'C:\Inbox'
+        add_file(&conn, 1, "inbox-file.txt", "document", 10);
+
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (2, NULL, 'D:\\Desktop', 'Desktop', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+             VALUES (2, 2, 'D:\\Desktop\\desktop-file.txt', 'desktop-file.txt', 20, 'document', 0)",
+            [],
+        )
+        .unwrap();
+
+        // A third folder that belongs to neither requested zone.
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (3, NULL, 'E:\\Projects', 'Projects', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+             VALUES (3, 3, 'E:\\Projects\\outside-file.txt', 'outside-file.txt', 30, 'document', 0)",
+            [],
+        )
+        .unwrap();
+
+        let zones = vec!["C:\\Inbox".to_string(), "D:\\Desktop".to_string()];
+        let found = candidates(&conn, &zones).unwrap();
+
+        assert_eq!(found.len(), 2, "the outside folder contributes nothing: {found:?}");
+        assert!(!found.iter().any(|c| c.file_id == 3));
+
+        let inbox = found.iter().find(|c| c.file_id == 1).expect("inbox file present");
+        assert_eq!(inbox.zone, "C:\\Inbox");
+        let desktop = found.iter().find(|c| c.file_id == 2).expect("desktop file present");
+        assert_eq!(desktop.zone, "D:\\Desktop");
+    }
+
+    #[test]
+    fn a_file_with_an_unrelated_role_is_still_a_candidate() {
+        let conn = migrated_conn();
+        add_file(&conn, 1, "keep.pdf", "document", 10);
+        add_role(&conn, 1, "C:\\Inbox\\keep.pdf", "backup");
+
+        let found = candidates(&conn, &["C:\\Inbox".to_string()]).unwrap();
+        assert_eq!(
+            found.len(),
+            1,
+            "an unprotected role must not disqualify the file: {found:?}"
+        );
+        assert_eq!(found[0].name, "keep.pdf");
     }
 }
