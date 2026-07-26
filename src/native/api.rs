@@ -1279,6 +1279,252 @@ pub fn set_ontology_enabled(request: SetOntologyEnabledRequest) -> Result<(), St
     }
 }
 
+// ---- Cataloging: relocation plans, execution, members, rules ----
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RelocationMoveInput {
+    pub file_id: i64,
+    pub from: String,
+    pub to: String,
+    #[serde(default)]
+    pub discovery_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RelocationPlanRequest {
+    pub index_path: PathBuf,
+    pub moves: Vec<RelocationMoveInput>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DroppedMove {
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct RelocationPlanResponse {
+    pub plan_id: i64,
+    pub total_files: u64,
+    pub total_bytes: u64,
+    pub items: Vec<crate::ontology::catalog::plans::PlannedItem>,
+    /// Files re-verification removed, with the reason to show inline.
+    pub dropped: Vec<DroppedMove>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExecuteRelocationPlanRequest {
+    pub index_path: PathBuf,
+    pub plan_id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RelocationMembersRequest {
+    pub index_path: PathBuf,
+    pub discovery_id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CatalogRulesRequest {
+    pub index_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SaveCatalogRuleRequest {
+    pub index_path: PathBuf,
+    pub name: String,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub name_contains: Option<String>,
+    #[serde(default)]
+    pub zone: Option<String>,
+    pub destination: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeleteCatalogRuleRequest {
+    pub index_path: PathBuf,
+    pub id: i64,
+}
+
+/// Re-verify a set of proposed moves and persist them as a draft plan.
+pub fn relocation_plan(request: RelocationPlanRequest) -> Result<RelocationPlanResponse, String> {
+    use crate::ontology::catalog::plans::{create_plan, plan_items, PlanItem};
+
+    let conn =
+        crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+
+    let mut items = Vec::new();
+    let mut dropped = Vec::new();
+    let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for input in request.moves {
+        let row: Option<(i64, Option<i64>)> = conn
+            .query_row(
+                "SELECT size, deleted_at FROM files WHERE id = ?1",
+                rusqlite::params![input.file_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok();
+
+        let Some((size, deleted_at)) = row else {
+            dropped.push(DroppedMove {
+                path: input.from,
+                reason: "no longer in the index".to_owned(),
+            });
+            continue;
+        };
+        if deleted_at.is_some() {
+            dropped.push(DroppedMove {
+                path: input.from,
+                reason: "no longer in the index".to_owned(),
+            });
+            continue;
+        }
+        if !Path::new(&input.from).exists() {
+            dropped.push(DroppedMove {
+                path: input.from,
+                reason: "no longer on disk".to_owned(),
+            });
+            continue;
+        }
+        if Path::new(&input.to).exists() || !claimed.insert(input.to.clone()) {
+            dropped.push(DroppedMove {
+                path: input.from,
+                reason: "a file already claims that name at the destination".to_owned(),
+            });
+            continue;
+        }
+
+        items.push(PlanItem {
+            file_id: input.file_id,
+            from_path: input.from,
+            to_path: input.to,
+            size,
+            discovery_id: input.discovery_id,
+        });
+    }
+
+    let plan_id = create_plan(&conn, &items).map_err(|e| e.to_string())?;
+    let persisted = plan_items(&conn, plan_id).map_err(|e| e.to_string())?;
+    let total_files = persisted.len() as u64;
+    let total_bytes = persisted.iter().map(|i| i.size.max(0) as u64).sum();
+
+    Ok(RelocationPlanResponse {
+        plan_id,
+        total_files,
+        total_bytes,
+        items: persisted,
+        dropped,
+    })
+}
+
+/// Execute a draft relocation plan and mark its source discoveries confirmed.
+pub fn execute_relocation_plan(
+    request: ExecuteRelocationPlanRequest,
+) -> Result<crate::ontology::catalog::executor::RelocationResult, String> {
+    use crate::ontology::catalog::executor::{execute_plan_with, SystemMover};
+
+    let mut conn =
+        crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+
+    let discovery_ids: Vec<i64> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT discovery_id
+                 FROM ontology_relocation_plan_items
+                 WHERE plan_id = ?1 AND discovery_id IS NOT NULL",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![request.plan_id], |row| row.get::<_, i64>(0))
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(Result::ok).collect()
+    };
+
+    let result = execute_plan_with(&mut conn, request.plan_id, &SystemMover)
+        .map_err(|e| e.to_string())?;
+
+    for id in discovery_ids {
+        let _ = crate::ontology::discoveries_resolve::confirm_discovery(&conn, id);
+    }
+
+    Ok(result)
+}
+
+/// The full member list for one card. The payload embeds only the first 50.
+pub fn relocation_members(
+    request: RelocationMembersRequest,
+) -> Result<Vec<crate::ontology::catalog::payload::RelocationMember>, String> {
+    use crate::ontology::catalog::cluster::{candidates, refine_kind};
+    use crate::ontology::catalog::payload::{RelocationMember, RelocationPayload};
+    use crate::ontology::catalog::zones::inbox_zones;
+    use crate::ontology::discoveries::get_discovery;
+
+    let conn =
+        crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    let discovery = get_discovery(&conn, request.discovery_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("discovery {} not found", request.discovery_id))?;
+    let payload: RelocationPayload =
+        serde_json::from_str(&discovery.payload).map_err(|e| e.to_string())?;
+
+    let zones = inbox_zones(&conn).map_err(|e| e.to_string())?;
+    let all = candidates(&conn, &zones).map_err(|e| e.to_string())?;
+
+    Ok(all
+        .into_iter()
+        .filter(|c| c.zone == payload.zone && refine_kind(&c.media_kind, &c.name) == payload.kind)
+        .map(|c| RelocationMember {
+            file_id: c.file_id,
+            path: c.path,
+            name: c.name,
+            size: c.size,
+        })
+        .collect())
+}
+
+/// List the user's saved catalog rules.
+pub fn catalog_rules(
+    request: CatalogRulesRequest,
+) -> Result<Vec<crate::ontology::catalog::rules::CatalogRule>, String> {
+    let conn =
+        crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    crate::ontology::catalog::rules::list_rules(&conn).map_err(|e| e.to_string())
+}
+
+/// Save a rule taught by a completed move or an edited suggestion.
+pub fn save_catalog_rule(request: SaveCatalogRuleRequest) -> Result<i64, String> {
+    use crate::ontology::catalog::rules::{create_rule, NewCatalogRule, RuleCriteria};
+
+    let conn =
+        crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    let criteria = RuleCriteria {
+        kind: request.kind,
+        name_contains: request.name_contains,
+        zone: request.zone,
+    };
+    create_rule(
+        &conn,
+        &NewCatalogRule {
+            name: &request.name,
+            criteria: &criteria,
+            destination: &request.destination,
+            source: &request.source,
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Forget a saved rule.
+pub fn delete_catalog_rule(request: DeleteCatalogRuleRequest) -> Result<(), String> {
+    let conn =
+        crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    crate::ontology::catalog::rules::delete_rule(&conn, request.id).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1967,6 +2213,155 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn relocation_plan_then_execute_round_trips() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("relocation-api");
+        let inbox = root.join("inbox");
+        let dest = root.join("dest");
+        fs::create_dir_all(&inbox).expect("create inbox");
+        fs::create_dir_all(&dest).expect("create dest");
+
+        let from = inbox.join("a.exe");
+        write_file(&from, b"payload!!");
+        let to = dest.join("a.exe");
+        let index_path = root.join("index.sqlite");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, ?1, 'inbox', 0, 0)",
+                rusqlite::params![inbox.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (1, 1, ?1, 'a.exe', 9, 'installer', 0)",
+                rusqlite::params![from.to_string_lossy()],
+            )
+            .unwrap();
+        }
+
+        let plan = relocation_plan(RelocationPlanRequest {
+            index_path: index_path.clone(),
+            moves: vec![RelocationMoveInput {
+                file_id: 1,
+                from: from.to_string_lossy().to_string(),
+                to: to.to_string_lossy().to_string(),
+                discovery_id: None,
+            }],
+        })
+        .expect("relocation_plan");
+
+        assert_eq!(plan.total_files, 1);
+        assert_eq!(plan.items.len(), 1);
+        assert_eq!(plan.items[0].to_path, to.to_string_lossy());
+
+        let result = execute_relocation_plan(ExecuteRelocationPlanRequest {
+            index_path: index_path.clone(),
+            plan_id: plan.plan_id,
+        })
+        .expect("execute_relocation_plan");
+
+        assert_eq!(result.moved, 1);
+        assert_eq!(result.pairs.len(), 1);
+        assert!(to.exists(), "the file landed at the destination");
+        assert!(!from.exists(), "the source is gone");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn relocation_plan_drops_a_vanished_source() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("relocation-vanished");
+        fs::create_dir_all(&root).expect("create root");
+        let index_path = root.join("index.sqlite");
+        let ghost = root.join("ghost.exe");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, ?1, 'root', 0, 0)",
+                rusqlite::params![root.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (1, 1, ?1, 'ghost.exe', 9, 'installer', 0)",
+                rusqlite::params![ghost.to_string_lossy()],
+            )
+            .unwrap();
+        }
+
+        let plan = relocation_plan(RelocationPlanRequest {
+            index_path,
+            moves: vec![RelocationMoveInput {
+                file_id: 1,
+                from: ghost.to_string_lossy().to_string(),
+                to: root.join("moved.exe").to_string_lossy().to_string(),
+                discovery_id: None,
+            }],
+        })
+        .expect("relocation_plan");
+
+        assert_eq!(plan.total_files, 0, "a file that is not on disk is dropped at plan time");
+        assert_eq!(plan.dropped.len(), 1);
+        assert!(plan.dropped[0].reason.contains("no longer"));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn catalog_rules_crud_round_trips() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("catalog-rules-api");
+        fs::create_dir_all(&root).expect("create root");
+        let index_path = root.join("index.sqlite");
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+        }
+
+        let id = save_catalog_rule(SaveCatalogRuleRequest {
+            index_path: index_path.clone(),
+            name: "Invoices".to_string(),
+            kind: Some("invoice".to_string()),
+            name_contains: None,
+            zone: None,
+            destination: "D:\\Finance".to_string(),
+            source: "saved-after-move".to_string(),
+        })
+        .expect("save_catalog_rule");
+
+        let listed = catalog_rules(CatalogRulesRequest { index_path: index_path.clone() })
+            .expect("catalog_rules");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].destination, "D:\\Finance");
+
+        delete_catalog_rule(DeleteCatalogRuleRequest { index_path: index_path.clone(), id })
+            .expect("delete_catalog_rule");
+        assert!(catalog_rules(CatalogRulesRequest { index_path }).unwrap().is_empty());
+
+        cleanup(&root);
     }
 }
 
