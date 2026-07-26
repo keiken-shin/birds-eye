@@ -60,11 +60,18 @@ pub fn create_plan(conn: &Connection, items: &[PlanItem]) -> Result<i64, Ontolog
         Ok(plan_id)
     })();
 
+    // Both commit and insert failures must rollback to avoid leaving the
+    // connection in an open, uncommitted transaction. Manual transaction
+    // control is required here because create_plan takes &Connection, which
+    // prevents using Connection::transaction() (that requires &mut Connection).
     match result {
-        Ok(plan_id) => {
-            conn.execute("COMMIT", [])?;
-            Ok(plan_id)
-        }
+        Ok(plan_id) => match conn.execute("COMMIT", []) {
+            Ok(_) => Ok(plan_id),
+            Err(err) => {
+                let _ = conn.execute("ROLLBACK", []);
+                Err(err.into())
+            }
+        },
         Err(err) => {
             let _ = conn.execute("ROLLBACK", []);
             Err(err)
