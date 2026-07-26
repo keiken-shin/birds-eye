@@ -22,7 +22,7 @@ export type MoveDialogProps = {
   paths: string[];
   onClose: () => void;
   /** Fired once every file landed in the destination (just before the dialog closes). */
-  onMoved: () => void;
+  onMoved: (destination: string) => void;
 };
 
 /** Join destination + basename using the separator style the destination uses (default \). */
@@ -44,6 +44,7 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
 
   const [native, setNative] = useState(false);
   const [dest, setDest] = useState("");
+  const [subfolder, setSubfolder] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Paths still to move — shrinks to the failed set after a partial failure. */
@@ -82,6 +83,10 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
   const shown = remaining.slice(0, SHOWN_LIMIT);
   const extra = remaining.length - shown.length;
   const trimmedDest = dest.trim();
+  // The destination field is readOnly in native mode (picked via the OS dialog),
+  // so an optional subfolder name is the only way to type a new folder there.
+  // `move_files` already creates the destination's parent, so this is frontend-only.
+  const target = subfolder.trim() ? joinDest(trimmedDest, subfolder.trim()) : trimmedDest;
   const noun = remaining.length === 1 ? "file" : "files";
 
   const browse = async () => {
@@ -99,7 +104,7 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
     setBusy(true);
     setError(null);
     try {
-      const moves = remaining.map((from) => ({ from, to: joinDest(trimmedDest, baseName(from)) }));
+      const moves = remaining.map((from) => ({ from, to: joinDest(target, baseName(from)) }));
       const result = await moveFiles(moves, indexPath);
       if (result.failed.length < remaining.length) {
         // Something moved on disk — repaint every lens, and (when nothing is
@@ -110,7 +115,7 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
         }
       }
       if (result.failed.length === 0) {
-        onMoved();
+        onMoved(target);
         onClose();
         return;
       }
@@ -216,6 +221,19 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
               </Button>
             ) : null}
           </div>
+          <label className="mt-2 flex flex-col gap-1">
+            <span className="text-105 text-faint">New subfolder (optional)</span>
+            <input
+              value={subfolder}
+              onChange={(e) => setSubfolder(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void confirm();
+              }}
+              placeholder="e.g. Invoices"
+              spellCheck={false}
+              className="rounded-[7px] border border-line-input bg-field px-2.5 py-1.5 text-115 text-ink outline-none"
+            />
+          </label>
           <div className="mt-1.5 text-105 text-faint">
             Moves the file on disk — the index updates and a rescan keeps folder sizes accurate.
           </div>

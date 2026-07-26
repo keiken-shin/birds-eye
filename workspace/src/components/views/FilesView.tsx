@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Lock, Plus, ScanLine, Search, SearchX, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, FolderInput, Lock, Plus, ScanLine, Search, SearchX, X } from "lucide-react";
 import { ageDays, formatAge, formatBytes, formatCount } from "@bridge/domain";
 import {
   listSavedViews,
   runSavedView,
+  saveCatalogRule,
   searchNativeIndex,
   type NativeSavedView,
 } from "@bridge/nativeClient";
@@ -13,6 +14,7 @@ import { CATEGORIES, CATEGORY_ORDER, categoryOf, type MediaKind } from "../../li
 import { Card, EmptyState } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Chip, Tag } from "../ui/Chip";
+import { MoveDialog } from "../MoveDialog";
 import { ViewHeader } from "./ViewHeader";
 
 const SEARCH_LIMIT = 500;
@@ -68,9 +70,28 @@ export function FilesView() {
   const [text, setText] = useState(resultsQuery?.kind === "search" ? resultsQuery.text : "");
   const [kindFilter, setKindFilter] = useState<MediaKind | null>(null);
   const [sort, setSort] = useState<SortKey>("size");
+  /** Bulk-select for the results list — local to this view, not the global store. */
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [rulePrompt, setRulePrompt] = useState<{ text: string; destination: string } | null>(null);
   const reqId = useRef(0);
   /** The last committed selection key — a change means clear old rows and show loading. */
   const lastSel = useRef("");
+
+  const togglePick = useCallback((path: string) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+
+  // A different query invalidates any in-progress bulk selection — the rows
+  // it referred to are no longer the ones on screen.
+  useEffect(() => {
+    setPicked(new Set());
+  }, [resultsQuery]);
 
   useEffect(() => {
     void listSavedViews().then(setSavedViews).catch(() => setSavedViews([]));
@@ -191,6 +212,12 @@ export function FilesView() {
     }
     return sorted;
   }, [resultsQuery, fetched, presetRows, kindFilter, sort]);
+
+  // "All loaded", never "all matching": search_files has no OFFSET and returns
+  // no total, so the frontend only ever holds the first SEARCH_LIMIT rows.
+  const pickAllLoaded = useCallback(() => {
+    setPicked(new Set(rows.map((r) => r.path)));
+  }, [rows]);
 
   const totalBytes = useMemo(() => rows.reduce((s, r) => s + Math.max(0, r.size), 0), [rows]);
   const shown = rows.slice(0, RENDER_CAP);
@@ -335,10 +362,18 @@ export function FilesView() {
             />
           ) : (
             <div className="be-rise be-d3 flex flex-col gap-2">
-              {/* Count line */}
+              {/* Count line — a capped search never claims to be the whole match set. */}
               <div className="flex items-baseline gap-1.5 text-11 text-faint">
-                <span className="mono font-semibold text-ink-soft">{formatCount(rows.length)}</span>
-                <span>files ·</span>
+                {resultsQuery?.kind === "search" && rows.length >= SEARCH_LIMIT ? (
+                  <span className="mono font-semibold text-ink-soft">
+                    showing first {SEARCH_LIMIT} matches
+                  </span>
+                ) : (
+                  <>
+                    <span className="mono font-semibold text-ink-soft">{formatCount(rows.length)}</span>
+                    <span>files ·</span>
+                  </>
+                )}
                 <span className="mono font-semibold text-ink-soft">{formatBytes(totalBytes)}</span>
                 <span>total</span>
               </div>
@@ -361,6 +396,34 @@ export function FilesView() {
                 />
               ) : (
                 <Card className="overflow-hidden">
+                  {picked.size ? (
+                    <div className="flex flex-none items-center gap-2 border-b border-line bg-inset px-3 py-2">
+                      <span className="text-115 text-ink">{picked.size} selected</span>
+                      <button
+                        type="button"
+                        onClick={pickAllLoaded}
+                        className="text-115 text-primary-ink hover:underline"
+                      >
+                        Select all {rows.length} loaded
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPicked(new Set())}
+                        className="text-115 text-faint hover:text-ink"
+                      >
+                        Clear
+                      </button>
+                      <span className="flex-1" />
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        icon={FolderInput}
+                        onClick={() => setMoveOpen(true)}
+                      >
+                        Move to…
+                      </Button>
+                    </div>
+                  ) : null}
                   {shown.map((r) => {
                     const cat = categoryOf(r.kind);
                     const Icon = cat.icon;
@@ -382,6 +445,14 @@ export function FilesView() {
                             : "hover:bg-raised/50"
                         }`}
                       >
+                        <input
+                          type="checkbox"
+                          checked={picked.has(r.path)}
+                          aria-label={`Select ${r.name}`}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => togglePick(r.path)}
+                          className="flex-none"
+                        />
                         <span
                           className="flex h-8 w-8 flex-none items-center justify-center rounded-lg"
                           style={{
@@ -450,6 +521,49 @@ export function FilesView() {
           )}
         </div>
       </div>
+
+      {moveOpen ? (
+        <MoveDialog
+          paths={[...picked]}
+          onClose={() => setMoveOpen(false)}
+          onMoved={(destination) => {
+            setPicked(new Set());
+            if (resultsQuery?.kind === "search" && destination && indexPath) {
+              setRulePrompt({ text: resultsQuery.text, destination });
+            }
+          }}
+        />
+      ) : null}
+
+      {rulePrompt ? (
+        <div className="flex flex-none items-center gap-2 border-t border-line bg-inset px-3 py-2">
+          <span className="text-115 text-dim">
+            Always move files matching “{rulePrompt.text}” to {rulePrompt.destination}?
+          </span>
+          <Button
+            onClick={() => {
+              if (indexPath) {
+                void saveCatalogRule(indexPath, {
+                  name: `Files matching “${rulePrompt.text}”`,
+                  nameContains: rulePrompt.text,
+                  destination: rulePrompt.destination,
+                  source: "saved-after-move",
+                });
+              }
+              setRulePrompt(null);
+            }}
+          >
+            Save as rule
+          </Button>
+          <button
+            type="button"
+            onClick={() => setRulePrompt(null)}
+            className="text-115 text-faint hover:text-ink"
+          >
+            No thanks
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
