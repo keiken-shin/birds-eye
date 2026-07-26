@@ -27,30 +27,49 @@ pub struct PlannedItem {
     pub note: Option<String>,
 }
 
+/// Inserts the plan row and all its items as one unit: a mid-loop failure
+/// must not leave an orphaned plan row with partial items. `conn` is `&`
+/// (not `&mut`) so this uses raw `BEGIN`/`COMMIT`/`ROLLBACK` rather than
+/// `Connection::transaction()`, which would require a signature change.
 pub fn create_plan(conn: &Connection, items: &[PlanItem]) -> Result<i64, OntologyError> {
-    conn.execute(
-        "INSERT INTO ontology_relocation_plans (created_at, status)
-         VALUES (strftime('%s','now'), 'draft')",
-        [],
-    )?;
-    let plan_id = conn.last_insert_rowid();
+    conn.execute("BEGIN", [])?;
 
-    for item in items {
+    let result = (|| -> Result<i64, OntologyError> {
         conn.execute(
-            "INSERT INTO ontology_relocation_plan_items
-                (plan_id, discovery_id, file_id, from_path, to_path, size, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'planned')",
-            params![
-                plan_id,
-                item.discovery_id,
-                item.file_id,
-                item.from_path,
-                item.to_path,
-                item.size
-            ],
+            "INSERT INTO ontology_relocation_plans (created_at, status)
+             VALUES (strftime('%s','now'), 'draft')",
+            [],
         )?;
+        let plan_id = conn.last_insert_rowid();
+
+        for item in items {
+            conn.execute(
+                "INSERT INTO ontology_relocation_plan_items
+                    (plan_id, discovery_id, file_id, from_path, to_path, size, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'planned')",
+                params![
+                    plan_id,
+                    item.discovery_id,
+                    item.file_id,
+                    item.from_path,
+                    item.to_path,
+                    item.size
+                ],
+            )?;
+        }
+        Ok(plan_id)
+    })();
+
+    match result {
+        Ok(plan_id) => {
+            conn.execute("COMMIT", [])?;
+            Ok(plan_id)
+        }
+        Err(err) => {
+            let _ = conn.execute("ROLLBACK", []);
+            Err(err)
+        }
     }
-    Ok(plan_id)
 }
 
 pub fn plan_items(conn: &Connection, plan_id: i64) -> Result<Vec<PlannedItem>, OntologyError> {
@@ -175,5 +194,51 @@ mod tests {
         let after = plan_items(&conn, plan_id).unwrap();
         assert_eq!(after[0].status, "skipped");
         assert_eq!(after[0].note.as_deref(), Some("vanished"));
+    }
+
+    #[test]
+    fn a_failed_creation_leaves_no_orphaned_plan_row() {
+        let conn = migrated_conn();
+        // Genuinely (not by contorting internals) make the second item's
+        // insert fail: a trigger that aborts on a specific file_id.
+        conn.execute_batch(
+            "CREATE TRIGGER block_bad_item
+             BEFORE INSERT ON ontology_relocation_plan_items
+             WHEN NEW.file_id = 999
+             BEGIN
+                 SELECT RAISE(ABORT, 'blocked for test');
+             END;",
+        )
+        .unwrap();
+
+        let result = create_plan(
+            &conn,
+            &[
+                PlanItem {
+                    file_id: 1,
+                    from_path: "a".to_string(),
+                    to_path: "b".to_string(),
+                    size: 1,
+                    discovery_id: None,
+                },
+                PlanItem {
+                    file_id: 999,
+                    from_path: "c".to_string(),
+                    to_path: "d".to_string(),
+                    size: 1,
+                    discovery_id: None,
+                },
+            ],
+        );
+
+        assert!(result.is_err(), "the blocked insert must surface as an error");
+        let plan_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_relocation_plans", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(plan_count, 0, "a failed creation must not leave an orphaned plan row");
+        let item_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_relocation_plan_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(item_count, 0, "nor any orphaned item rows");
     }
 }

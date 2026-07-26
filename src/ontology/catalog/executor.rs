@@ -51,6 +51,16 @@ pub struct RelocationResult {
     pub failed: Vec<RelocationFailure>,
 }
 
+/// Executes a relocation plan: moves each `"planned"` item on disk via
+/// `mover` and records the outcome.
+///
+/// Residual window: the filesystem move can't join the DB transaction that
+/// records it, so a crash between the two is possible. If the process dies
+/// after `mover.move_one` succeeds but before `record_move`'s transaction
+/// commits, the item stays `"planned"` while its source is already gone from
+/// disk. A later re-run re-verifies the source (index row and disk path)
+/// and, finding it missing, marks the item `"skipped"` — safe, nothing is
+/// moved twice. A background rescan reconciles `deleted_at` either way.
 pub fn execute_plan_with(
     conn: &mut Connection,
     plan_id: i64,
@@ -90,11 +100,12 @@ pub fn execute_plan_with(
 
         match mover.move_one(&item.from_path, &item.to_path) {
             Ok(()) => {
-                set_item_status(conn, item.id, "moved", None)?;
-                let _ = conn.execute(
-                    "UPDATE files SET deleted_at = strftime('%s','now') WHERE id = ?1",
-                    params![item.file_id],
-                );
+                // The move has already happened on disk by this point, so it
+                // is unconditionally reported as moved below regardless of
+                // whether the index write succeeds — aborting here would
+                // strand the rest of the plan and lose the pairs the UI
+                // needs for undo.
+                record_move(conn, item.id, item.file_id);
                 moved += 1;
                 bytes_moved += item.size.max(0) as u64;
                 pairs.push(MovedPair {
@@ -120,6 +131,33 @@ pub fn execute_plan_with(
         pairs,
         failed,
     })
+}
+
+/// Marks an item `"moved"` and soft-deletes its source row in one
+/// transaction, so the two writes are atomic with respect to each other. If
+/// the transaction fails, falls back to a best-effort single-statement write
+/// recording the failure on the item's note instead of leaving it silent —
+/// the caller has already counted the move as successful either way.
+fn record_move(conn: &mut Connection, item_id: i64, file_id: i64) {
+    let outcome = (|| -> Result<(), OntologyError> {
+        let tx = conn.transaction()?;
+        set_item_status(&tx, item_id, "moved", None)?;
+        tx.execute(
+            "UPDATE files SET deleted_at = strftime('%s','now') WHERE id = ?1",
+            params![file_id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    })();
+
+    if outcome.is_err() {
+        let _ = set_item_status(
+            conn,
+            item_id,
+            "moved",
+            Some("moved; index update failed, will heal on next scan"),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -350,6 +388,136 @@ mod tests {
         assert_eq!(result.moved, 0);
         assert!(mover.calls.borrow().is_empty());
         assert_eq!(plan_items(&conn, plan_id).unwrap()[0].status, "skipped");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn an_index_write_failure_is_recorded_on_the_item_not_swallowed() {
+        let root = test_root("index-write-failure");
+        let from = root.join("a.exe");
+        let to = root.join("dest").join("a.exe");
+        let mut conn = migrated_conn();
+        seed_file(&conn, 1, &from);
+        let plan_id = create_plan(
+            &conn,
+            &[PlanItem {
+                file_id: 1,
+                from_path: from.to_string_lossy().to_string(),
+                to_path: to.to_string_lossy().to_string(),
+                size: 10,
+                discovery_id: None,
+            }],
+        )
+        .unwrap();
+
+        // Genuinely (not by calling internals) make the `deleted_at` UPDATE
+        // for this row fail: a trigger that aborts that specific write. This
+        // forces record_move's transaction to fail and roll back, so the
+        // fallback single-statement note path is exercised for real.
+        conn.execute_batch(
+            "CREATE TRIGGER block_deleted_at
+             BEFORE UPDATE OF deleted_at ON files
+             WHEN NEW.id = 1
+             BEGIN
+                 SELECT RAISE(ABORT, 'blocked for test');
+             END;",
+        )
+        .unwrap();
+
+        let mover = FakeMover { fail: vec![], calls: RefCell::new(vec![]) };
+        let result = execute_plan_with(&mut conn, plan_id, &mover).unwrap();
+
+        // The move genuinely happened, so it is still reported as moved and
+        // still present in `pairs` for the frontend's undo.
+        assert_eq!(result.moved, 1);
+        assert_eq!(result.pairs.len(), 1);
+        assert!(result.failed.is_empty());
+
+        let items = plan_items(&conn, plan_id).unwrap();
+        assert_eq!(items[0].status, "moved");
+        assert_eq!(
+            items[0].note.as_deref(),
+            Some("moved; index update failed, will heal on next scan"),
+            "the index-write failure must be visible on the item, not silent"
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn executing_an_already_executed_plan_moves_nothing_again() {
+        let root = test_root("idempotent-execute");
+        let from = root.join("a.exe");
+        let to = root.join("dest").join("a.exe");
+        let mut conn = migrated_conn();
+        seed_file(&conn, 1, &from);
+        let plan_id = create_plan(
+            &conn,
+            &[PlanItem {
+                file_id: 1,
+                from_path: from.to_string_lossy().to_string(),
+                to_path: to.to_string_lossy().to_string(),
+                size: 10,
+                discovery_id: None,
+            }],
+        )
+        .unwrap();
+
+        let mover = FakeMover { fail: vec![], calls: RefCell::new(vec![]) };
+        let first = execute_plan_with(&mut conn, plan_id, &mover).unwrap();
+        assert_eq!(first.moved, 1);
+        assert_eq!(mover.calls.borrow().len(), 1);
+
+        let second = execute_plan_with(&mut conn, plan_id, &mover).unwrap();
+
+        assert_eq!(second.moved, 0);
+        assert!(second.pairs.is_empty());
+        assert!(second.failed.is_empty());
+        assert_eq!(
+            mover.calls.borrow().len(),
+            1,
+            "an already-moved item must never be handed to the mover again"
+        );
+        assert_eq!(plan_items(&conn, plan_id).unwrap()[0].status, "moved");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn a_plan_with_only_skipped_items_still_finishes_executed() {
+        let root = test_root("only-skipped-executed");
+        let gone = root.join("gone.exe");
+        let mut conn = migrated_conn();
+        seed_file(&conn, 1, &gone);
+        conn.execute("UPDATE files SET deleted_at = 1 WHERE id = 1", []).unwrap();
+        let plan_id = create_plan(
+            &conn,
+            &[PlanItem {
+                file_id: 1,
+                from_path: gone.to_string_lossy().to_string(),
+                to_path: root.join("dest").join("gone.exe").to_string_lossy().to_string(),
+                size: 10,
+                discovery_id: None,
+            }],
+        )
+        .unwrap();
+
+        let mover = FakeMover { fail: vec![], calls: RefCell::new(vec![]) };
+        let result = execute_plan_with(&mut conn, plan_id, &mover).unwrap();
+
+        assert_eq!(result.moved, 0);
+        assert!(result.failed.is_empty());
+        assert_eq!(plan_items(&conn, plan_id).unwrap()[0].status, "skipped");
+
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM ontology_relocation_plans WHERE id = ?1",
+                [plan_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            status, "executed",
+            "a plan whose only item was skipped still finishes executed"
+        );
         cleanup(&root);
     }
 }
