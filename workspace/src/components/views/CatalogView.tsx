@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, X, ChevronDown, ChevronRight } from "lucide-react";
+import { AlertTriangle, Check, X, ChevronDown, ChevronRight } from "lucide-react";
 import { formatBytes } from "@bridge/domain";
 import {
   rejectDiscovery,
@@ -12,7 +12,7 @@ import { useIndexData } from "../../state/indexData";
 import { useWorkspace } from "../../state/workspaceStore";
 import { EnableIntelligenceCard } from "../EnableIntelligenceCard";
 import { Button } from "../ui/Button";
-import { Card, SectionLabel } from "../ui/Card";
+import { Card, EmptyState, SectionLabel } from "../ui/Card";
 import { ViewHeader } from "./ViewHeader";
 
 /**
@@ -33,16 +33,32 @@ export function CatalogView() {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [members, setMembers] = useState<Record<number, NativeRelocationMember[]>>({});
   const [excluded, setExcluded] = useState<Record<number, Set<string>>>({});
+  const [acceptingId, setAcceptingId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!indexPath) return;
-    const rows = await relocationCards(indexPath);
-    setCards(rankCards(parseCards(rows)));
+    setError(null);
+    try {
+      const rows = await relocationCards(indexPath);
+      setCards(rankCards(parseCards(rows)));
+    } catch (e) {
+      setError(String(e));
+    }
   }, [indexPath]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // ids (and therefore any cached member list, exclusion set, or expanded row)
+  // are only unique within one index — an index switch must drop them all or
+  // a stale id collision can serve the wrong files under the new index.
+  useEffect(() => {
+    setMembers({});
+    setExcluded({});
+    setExpanded(null);
+  }, [indexPath]);
 
   // Shared by expand (show the list) and accept (stage it): the payload embeds
   // only the first 50 members, so a card whose true count is higher needs the
@@ -70,7 +86,12 @@ export function CatalogView() {
         return;
       }
       setExpanded(card.id);
-      await ensureMembers(card);
+      try {
+        await ensureMembers(card);
+      } catch (e) {
+        setError(String(e));
+        setExpanded(null);
+      }
     },
     [expanded, ensureMembers]
   );
@@ -80,31 +101,53 @@ export function CatalogView() {
     [members]
   );
 
+  // Guarded by acceptingId so a double-click (or a slow ensureMembers round
+  // trip for a >50-member cluster) can't re-enter and re-toggle the same
+  // members, which would un-stage everything the first pass just staged.
+  // isMoveStaged skip is the same idempotency belt-and-suspenders: staging is
+  // additive, never a toggle, no matter how accept gets invoked.
   const accept = useCallback(
     async (card: RelocationCard) => {
-      const list = await ensureMembers(card);
-      const skip = excluded[card.id] ?? new Set<string>();
-      for (const member of list) {
-        if (skip.has(member.path)) continue;
-        toggleStagedMove({
-          path: member.path,
-          name: member.name,
-          bytes: member.size,
-          to: destinationFor(card.payload.destination, member.name),
-          destinationExists: card.payload.destination_exists,
-          fileId: member.file_id,
-          discoveryId: card.id,
-        });
+      setError(null);
+      setAcceptingId(card.id);
+      try {
+        const list = await ensureMembers(card);
+        const skip = excluded[card.id] ?? new Set<string>();
+        for (const member of list) {
+          if (skip.has(member.path) || isMoveStaged(member.path)) continue;
+          toggleStagedMove({
+            path: member.path,
+            name: member.name,
+            bytes: member.size,
+            to: destinationFor(card.payload.destination, member.name),
+            destinationExists: card.payload.destination_exists,
+            fileId: member.file_id,
+            discoveryId: card.id,
+          });
+        }
+        setCards((prev) => prev?.filter((c) => c.id !== card.id) ?? null);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setAcceptingId(null);
       }
-      setCards((prev) => prev?.filter((c) => c.id !== card.id) ?? null);
     },
-    [ensureMembers, excluded, toggleStagedMove]
+    [ensureMembers, excluded, toggleStagedMove, isMoveStaged]
   );
 
   const reject = useCallback(
     async (card: RelocationCard) => {
+      if (!indexPath) return;
+      setError(null);
       setCards((prev) => prev?.filter((c) => c.id !== card.id) ?? null);
-      if (indexPath) await rejectDiscovery(indexPath, card.id);
+      try {
+        await rejectDiscovery(indexPath, card.id);
+      } catch (e) {
+        // The backend never suppressed the discovery — put the card back
+        // rather than let it silently vanish with no explanation.
+        setError(String(e));
+        setCards((prev) => rankCards([...(prev ?? []), card]));
+      }
     },
     [indexPath]
   );
@@ -125,6 +168,17 @@ export function CatalogView() {
         }
       />
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+        {/* Once cards have loaded, a later accept/reject failure gets a banner
+            here instead of the dedicated failed-load state below — the list
+            itself is still good, only the one action didn't take. */}
+        {cards !== null && error ? (
+          <div className="mt-4 flex items-center gap-2 rounded-[9px] border border-danger/40 px-3 py-2 text-11 text-danger">
+            <AlertTriangle size={13} strokeWidth={2} aria-hidden className="flex-none" />
+            <span className="min-w-0 truncate" title={error}>
+              {error}
+            </span>
+          </div>
+        ) : null}
         {/* `ontology === null` means "not loaded yet" — without this guard the
             enable CTA flashes on every startup, same as BoardView's findings tab. */}
         {ontology && !ontologyEnabled ? (
@@ -133,7 +187,17 @@ export function CatalogView() {
             <EnableIntelligenceCard />
           </div>
         ) : cards === null ? (
-          <p className="mt-6 text-12 italic text-label">Looking for misplaced files…</p>
+          error ? (
+            <EmptyState
+              className="mt-6"
+              icon={AlertTriangle}
+              title="Couldn't load suggestions"
+              hint={error}
+              action={{ label: "Retry", onClick: () => void load() }}
+            />
+          ) : (
+            <p className="mt-6 text-12 italic text-label">Looking for misplaced files…</p>
+          )
         ) : cards.length === 0 ? (
           <Card className="mt-6 p-4">
             <SectionLabel>Nothing to move</SectionLabel>
@@ -185,10 +249,10 @@ export function CatalogView() {
                       <Button
                         variant="primary"
                         icon={Check}
-                        disabled={keeping.length === 0}
+                        disabled={keeping.length === 0 || acceptingId === card.id}
                         onClick={() => void accept(card)}
                       >
-                        Accept
+                        {acceptingId === card.id ? "Accepting…" : "Accept"}
                       </Button>
                       <Button icon={X} onClick={() => void reject(card)}>
                         Not this
