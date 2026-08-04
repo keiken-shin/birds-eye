@@ -5,5 +5,6 @@ pub mod executor;
 pub mod infer;
 pub mod payload;
 pub mod plans;
+pub mod relocation_log;
 pub mod rules;
 pub mod zones;

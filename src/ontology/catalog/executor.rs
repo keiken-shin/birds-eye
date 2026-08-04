@@ -11,7 +11,13 @@ pub trait Mover {
     fn move_one(&self, from: &str, to: &str) -> Result<(), String>;
 }
 
-pub struct SystemMover;
+pub struct SystemMover {
+    /// The index whose move log this move is appended to, and whose rows are
+    /// reconciled. `None` for a put-back: the log entry being restored already
+    /// records that move and its status records the undo, so a second row would
+    /// double every entry in the list the user reads.
+    pub index_path: Option<std::path::PathBuf>,
+}
 
 impl Mover for SystemMover {
     fn move_one(&self, from: &str, to: &str) -> Result<(), String> {
@@ -20,7 +26,7 @@ impl Mover for SystemMover {
                 from: from.to_string(),
                 to: to.to_string(),
             }],
-            index_path: None,
+            index_path: self.index_path.clone(),
         });
         match response.failed.first() {
             Some(failure) => Err(failure.reason.clone()),
