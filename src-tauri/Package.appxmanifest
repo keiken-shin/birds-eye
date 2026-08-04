@@ -40,7 +40,7 @@
     <Application Id="BirdsEye" Executable="birds-eye-desktop.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="Birds Eye"
-        Description="Birds Eye desktop application"
+        Description="Find what's safe to delete on your PC — with a reason for every recommendation. Free, offline, and everything goes to the Recycle Bin first."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

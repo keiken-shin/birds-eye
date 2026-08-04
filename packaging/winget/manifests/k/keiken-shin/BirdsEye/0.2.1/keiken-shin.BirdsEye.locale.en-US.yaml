@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+
+PackageIdentifier: keiken-shin.BirdsEye
+PackageVersion: 0.2.1
+PackageLocale: en-US
+Publisher: keiken-shin
+PublisherUrl: https://github.com/keiken-shin
+PublisherSupportUrl: https://github.com/keiken-shin/birds-eye/issues
+Author: keiken-shin
+PackageName: Bird's Eye
+PackageUrl: https://birds-eye.keiken.dev/
+License: MIT
+LicenseUrl: https://github.com/keiken-shin/birds-eye/blob/main/LICENSE
+Copyright: Copyright (c) 2026 keiken-shin
+ShortDescription: |-
+  Free, offline disk cleanup for Windows that tells you what's safe to delete and why — not
+  just what's big. Build caches, old installers, duplicates and stale projects, each with a
+  size, an age and a reason. Recycle Bin first, restorable 30 days.
+Description: |-
+  Find what's safe to delete on your PC — with a reason for every recommendation. Free,
+  offline, and everything goes to the Recycle Bin first.
+
+  Your drive is full. The usual tools draw you a colourful map of what's big — and leave
+  you to guess what's safe to remove.
+
+  Bird's Eye goes one step further. It scans your folders, works out what each one
+  actually is — a build cache, an installer you already ran, a duplicate download, a
+  project you finished two years ago — and tells you which ones you can safely delete,
+  how much space you'd get back, and why.
+
+  Every recommendation shows three things: the size, how long it's sat untouched, and a
+  plain-English reason. Nothing is deleted until you review a list of exactly what will
+  happen. Everything goes to the Recycle Bin, restorable for 30 days.
+
+  And nothing ever leaves your PC. No account, no sign-in, no telemetry, no upload — not
+  a filename, not a hash. It works with the network off. The source is public and
+  MIT-licensed, so you can check rather than take our word for it.
+
+  WHAT IT FINDS
+  • Build outputs and package caches — node_modules, target, .gradle, pip
+  • Installers you already ran, sitting in Downloads
+  • Duplicate files, ranked by how much space they waste
+  • Projects you finished and haven't opened in a year
+  • Old backups, VM disks and model files you forgot about
+
+  WHAT IT WILL NEVER DO
+  • No "health score." No "247 issues found."
+  • No registry cleaning. No startup "optimisation."
+  • No nagging, no countdowns, no upsell.
+  • No account, and no data leaving your machine.
+Moniker: birds-eye
+Tags:
+  - disk-cleanup
+  - disk-space-analyzer
+  - whats-taking-up-space
+  - safe-to-delete
+  - duplicate-file-finder
+  - treemap
+  - windows
+ManifestType: defaultLocale
+ManifestVersion: 1.12.0
