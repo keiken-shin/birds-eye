@@ -341,7 +341,7 @@ fn unix_now() -> i64 {
 mod tests {
     use super::*;
     use crate::index::schema::ALL_MIGRATIONS;
-    use crate::ontology::enabled::enable;
+    use crate::ontology::enabled::{disable, enable};
     use rusqlite::Connection;
     use std::sync::atomic::AtomicBool;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -587,6 +587,7 @@ mod tests {
         for (_, sql) in ALL_MIGRATIONS {
             conn.execute_batch(sql).unwrap();
         }
+        disable(&conn).unwrap();
         drop(conn);
 
         assert!(!run_phase2(&path, BudgetTier::CheapOnly, pause()).unwrap());

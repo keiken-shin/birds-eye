@@ -150,8 +150,10 @@ impl From<serde_json::Error> for PopulatorError {
 impl std::fmt::Display for PopulatorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Ontology(e) => write!(f, "ontology error: {e}"),
-            Self::Aborted(msg) => write!(f, "populator aborted: {msg}"),
+            // Surfaced to the user through the job log, so it delegates rather than stacking an
+            // internal prefix on top of a message that already reads as a sentence.
+            Self::Ontology(e) => write!(f, "{e}"),
+            Self::Aborted(msg) => write!(f, "analysis stopped: {msg}"),
         }
     }
 }
@@ -348,10 +350,10 @@ mod tests {
         assert_error::<PopulatorError>();
 
         let err = PopulatorError::from(serde_json::from_str::<serde_json::Value>("{").unwrap_err());
-        assert!(format!("{err}").contains("ontology error: json error:"));
+        assert!(format!("{err}").contains("json error:"));
 
         let aborted = PopulatorError::Aborted("pause requested".to_string());
-        assert_eq!(aborted.to_string(), "populator aborted: pause requested");
+        assert_eq!(aborted.to_string(), "analysis stopped: pause requested");
     }
 
     #[test]
