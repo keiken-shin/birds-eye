@@ -12,9 +12,13 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
-import { formatBytes, formatCount, lastSegment } from "@bridge/domain";
-import { REASON_LABELS, type NativeTreemapLensFolder } from "@bridge/nativeClient";
-import { verdictForFolder } from "../../lib/verdict";
+import { formatBytes, formatCount } from "@bridge/domain";
+import { VERDICT_STYLES } from "../../lib/verdict";
+import {
+  folderRecommendations,
+  staleFileRecommendations,
+  type RecItem,
+} from "../../lib/recommendations";
 import { useIndexData } from "../../state/indexData";
 import { useWorkspace } from "../../state/workspaceStore";
 import { Card, EmptyState } from "../ui/Card";
@@ -25,27 +29,15 @@ import { ViewHeader } from "./ViewHeader";
 import type { Verdict } from "../../state/types";
 
 /* ------------------------------------------------------------------ */
-/* Risk taxonomy — the legend and the 3px row edge share these.        */
+/* Risk — the legend and the 3px row edge share these. Two of the three */
+/* safety words; "Don't touch" never reaches this view.                 */
 /* ------------------------------------------------------------------ */
 
-type Risk = "safe" | "review" | "caution";
+type Risk = "safe" | "review";
 
 const RISK: Record<Risk, { color: string; label: string }> = {
-  safe: { color: "var(--color-primary)", label: "Safe to remove" },
-  review: { color: "var(--color-warn)", label: "Review first" },
-  caution: { color: "var(--color-danger)", label: "Use caution" },
-};
-
-type RecItem = {
-  path: string;
-  name: string;
-  /** Reclaimable bytes when known, else file size. */
-  bytes: number;
-  /** Short "why" line — reason label or age. */
-  sub: string;
-  verdict: Verdict;
-  kind: "folder" | "file";
-  reason: string | null;
+  safe: { color: "var(--color-primary)", label: VERDICT_STYLES.safe.label },
+  review: { color: "var(--color-review-bd)", label: VERDICT_STYLES.review.label },
 };
 
 type RecGroup = {
@@ -56,43 +48,6 @@ type RecGroup = {
   risk: Risk;
   items: RecItem[];
 };
-
-const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
-const isAncestor = (parent: string, child: string) => child.startsWith(parent + "/");
-
-/** Lens rows for the given reasons — root excluded, zero-reclaim excluded, shallowest wins. */
-function lensGroupItems(
-  rows: NativeTreemapLensFolder[],
-  reasons: Set<string>,
-  rootPath: string | null
-): RecItem[] {
-  const root = rootPath ? norm(rootPath) : null;
-  const cands = rows.filter(
-    (r) =>
-      r.cleanup_reason !== null &&
-      reasons.has(r.cleanup_reason) &&
-      r.reclaimable_bytes > 0 &&
-      norm(r.folder_path) !== root
-  );
-  const paths = cands.map((r) => norm(r.folder_path));
-  return cands
-    .filter((_, i) => !paths.some((p, k) => k !== i && isAncestor(p, paths[i])))
-    .sort((a, b) => b.reclaimable_bytes - a.reclaimable_bytes)
-    .map((r) => ({
-      path: r.folder_path,
-      name: lastSegment(r.folder_path),
-      bytes: r.reclaimable_bytes,
-      sub: r.cleanup_reason ? (REASON_LABELS[r.cleanup_reason] ?? r.cleanup_reason) : "",
-      verdict: verdictForFolder(r),
-      kind: "folder" as const,
-      reason: r.cleanup_reason,
-    }));
-}
-
-function ageLabel(seconds: number): string {
-  const days = seconds / 86_400;
-  return days >= 365 ? `${(days / 365).toFixed(1)} yr` : `${Math.round(days / 30)} mo`;
-}
 
 export function CleanupView() {
   const { status, error, overview, lensByPath, activeEntry, refreshData } = useIndexData();
@@ -113,51 +68,37 @@ export function CleanupView() {
       out.push(
         {
           id: "build",
-          title: "Build outputs & caches",
+          title: "Build output and caches",
           icon: Wrench,
           tint: "var(--color-cat-code)",
           risk: "safe",
-          items: lensGroupItems(rows, new Set(["safe-derivative", "scratch"]), root),
+          items: folderRecommendations(rows, new Set(["safe-derivative", "scratch"]), root),
         },
         {
           id: "backups",
-          title: "Redundant backups",
+          title: "Backups you already have twice",
           icon: HardDriveDownload,
           tint: "var(--color-cat-archive)",
           risk: "review",
-          items: lensGroupItems(rows, new Set(["redundant-backup"]), root),
+          items: folderRecommendations(rows, new Set(["redundant-backup"]), root),
         },
         {
           id: "finished",
-          title: "Finished project leftovers",
+          title: "Left over from projects you've finished",
           icon: FolderX,
           tint: "var(--color-cat-document)",
           risk: "review",
-          items: lensGroupItems(rows, new Set(["finished-project-cruft"]), root),
+          items: folderRecommendations(rows, new Set(["finished-project-cruft"]), root),
         }
       );
     }
-    const nowSec = Math.floor(Date.now() / 1000);
-    const cutoff = nowSec - 365 * 86_400;
     out.push({
       id: "stale",
-      title: "Untouched for 1+ year",
+      title: "Big files you haven't touched in a year",
       icon: Hourglass,
-      tint: "var(--color-warn)",
-      risk: "caution",
-      items: (overview?.files ?? [])
-        .filter((f) => f.modified_at !== null && f.modified_at < cutoff)
-        .sort((a, b) => b.size - a.size)
-        .slice(0, 8)
-        .map((f) => ({
-          path: f.path,
-          name: lastSegment(f.path),
-          bytes: f.size,
-          sub: `untouched ${ageLabel(nowSec - (f.modified_at ?? nowSec))}`,
-          verdict: "review" as const,
-          kind: "file" as const,
-          reason: null,
-        })),
+      tint: "var(--color-review-bd)",
+      risk: "review",
+      items: staleFileRecommendations(overview?.files ?? []),
     });
     return out.filter((g) => g.items.length > 0);
   }, [lensByPath, overview, activeEntry, ontologyEnabled]);
@@ -214,12 +155,12 @@ export function CleanupView() {
   if (status === "no-index") {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <ViewHeader title="Cleanup" />
+        <ViewHeader title="Clean up" />
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <EmptyState
             icon={ScanLine}
-            title="Scan a folder to get recommendations"
-            hint="Cleanup curates what's safely reclaimable from your local index — nothing leaves this machine."
+            title="Scan a folder to see what's safe to delete"
+            hint="Bird's Eye reads your own folders and tells you what it found, and why. Nothing is uploaded."
             action={{ label: "Scan a folder", icon: ScanLine, onClick: () => setOverlay("scan") }}
           />
         </div>
@@ -230,7 +171,7 @@ export function CleanupView() {
   if (status === "error") {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <ViewHeader title="Cleanup" />
+        <ViewHeader title="Clean up" />
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <EmptyState
             icon={Hourglass}
@@ -250,12 +191,11 @@ export function CleanupView() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ViewHeader
-        title="Cleanup"
+        title="Clean up"
         sub={
           <>
-            Smart recommendations —{" "}
             <span className="mono font-semibold text-primary-ink">{formatBytes(listedTotal)}</span>{" "}
-            recoverable
+            you can free
           </>
         }
         actions={
@@ -267,9 +207,11 @@ export function CleanupView() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[1080px] flex-col gap-4 p-4">
-          {/* Risk legend */}
+          {/* Safety legend */}
           <Card className="be-rise flex flex-wrap items-center gap-x-5 gap-y-1.5 px-4 py-2.5">
-            <span className="text-10 font-semibold tracking-[0.12em] text-label uppercase">Risk</span>
+            <span className="text-10 font-semibold tracking-[0.12em] text-label uppercase">
+              Safety
+            </span>
             {(Object.keys(RISK) as Risk[]).map((r) => (
               <span key={r} className="flex items-center gap-1.5 text-11 text-muted">
                 <span className="h-2 w-2 rounded-full" style={{ background: RISK[r].color }} aria-hidden />
@@ -278,11 +220,11 @@ export function CleanupView() {
             ))}
           </Card>
 
-          {/* Intelligence off → groups 1–3 replaced by the opt-in card */}
+          {/* Analysis off → groups 1–3 replaced by the opt-in card */}
           {!ontologyEnabled ? (
             <Card className={`be-rise ${nextDelay()} p-4`}>
               <div className="mb-3 text-10 font-semibold tracking-[0.12em] text-label uppercase">
-                Unlock smart recommendations
+                Turn the analysis on
               </div>
               <EnableIntelligenceCard />
             </Card>
@@ -292,8 +234,8 @@ export function CleanupView() {
             <Card className={`be-rise ${nextDelay()}`}>
               <EmptyState
                 icon={Sparkles}
-                title="Nothing obviously reclaimable"
-                hint="No caches, redundant backups or stale giants stand out in this index right now."
+                title="Nothing here is obviously safe to delete"
+                hint="No build caches, spare backups or big untouched files stand out in this index right now."
               />
             </Card>
           ) : null}
@@ -320,7 +262,7 @@ export function CleanupView() {
                 icon={Copy}
                 tint="var(--color-danger)"
                 title="Duplicate files"
-                count={`${formatCount(dupGroups.length)} groups · ${formatBytes(dupWaste)} reclaimable`}
+                count={`${formatCount(dupGroups.length)} groups · ${formatBytes(dupWaste)} you can free`}
                 risk="review"
               />
               <div
@@ -355,7 +297,8 @@ export function CleanupView() {
           {/* Footer note */}
           <div className="be-rise be-d4 flex items-center gap-2 px-1 pb-2 text-11 text-faint">
             <Recycle size={12} className="flex-none text-primary-ink" aria-hidden />
-            Staged items go through Review &amp; clean — recycle bin first, restorable for 30 days.
+            Bird's Eye checks every staged item again before it removes anything — recycle bin
+            first, restorable for 30 days.
           </div>
         </div>
       </div>
@@ -471,7 +414,7 @@ function GroupCard({
         icon={group.icon}
         tint={group.tint}
         title={group.title}
-        count={`${formatCount(group.items.length)} ${group.items.length === 1 ? "item" : "items"} · ${formatBytes(totalBytes)} reclaimable`}
+        count={`${formatCount(group.items.length)} ${group.items.length === 1 ? "item" : "items"} · ${formatBytes(totalBytes)} you can free`}
         risk={group.risk}
         check={headerCheck}
         onCheck={onToggleGroup}
@@ -492,19 +435,21 @@ function GroupCard({
               style={{ borderLeftColor: RISK[group.risk].color }}
             >
               <CheckSquare state={staged ? "staged" : on ? "on" : "off"} />
+              {/* The row is the ad: name · size · how long since you touched it · why. */}
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline gap-2">
                   <span className="truncate text-125 font-medium text-ink">{item.name}</span>
-                  {item.sub ? (
-                    <span className="flex-none truncate text-10 text-faint">{item.sub}</span>
-                  ) : null}
+                  <span className="mono flex-none text-11 font-semibold text-ink-soft">
+                    {formatBytes(item.bytes)}
+                  </span>
+                  <span className="flex-none truncate text-10 text-faint">
+                    {item.age ?? "date unknown"}
+                  </span>
+                  <span className="min-w-0 truncate text-10 text-dim">{item.why}</span>
                 </span>
                 <span className="mono block truncate text-10 text-dim">{item.path}</span>
               </span>
-              <span className="mono flex-none text-115 font-semibold text-ink-soft">
-                {formatBytes(item.bytes)}
-              </span>
-              <VerdictTag verdict={item.verdict} label={staged ? "STAGED" : undefined} />
+              <VerdictTag verdict={item.verdict} label={staged ? "Staged" : undefined} />
             </button>
           );
         })}

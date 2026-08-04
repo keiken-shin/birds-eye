@@ -21,8 +21,8 @@ function run(sep: "/" | "\\") {
 
   // Mirror exactly how indexData builds the lookup map.
   const lensRows: NativeTreemapLensFolder[] = [
-    { folder_path: build, role: "derivative", replaceability: "regenerable", lifecycle: "finished", cleanup_reason: "safe-derivative", reclaimable_bytes: 180 },
-    { folder_path: src, role: "source", replaceability: "irreplaceable", lifecycle: "active", cleanup_reason: null, reclaimable_bytes: 0 },
+    { folder_path: build, role: "derivative", replaceability: "regenerable", lifecycle: "finished", cleanup_reason: "safe-derivative", reclaimable_bytes: 180, modified_at: null },
+    { folder_path: src, role: "source", replaceability: "irreplaceable", lifecycle: "active", cleanup_reason: null, reclaimable_bytes: 0, modified_at: null },
   ];
   const lensByPath = new Map(lensRows.map((r) => [r.folder_path, r]));
 
