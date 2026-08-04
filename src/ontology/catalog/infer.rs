@@ -1,14 +1,17 @@
 //! Destination inference: user rule, then learned home, then template.
 
 use crate::ontology::catalog::rules::{list_rules, matches};
-use crate::ontology::catalog::zones::is_in_zone;
+use crate::ontology::catalog::zones::zone_for_folder;
 use crate::ontology::OntologyError;
 use rusqlite::Connection;
 
 /// A learned home must hold at least this many same-kind files.
-const MIN_LEARNED_FILES: i64 = 10;
+/// Also read by `cluster::settled_folders` — "settled" means one thing in this
+/// engine, whether the folder is being adopted as a destination or protected as
+/// a source.
+pub(crate) const MIN_LEARNED_FILES: i64 = 10;
 /// ...and at least this share of them, counted outside the inbox zones.
-const MIN_LEARNED_SHARE: f64 = 0.60;
+pub(crate) const MIN_LEARNED_SHARE: f64 = 0.60;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Destination {
@@ -69,7 +72,11 @@ fn learned_home(
     let mut outside: Vec<(String, i64)> = Vec::new();
     for row in rows {
         let (path, count) = row?;
-        if !is_in_zone(&path, zones) {
+        // `fo.path` is a folder, so this is the folder question: under a `D:\` zone
+        // `D:\Photos` is a folder the user built, not the loose-file inbox, and it stays
+        // eligible as a home. The file-path rule would call it a direct child of the zone
+        // and drop the folder the photos already live in.
+        if zone_for_folder(&path, zones).is_none() {
             outside.push((path, count));
         }
     }
@@ -154,7 +161,9 @@ fn template_for(zones: &[String], kind: &str, media_kind: &str) -> Option<Destin
         reason: why.to_string(),
         confidence: 0.5,
     };
-    if is_in_zone(&destination.path, zones) {
+    // Same folder question `cluster::candidates` asks, so "would this destination come
+    // straight back as a candidate?" gets the same answer here as it does there.
+    if zone_for_folder(&destination.path, zones).is_some() {
         return None;
     }
     Some(destination)
@@ -247,6 +256,29 @@ mod tests {
         let got = infer(&conn, &zones, "C:\\Inbox", "document", "a.pdf", "document").unwrap();
         // Falls through to the template, never proposes the inbox itself.
         assert!(got.is_none() || got.as_ref().unwrap().source == "template");
+    }
+
+    #[test]
+    fn a_folder_on_a_drive_root_zone_can_still_be_the_learned_home() {
+        // `D:\` is a scan root and therefore an inbox zone. Asking the file-path question
+        // about the *folder* `D:\Photos` calls it a direct child of that zone, so the
+        // folder the user's photos already live in was struck out as zone-resident and the
+        // suggestion fell through to a template. The drive root itself must still be
+        // excluded, however many files are loose on it.
+        let conn = migrated_conn();
+        add_folder(&conn, 1, "D:\\Photos");
+        add_files(&conn, 1, "D:\\Photos", "photo", 20, 100);
+        add_folder(&conn, 2, "D:\\");
+        add_files(&conn, 2, "D:", "photo", 50, 300);
+
+        let zones = vec!["D:\\".to_string()];
+        let got = infer(&conn, &zones, "D:\\", "photo", "a.jpg", "photo")
+            .unwrap()
+            .expect("a destination");
+        assert_eq!(got.path, "D:\\Photos");
+        assert_eq!(got.source, "learned");
+        // 20/20 outside the zone — the 50 loose files never enter the denominator.
+        assert!(got.reason.contains("100%"), "reason states the evidence: {}", got.reason);
     }
 
     #[test]
@@ -405,7 +437,7 @@ mod tests {
         for (kind, media_kind) in cases {
             if let Some(dest) = template_for(&zones, kind, media_kind) {
                 assert!(
-                    !is_in_zone(&dest.path, &zones),
+                    zone_for_folder(&dest.path, &zones).is_none(),
                     "{media_kind}/{kind} template destination {} is inside an inbox zone",
                     dest.path
                 );
@@ -414,7 +446,7 @@ mod tests {
 
         let installer = template_for(&zones, "x", "installer").expect("installer destination");
         assert!(installer.path.ends_with("Software\\Installers"), "{}", installer.path);
-        assert!(!is_in_zone(&installer.path, &zones));
+        assert!(zone_for_folder(&installer.path, &zones).is_none());
     }
 
     #[test]

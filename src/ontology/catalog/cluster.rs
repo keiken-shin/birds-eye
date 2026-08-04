@@ -1,13 +1,13 @@
 //! Candidate selection and clustering.
 
-use crate::ontology::catalog::zones::is_in_zone;
+use crate::ontology::catalog::infer::{MIN_LEARNED_FILES, MIN_LEARNED_SHARE};
+use crate::ontology::catalog::zones::zone_for_folder;
 use crate::ontology::OntologyError;
 use rusqlite::Connection;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Roles that mean "this file belongs to something" — a checked-out repo or a
-/// build directory sitting in Downloads is protected by its files' roles, since
-/// V1 has no folder-coherence classification.
+/// build directory sitting in Downloads is protected by its files' roles.
 const PROTECTED_ROLES: [&str; 4] = ["system", "scratch", "source", "asset"];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20,7 +20,17 @@ pub struct Candidate {
     pub zone: String,
 }
 
-/// Every live file inside an inbox zone that carries no protective role.
+/// One indexed folder sitting inside an inbox zone.
+struct ZoneFolder {
+    id: i64,
+    parent_id: Option<i64>,
+    /// True when this folder *is* the zone (e.g. Downloads itself).
+    is_zone_root: bool,
+    zone: String,
+}
+
+/// Every live file inside an inbox zone that carries no protective role and does
+/// not sit under a folder that already looks settled.
 ///
 /// Resolves zones through `folders` first — there are orders of magnitude fewer
 /// folders than files, so this never loads a 500k-row `files` table into memory
@@ -30,20 +40,29 @@ pub fn candidates(conn: &Connection, zones: &[String]) -> Result<Vec<Candidate>,
         return Ok(Vec::new());
     }
 
-    // (folder_id, owning zone) for every indexed folder inside a zone.
-    let mut zone_folders: Vec<(i64, String)> = Vec::new();
+    // Every indexed folder inside a zone, with the tree links needed to ask
+    // "is anything above me settled?".
+    let mut zone_folders: Vec<ZoneFolder> = Vec::new();
     {
-        let mut stmt = conn.prepare("SELECT id, path FROM folders")?;
+        let mut stmt = conn.prepare("SELECT id, parent_id, path FROM folders")?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })?;
         for row in rows {
-            let (id, path) = row?;
-            if let Some(zone) = zones
-                .iter()
-                .find(|zone| is_in_zone(&path, std::slice::from_ref(*zone)))
-            {
-                zone_folders.push((id, zone.clone()));
+            let (id, parent_id, path) = row?;
+            // Folder semantics, not file semantics: under a `D:\` zone this is the difference
+            // between "files loose at the root of D:" and "everything in D:\Projects".
+            if let Some(zone) = zone_for_folder(&path, zones) {
+                zone_folders.push(ZoneFolder {
+                    id,
+                    parent_id,
+                    is_zone_root: same_folder(&path, zone),
+                    zone: zone.clone(),
+                });
             }
         }
     }
@@ -51,9 +70,18 @@ pub fn candidates(conn: &Connection, zones: &[String]) -> Result<Vec<Candidate>,
         return Ok(Vec::new());
     }
 
-    let zone_of: HashMap<i64, String> = zone_folders.iter().cloned().collect();
+    let left_alone = settled_subtrees(conn, &zone_folders)?;
+    let zone_of: HashMap<i64, String> = zone_folders
+        .iter()
+        .filter(|folder| !left_alone.contains(&folder.id))
+        .map(|folder| (folder.id, folder.zone.clone()))
+        .collect();
+    if zone_of.is_empty() {
+        return Ok(Vec::new());
+    }
+
     let placeholders = std::iter::repeat("?")
-        .take(zone_folders.len())
+        .take(zone_of.len())
         .collect::<Vec<_>>()
         .join(",");
     let protected_roles = PROTECTED_ROLES
@@ -77,7 +105,7 @@ pub fn candidates(conn: &Connection, zones: &[String]) -> Result<Vec<Candidate>,
          ORDER BY f.id ASC"
     );
 
-    let ids: Vec<i64> = zone_folders.iter().map(|(id, _)| *id).collect();
+    let ids: Vec<i64> = zone_of.keys().copied().collect();
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(rusqlite::params_from_iter(ids), |row| {
         Ok((
@@ -104,6 +132,105 @@ pub fn candidates(conn: &Connection, zones: &[String]) -> Result<Vec<Candidate>,
             media_kind,
             zone: zone.clone(),
         });
+    }
+    Ok(out)
+}
+
+/// Same folder, ignoring a trailing separator and ASCII case.
+fn same_folder(path: &str, zone: &str) -> bool {
+    path.trim_end_matches(['\\', '/'])
+        .eq_ignore_ascii_case(zone.trim_end_matches(['\\', '/']))
+}
+
+/// Folder ids to leave alone: every folder that looks settled, plus everything
+/// beneath it.
+///
+/// A folder is settled when it holds at least `MIN_LEARNED_FILES` live files and
+/// at least `MIN_LEARNED_SHARE` of them are one `media_kind`. Those are
+/// `infer::learned_home`'s own two constants on purpose — a folder that would be
+/// good enough to *adopt* as a destination outside a zone should not be
+/// dismantled just because it happens to sit inside one. Ten files is more than
+/// a handful (three PDFs in Downloads is an accident; thirty is a filing
+/// decision) and 60% tolerates the stray README or cover image without letting a
+/// mixed dumping ground through.
+///
+/// Two deliberate asymmetries:
+///
+/// - **The zone root can never be settled.** Downloads full of PDFs *is* the
+///   problem, not evidence of intent; letting it protect itself would switch the
+///   whole engine off.
+/// - **Every live file counts, including role-protected ones.** Coherence is a
+///   property of the folder, not of the candidate set, so a stray invoice among
+///   thirty source files rides along with them.
+///
+/// This only ever shrinks the candidate set. The worst outcome is a suggestion
+/// that never appears.
+fn settled_subtrees(
+    conn: &Connection,
+    zone_folders: &[ZoneFolder],
+) -> Result<HashSet<i64>, OntologyError> {
+    let placeholders = std::iter::repeat("?")
+        .take(zone_folders.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT folder_id, COALESCE(media_kind, 'other') AS k, COUNT(*)
+         FROM files
+         WHERE deleted_at IS NULL AND folder_id IN ({placeholders})
+         GROUP BY folder_id, k"
+    );
+    let ids: Vec<i64> = zone_folders.iter().map(|folder| folder.id).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(ids), |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(2)?))
+    })?;
+
+    // folder id -> (files, biggest single kind)
+    let mut tally: HashMap<i64, (i64, i64)> = HashMap::new();
+    for row in rows {
+        let (folder_id, count) = row?;
+        let entry = tally.entry(folder_id).or_insert((0, 0));
+        entry.0 += count;
+        entry.1 = entry.1.max(count);
+    }
+
+    let roots: HashSet<i64> = zone_folders
+        .iter()
+        .filter(|folder| folder.is_zone_root)
+        .map(|folder| folder.id)
+        .collect();
+    let settled: HashSet<i64> = tally
+        .into_iter()
+        .filter(|(id, (total, top))| {
+            !roots.contains(id)
+                && *total >= MIN_LEARNED_FILES
+                && *top as f64 / *total as f64 >= MIN_LEARNED_SHARE
+        })
+        .map(|(id, _)| id)
+        .collect();
+    if settled.is_empty() {
+        return Ok(settled);
+    }
+
+    // Walk up `parent_id` rather than matching path prefixes, so a sibling named
+    // `tax-2024-old` can never be swallowed by `tax-2024`. The chain leaves the
+    // map (and stops) as soon as it passes the zone root.
+    let parent_of: HashMap<i64, Option<i64>> = zone_folders
+        .iter()
+        .map(|folder| (folder.id, folder.parent_id))
+        .collect();
+    let mut out = HashSet::new();
+    for folder in zone_folders {
+        let mut cursor = Some(folder.id);
+        // A parent_id cycle in a corrupt index must not hang the scan.
+        for _ in 0..=zone_folders.len() {
+            let Some(id) = cursor else { break };
+            if settled.contains(&id) {
+                out.insert(folder.id);
+                break;
+            }
+            cursor = parent_of.get(&id).copied().flatten();
+        }
     }
     Ok(out)
 }
@@ -179,6 +306,29 @@ mod tests {
             rusqlite::params![id, format!("C:\\Inbox\\{name}"), name, size, kind],
         )
         .unwrap();
+    }
+
+    fn add_folder(conn: &Connection, id: i64, parent_id: i64, path: &str) {
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (?1, ?2, ?3, ?3, 1, 0)",
+            rusqlite::params![id, parent_id, path],
+        )
+        .unwrap();
+    }
+
+    /// `n` files of one kind in `folder_id`. Ids double as unique names, since
+    /// `files.path` is UNIQUE.
+    fn fill(conn: &Connection, folder_id: i64, first_id: i64, n: i64, kind: &str, dir: &str) {
+        for id in first_id..first_id + n {
+            let name = format!("f{id}.dat");
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (?1, ?2, ?3, ?4, 10, ?5, 0)",
+                rusqlite::params![id, folder_id, format!("{dir}\\{name}"), name, kind],
+            )
+            .unwrap();
+        }
     }
 
     fn add_role(conn: &Connection, file_id: i64, path: &str, role: &str) {
@@ -388,6 +538,115 @@ mod tests {
         assert_eq!(inbox.zone, "C:\\Inbox");
         let desktop = found.iter().find(|c| c.file_id == 2).expect("desktop file present");
         assert_eq!(desktop.zone, "D:\\Desktop");
+    }
+
+    /// The drive-root case at the level that actually decides candidacy. `D:\` is a scan root,
+    /// so `inbox_zones()` makes it a zone; `is_in_zone` calls the *folder* `D:\Projects` a direct
+    /// child of it, which turned every file sitting directly in `D:\Projects` into a relocation
+    /// candidate. Three loose documents are too few and too mixed for the settled-folder guard to
+    /// catch, so only the folder-vs-file distinction keeps them out.
+    #[test]
+    fn a_drive_root_zone_never_scatters_the_folders_on_it() {
+        let conn = migrated_conn();
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (10, NULL, 'D:\\', 'D:', 0, 0)",
+            [],
+        )
+        .unwrap();
+        add_folder(&conn, 11, 10, "D:\\Projects");
+        fill(&conn, 11, 100, 3, "document", "D:\\Projects");
+        // Loose at the root: still the inbox, still candidates.
+        fill(&conn, 10, 200, 2, "installer", "D:");
+
+        let found = candidates(&conn, &["D:\\".to_string()]).unwrap();
+        assert_eq!(found.len(), 2, "only the loose files are candidates: {found:?}");
+        assert!(found.iter().all(|c| !c.path.contains("Projects")));
+        assert!(found.iter().all(|c| c.zone == "D:\\"));
+    }
+
+    const ZONE: &str = "C:\\Inbox";
+
+    fn in_zone(conn: &Connection) -> Vec<Candidate> {
+        candidates(conn, &[ZONE.to_string()]).unwrap()
+    }
+
+    #[test]
+    fn a_settled_folder_inside_a_zone_is_left_alone() {
+        // The case the design spec named: Downloads\tax-2024 with thirty PDFs in
+        // it, none of them carrying a protective role.
+        let conn = migrated_conn(); // folder 1 = the zone itself
+        add_folder(&conn, 2, 1, "C:\\Inbox\\tax-2024");
+        fill(&conn, 2, 100, 30, "document", "C:\\Inbox\\tax-2024");
+
+        let found = in_zone(&conn);
+        assert!(found.is_empty(), "a settled folder must not be scattered: {found:?}");
+    }
+
+    #[test]
+    fn loose_files_in_the_zone_are_still_proposed() {
+        // The zone root can never settle itself, however much lands in it —
+        // otherwise a busy Downloads would switch the whole engine off.
+        let conn = migrated_conn();
+        fill(&conn, 1, 100, 30, "document", ZONE);
+        add_folder(&conn, 2, 1, "C:\\Inbox\\tax-2024");
+        fill(&conn, 2, 200, 30, "document", "C:\\Inbox\\tax-2024");
+
+        let found = in_zone(&conn);
+        assert_eq!(found.len(), 30, "loose files stay candidates: {found:?}");
+        assert!(found.iter().all(|c| !c.path.contains("tax-2024")));
+    }
+
+    #[test]
+    fn a_folder_just_under_the_threshold_is_still_proposed() {
+        // Nine files of one kind is not proof of intent. Pins the boundary at
+        // MIN_LEARNED_FILES so a retune has to update this test on purpose.
+        let conn = migrated_conn();
+        add_folder(&conn, 2, 1, "C:\\Inbox\\maybe");
+        fill(&conn, 2, 100, MIN_LEARNED_FILES - 1, "document", "C:\\Inbox\\maybe");
+        assert_eq!(in_zone(&conn).len() as i64, MIN_LEARNED_FILES - 1);
+
+        // The tenth file settles it.
+        fill(&conn, 2, 200, 1, "document", "C:\\Inbox\\maybe");
+        assert!(in_zone(&conn).is_empty(), "the threshold file must protect the folder");
+    }
+
+    #[test]
+    fn a_folder_under_a_settled_parent_is_left_alone_too() {
+        let conn = migrated_conn();
+        add_folder(&conn, 2, 1, "C:\\Inbox\\tax-2024");
+        fill(&conn, 2, 100, 30, "document", "C:\\Inbox\\tax-2024");
+
+        // Too small and too mixed to protect itself; the settled parent covers it.
+        add_folder(&conn, 3, 2, "C:\\Inbox\\tax-2024\\receipts");
+        fill(&conn, 3, 200, 2, "photo", "C:\\Inbox\\tax-2024\\receipts");
+        add_folder(&conn, 4, 3, "C:\\Inbox\\tax-2024\\receipts\\scans");
+        fill(&conn, 4, 300, 1, "photo", "C:\\Inbox\\tax-2024\\receipts\\scans");
+
+        // A sibling that merely shares the name prefix is NOT covered — the walk
+        // is up parent_id, not along path prefixes.
+        add_folder(&conn, 5, 1, "C:\\Inbox\\tax-2024-old");
+        fill(&conn, 5, 400, 3, "document", "C:\\Inbox\\tax-2024-old");
+
+        let found = in_zone(&conn);
+        assert_eq!(found.len(), 3, "only the prefix-sibling survives: {found:?}");
+        assert!(found.iter().all(|c| c.path.contains("tax-2024-old")));
+    }
+
+    #[test]
+    fn a_mixed_bag_folder_is_still_proposed() {
+        // Thirty files over five kinds: plenty of files, no dominant purpose.
+        let conn = migrated_conn();
+        add_folder(&conn, 2, 1, "C:\\Inbox\\junk");
+        for (n, kind) in ["document", "photo", "video", "music", "installer"]
+            .iter()
+            .enumerate()
+        {
+            fill(&conn, 2, 100 + n as i64 * 10, 6, kind, "C:\\Inbox\\junk");
+        }
+
+        let found = in_zone(&conn);
+        assert_eq!(found.len(), 30, "a dumping ground is not a filing decision: {found:?}");
     }
 
     #[test]

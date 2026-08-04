@@ -53,6 +53,26 @@ pub fn is_in_zone(path: &str, zones: &[String]) -> bool {
     })
 }
 
+/// Which zone this **folder** sits in, if any.
+///
+/// `is_in_zone` answers the question for a *file* path: under a drive-root zone it matches a
+/// direct child, because `D:\installer.exe` really is loose at the root of D:. Handed a *folder*
+/// path, that same rule admits `D:\Projects` — and since candidacy is decided per folder, every
+/// file directly inside a folder the user deliberately made then becomes a relocation candidate.
+///
+/// A drive-root zone means "files dumped loose at the root of the drive". For folders that is the
+/// root folder and nothing else. Every other zone (Downloads, Desktop) still nests, because a
+/// subfolder of Downloads is still Downloads.
+pub fn zone_for_folder<'z>(path: &str, zones: &'z [String]) -> Option<&'z String> {
+    zones.iter().find(|zone| {
+        let trimmed = zone.trim_end_matches(['\\', '/']);
+        if is_drive_root(trimmed) {
+            return path.trim_end_matches(['\\', '/']).eq_ignore_ascii_case(trimmed);
+        }
+        is_in_zone(path, std::slice::from_ref(*zone))
+    })
+}
+
 /// The zones for this index: the user's Downloads and Desktop, plus any drive
 /// root that is actually a scan root in this index.
 ///
@@ -99,6 +119,28 @@ mod tests {
             conn.execute_batch(sql).unwrap();
         }
         conn
+    }
+
+    /// A drive-root zone is an inbox for files dumped at the root, never a licence to relocate
+    /// the contents of folders the user built. `is_in_zone` says yes to `D:\Projects` because its
+    /// direct-child rule is written for file paths; candidacy is decided per *folder*, so that
+    /// answer would make every file in `D:\Projects` movable.
+    #[test]
+    fn a_drive_root_zone_holds_loose_files_not_the_folders_beside_them() {
+        let drive = vec!["D:\\".to_string()];
+
+        // The file-path question and the folder-path question have different answers here.
+        assert!(is_in_zone("D:\\Projects", &drive));
+        assert!(zone_for_folder("D:\\Projects", &drive).is_none());
+        assert!(zone_for_folder("D:\\Projects\\webshop", &drive).is_none());
+
+        // The drive root itself is still the inbox, so loose files keep their suggestions.
+        assert!(zone_for_folder("D:\\", &drive).is_some());
+
+        // Every other zone still nests — a subfolder of Downloads is still Downloads.
+        let downloads = vec!["C:\\Users\\a\\Downloads".to_string()];
+        assert!(zone_for_folder("C:\\Users\\a\\Downloads", &downloads).is_some());
+        assert!(zone_for_folder("C:\\Users\\a\\Downloads\\tax-2024", &downloads).is_some());
     }
 
     #[test]
