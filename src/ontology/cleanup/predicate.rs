@@ -7,7 +7,7 @@ use rusqlite::Connection;
 /// Read every cleanup candidate from the view (no scope filter).
 pub fn list_all_candidates(conn: &Connection) -> Result<Vec<CleanupCandidate>, OntologyError> {
     let mut stmt = conn.prepare_cached(
-        "SELECT file_id, entity_id, path, size, reason
+        "SELECT file_id, entity_id, path, size, modified_at, reason
          FROM v_cleanup_candidates
          ORDER BY size DESC, file_id ASC",
     )?;
@@ -58,7 +58,8 @@ fn row_to_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanupCandidat
         entity_id: row.get(1)?,
         path: row.get(2)?,
         size: row.get(3)?,
-        reason: row.get(4)?,
+        modified_at: row.get(4)?,
+        reason: row.get(5)?,
     })
 }
 
@@ -252,11 +253,43 @@ mod tests {
     }
 
     #[test]
+    fn candidate_rows_carry_modified_at_through_the_view() {
+        let conn = migrated_conn();
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, modified_at, indexed_at)
+             VALUES (1, 1, '/root/dist/bundle.js', 'bundle.js', 100, 12345, 0)",
+            [],
+        )
+        .unwrap();
+        let eid = upsert_entity(&conn, EntityKind::File, "/root/dist/bundle.js", Some(1), None, None)
+            .unwrap()
+            .id;
+        set_role(&conn, eid, "scratch", 0.95);
+
+        let cands = list_all_candidates(&conn).unwrap();
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].modified_at, Some(12345));
+    }
+
+    #[test]
+    fn candidate_modified_at_is_none_without_a_timestamp() {
+        // add_file() never sets modified_at -- the row stays NULL, and it must
+        // surface as None rather than an invented 0 ("modified at the epoch").
+        let conn = migrated_conn();
+        let scratch = add_file(&conn, 1, "/root/dist/bundle.js", 100);
+        set_role(&conn, scratch, "scratch", 0.95);
+
+        let cands = list_all_candidates(&conn).unwrap();
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].modified_at, None);
+    }
+
+    #[test]
     fn filter_candidates_applies_reasons_size_and_prefix() {
         let all = vec![
-            CleanupCandidate { file_id: 1, entity_id: 1, path: "/a/x.js".into(), size: 100, reason: "scratch".into() },
-            CleanupCandidate { file_id: 2, entity_id: 2, path: "/b/y.png".into(), size: 9_000, reason: "safe-derivative".into() },
-            CleanupCandidate { file_id: 3, entity_id: 3, path: "/a/z.js".into(), size: 50, reason: "scratch".into() },
+            CleanupCandidate { file_id: 1, entity_id: 1, path: "/a/x.js".into(), size: 100, modified_at: None, reason: "scratch".into() },
+            CleanupCandidate { file_id: 2, entity_id: 2, path: "/b/y.png".into(), size: 9_000, modified_at: None, reason: "safe-derivative".into() },
+            CleanupCandidate { file_id: 3, entity_id: 3, path: "/a/z.js".into(), size: 50, modified_at: None, reason: "scratch".into() },
         ];
 
         let only_scratch = filter_candidates(all.clone(), &["scratch".to_string()], None, None);
@@ -275,10 +308,10 @@ mod tests {
         // Staging one file must never sweep a same-stem sibling (report.txt vs report.txt.bak),
         // and scoping to a folder must never catch a sibling sharing its name prefix (proj/project).
         let all = vec![
-            CleanupCandidate { file_id: 1, entity_id: 1, path: r"D:\x\report.txt".into(), size: 10, reason: "scratch".into() },
-            CleanupCandidate { file_id: 2, entity_id: 2, path: r"D:\x\report.txt.bak".into(), size: 10, reason: "scratch".into() },
-            CleanupCandidate { file_id: 3, entity_id: 3, path: r"D:\proj\a.js".into(), size: 10, reason: "scratch".into() },
-            CleanupCandidate { file_id: 4, entity_id: 4, path: r"D:\project\b.js".into(), size: 10, reason: "scratch".into() },
+            CleanupCandidate { file_id: 1, entity_id: 1, path: r"D:\x\report.txt".into(), size: 10, modified_at: None, reason: "scratch".into() },
+            CleanupCandidate { file_id: 2, entity_id: 2, path: r"D:\x\report.txt.bak".into(), size: 10, modified_at: None, reason: "scratch".into() },
+            CleanupCandidate { file_id: 3, entity_id: 3, path: r"D:\proj\a.js".into(), size: 10, modified_at: None, reason: "scratch".into() },
+            CleanupCandidate { file_id: 4, entity_id: 4, path: r"D:\project\b.js".into(), size: 10, modified_at: None, reason: "scratch".into() },
         ];
 
         let just_report = filter_candidates(all.clone(), &[], None, Some(r"D:\x\report.txt"));
