@@ -1,6 +1,6 @@
 name: Deploy docs
 
-# Builds the MkDocs Material site and publishes it to GitHub Pages.
+# Builds the docs site with docs-site/build.mjs and publishes it to GitHub Pages.
 # Requires: repo Settings → Pages → Source = "GitHub Actions".
 
 on:
@@ -8,7 +8,7 @@ on:
     branches: [main]
     paths:
       - "docs/**"
-      - "mkdocs.yml"
+      - "docs-site/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -26,11 +26,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.x"
-      - run: pip install mkdocs-material
-      - run: mkdocs build --strict
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+      - run: npm ci
+        working-directory: docs-site
+      - run: node build.mjs
+        working-directory: docs-site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

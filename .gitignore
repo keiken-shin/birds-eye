@@ -3,8 +3,9 @@
 /workspace/dist/
 /workspace/node_modules/
 
-# Docs site build output (MkDocs)
+# Docs site build output (docs-site/build.mjs)
 /site/
+/docs-site/node_modules/
 
 *.log
 *.tmp

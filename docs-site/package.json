@@ -1,0 +1,17 @@
+{
+  "name": "birds-eye-docs-site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Static generator for the Bird's Eye documentation site. Reads docs/**/*.md, emits site/.",
+  "scripts": {
+    "build": "node build.mjs",
+    "serve": "node build.mjs --serve",
+    "test": "node build.mjs --selftest"
+  },
+  "dependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@fontsource-variable/space-grotesk": "^5.2.10",
+    "marked": "^16.4.1"
+  }
+}
