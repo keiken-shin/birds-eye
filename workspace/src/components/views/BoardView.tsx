@@ -1142,10 +1142,10 @@ export function BoardView() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ViewHeader
-        title="Board"
+        title="Findings"
         sub={
           findings.length
-            ? `${findings.length} findings${sourceCount ? ` · ${sourceCount} shared source${sourceCount > 1 ? "s" : ""}` : ""} · ${formatBytes(pendingBytes)} if confirmed`
+            ? `${findings.length} findings${sourceCount ? ` · ${sourceCount} shared source${sourceCount > 1 ? "s" : ""}` : ""} · ${formatBytes(pendingBytes)} if you confirm them`
             : "pin folders, confirm findings, keep your reasoning"
         }
         actions={
@@ -1159,9 +1159,9 @@ export function BoardView() {
               <button
                 type="button"
                 onClick={resumeEnrichment}
-                className="flex items-center gap-1.5 rounded-full border border-protected-bd bg-protected-bg px-2.5 py-1 text-10 text-protected-tx transition-[filter] hover:brightness-125"
+                className="flex items-center gap-1.5 rounded-full border border-review-bd bg-review-bg px-2.5 py-1 text-10 text-review-tx transition-[filter] hover:brightness-125"
               >
-                <Play size={10} aria-hidden /> Enrichment interrupted — resume
+                <Play size={10} aria-hidden /> The analysis stopped early — resume
               </button>
             ) : null}
             {failed.length > 0 ? (
@@ -1169,7 +1169,8 @@ export function BoardView() {
                 className="flex items-center gap-1.5 rounded-full border border-danger/40 px-2.5 py-1 text-10 text-danger"
                 title={failed.map((p) => `${p.name}: ${p.last_error ?? "failed"}`).join("\n")}
               >
-                <TriangleAlert size={10} aria-hidden /> {failed.length} populator{failed.length > 1 ? "s" : ""} failed
+                <TriangleAlert size={10} aria-hidden /> {failed.length} step
+                {failed.length > 1 ? "s" : ""} of the analysis didn't finish
               </span>
             ) : null}
             {(Array.from(kindCounts.entries()) as Array<[string, number]>)
@@ -1237,7 +1238,7 @@ export function BoardView() {
           <EmptyState
             icon={Network}
             title="An open canvas for your investigation"
-            hint="Pin folders from the Inspector, add notes, and confirm the findings the intelligence layer surfaces — cards keep their place."
+            hint="Pin folders from the Inspector, add notes, and confirm what Bird's Eye found — cards keep their place."
             action={{ label: "Add a note", icon: StickyNote, onClick: addNote }}
             className="h-full"
           />
@@ -1437,7 +1438,7 @@ export function BoardView() {
                       </button>
                       <button
                         type="button"
-                        title="Rename — your name replaces the generated one"
+                        title="Rename — your name replaces the one Bird's Eye picked"
                         onClick={() => setEditingCard(card.id)}
                         className="flex h-6 w-6 items-center justify-center rounded-full border border-line-modal bg-overlay text-faint shadow-[0_2px_8px_rgba(0,0,0,0.4)] transition-colors hover:text-ink"
                       >
@@ -1446,7 +1447,7 @@ export function BoardView() {
                       {card.kind !== "note" ? (
                         <button
                           type="button"
-                          title="Hide this card from the board"
+                          title="Hide this card from Findings"
                           onClick={() => hideCard(card.id)}
                           className="flex h-6 w-6 items-center justify-center rounded-full border border-line-modal bg-overlay text-faint shadow-[0_2px_8px_rgba(0,0,0,0.4)] transition-colors hover:text-ink"
                         >
@@ -1463,7 +1464,7 @@ export function BoardView() {
                       <input
                         autoFocus
                         defaultValue={edits.overrides[card.id]?.label ?? ""}
-                        placeholder="Name this card — empty restores the generated name"
+                        placeholder="Name this card — leave it empty to restore the original name"
                         aria-label="Card name"
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
@@ -1699,7 +1700,7 @@ function FindingCard({
         <div className="mt-2 flex items-center justify-between text-10 text-faint">
           <span>
             frees <span className="mono font-semibold text-primary-ink">{formatBytes(finding.bytes)}</span> if
-            confirmed
+            you confirm it
           </span>
           <VerdictTag verdict={verdict} />
         </div>
@@ -1759,8 +1760,8 @@ function SourceCard({
         </div>
         <div className="mt-1.5 text-10 text-faint">
           <span className="mono font-semibold text-ink-soft">{formatCount(source.count)}</span> findings ·{" "}
-          <span className="mono font-semibold text-primary-ink">{formatBytes(source.bytes)}</span> reclaimable
-          if confirmed
+          <span className="mono font-semibold text-primary-ink">{formatBytes(source.bytes)}</span> freed
+          if you confirm them
         </div>
       </div>
       <div className="flex border-t border-line-soft px-3 py-2">

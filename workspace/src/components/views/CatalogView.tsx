@@ -16,12 +16,12 @@ import { Card, EmptyState, SectionLabel } from "../ui/Card";
 import { ViewHeader } from "./ViewHeader";
 
 /**
- * Relocation suggestions: "these files belong somewhere else". Accepting a card
- * stages its members as moves; nothing touches disk until the review gate.
+ * "Organise" — these files belong somewhere else. Accepting a card stages its
+ * members as moves; nothing touches disk until the review gate.
  *
- * Written as a body component under its own ViewHeader so that if Cleanup and
- * Catalog are ever merged behind one header, the toggle drops into a parent and
- * this body is untouched.
+ * Written as a body component under its own ViewHeader so that if Clean up and
+ * Organise are ever merged behind one header, the toggle drops into a parent
+ * and this body is untouched.
  */
 export function CatalogView() {
   // `ontologyEnabled` lives on the workspace store; `ontology` (the status DTO)
@@ -160,11 +160,11 @@ export function CatalogView() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ViewHeader
-        title="Catalog"
+        title="Organise"
         sub={
           cards?.length
             ? `${cards.length} suggestion${cards.length === 1 ? "" : "s"} · ${formatBytes(total)}`
-            : "Where your files should live"
+            : "put files where they belong"
         }
       />
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">

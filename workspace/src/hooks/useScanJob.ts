@@ -16,6 +16,10 @@ export type ScanJobView = {
   status: "idle" | "scanning" | "complete" | "cancelled" | "failed";
   message: string;
   pct: number; // -1 = indeterminate
+  /** Raw counts behind `pct` — during duplicate sampling this is "files compared
+   *  of files that could be duplicates", which is a finding worth saying. */
+  progressCurrent: number;
+  progressTotal: number;
   files: number;
   folders: number;
   bytes: number;
@@ -29,6 +33,8 @@ const IDLE: ScanJobView = {
   status: "idle",
   message: "",
   pct: -1,
+  progressCurrent: 0,
+  progressTotal: 0,
   files: 0,
   folders: 0,
   bytes: 0,
@@ -68,6 +74,8 @@ export function useScanJob(onComplete?: (indexPath: string) => void) {
       status: terminal ?? "scanning",
       message: event.message || v.message,
       pct: event.progress_total > 0 ? Math.min(100, (event.progress_current / event.progress_total) * 100) : v.pct,
+      progressCurrent: event.progress_current,
+      progressTotal: event.progress_total,
       files: Math.max(v.files, event.files_scanned),
       folders: Math.max(v.folders, event.folders_scanned),
       bytes: Math.max(v.bytes, event.bytes_scanned),

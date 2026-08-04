@@ -4,8 +4,12 @@ import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
 
 /**
- * The opt-in CTA shown wherever intelligence is required but off (Inspector, Board lens).
- * One component so the empty state is identical everywhere — the locked honesty decision.
+ * Shown wherever the analysis is off (Inspector, Findings, Clean up, Organise).
+ * One component so the empty state is identical everywhere — the locked honesty
+ * decision.
+ *
+ * The analysis now runs by default, so this is the "you turned it off" path
+ * rather than a first-run pitch: it explains what's missing and offers it back.
  */
 export function EnableIntelligenceCard() {
   const { enable, busy, error } = useEnableIntelligence();
@@ -16,15 +20,16 @@ export function EnableIntelligenceCard() {
           <Sparkles size={15} strokeWidth={2} aria-hidden />
         </span>
         <span className="min-w-0 flex-1 text-115 leading-snug text-muted">
-          Classifies every folder on-device — why it exists, what depends on it, what's reclaimable.
+          This index only has sizes. Bird's Eye can read your folders and tell you what's safe to
+          delete and why — on this machine, nothing uploaded.
         </span>
         <Button variant="primary" size="sm" className="flex-none" disabled={busy} onClick={() => void enable()}>
-          {busy ? "Starting…" : "Enable intelligence"}
+          {busy ? "Starting…" : "Run the analysis"}
         </Button>
       </div>
       {error ? (
         <div className="mt-2.5 rounded-lg border border-danger/40 bg-danger/10 px-2.5 py-1.5 text-11 text-danger">
-          Couldn't enable: {error}
+          Couldn't start the analysis: {error}
         </div>
       ) : null}
     </Card>

@@ -168,7 +168,7 @@ export function DuplicatesView() {
           <EmptyState
             icon={ScanLine}
             title="Scan a folder to find duplicates"
-            hint="Bird's Eye hashes same-size files during smart scans and groups exact copies — everything stays on this machine."
+            hint="Bird's Eye hashes same-size files during smart scans and groups exact copies. Nothing is uploaded."
             action={{ label: "Scan a folder", icon: ScanLine, onClick: () => setOverlay("scan") }}
           />
         </div>

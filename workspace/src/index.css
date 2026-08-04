@@ -44,16 +44,18 @@
   --color-warn: #e0a44a;
   --color-danger: #e06a5a;
 
-  /* Verdict palette (safe / review / protected / keep) — bg · border · text */
+  /* Verdict palette — bg · border · text. Four internal states, three colours:
+     safe = green ("Safe to delete"), review = amber ("Check first"),
+     protected and keep share one grey ("Don't touch"). */
   --color-safe-bg: #15311f;
   --color-safe-bd: #2f7d4e;
   --color-safe-tx: #7fe0a6;
-  --color-review-bg: #23262e;
-  --color-review-bd: #3a4150;
-  --color-review-tx: #cdd2da;
-  --color-protected-bg: #2a2417;
-  --color-protected-bd: #6b5630;
-  --color-protected-tx: #e0c489;
+  --color-review-bg: #2a2417;
+  --color-review-bd: #6b5630;
+  --color-review-tx: #e0c489;
+  --color-protected-bg: #191c22;
+  --color-protected-bd: #2a2f38;
+  --color-protected-tx: #aab0b8;
   --color-keep-bg: #191c22;
   --color-keep-bd: #2a2f38;
   --color-keep-tx: #aab0b8;

@@ -6,7 +6,14 @@ import { useEnableIntelligence } from "../hooks/useEnableIntelligence";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
 
-/** First-class, non-destructive opt-in prompt — appears once per index when intelligence is off. */
+/**
+ * Non-destructive prompt — appears once per index when the analysis is off.
+ *
+ * The analysis runs by default now, so an index reaches this state one of two
+ * ways: it was scanned before that changed, or the user turned it off in
+ * Settings. Either way the offer is the same one, worded as a thing that's
+ * missing rather than a feature to unlock.
+ */
 export function EnableIntelligence() {
   const { indexPath, ontologyEnabled } = useWorkspace();
   const { ontology } = useIndexData();
@@ -18,7 +25,7 @@ export function EnableIntelligence() {
     setDismissed(localStorage.getItem(`be.ws.enable.dismissed:${indexPath}`) === "1");
   }, [indexPath]);
 
-  // `ontology === null` means the status read hasn't landed yet — showing the
+  // copy-ok: code comment. `ontology === null` means the status read hasn't landed yet — showing the
   // prompt then flashes it at every app start while a big index loads.
   if (!indexPath || ontology === null || ontologyEnabled || dismissed) return null;
 
@@ -38,17 +45,19 @@ export function EnableIntelligence() {
             <Sparkles size={15} strokeWidth={2} aria-hidden />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-135 font-semibold text-ink">Understand what's safe to delete</div>
+            <div className="text-135 font-semibold text-ink">
+              This index only knows how big things are
+            </div>
             <div className="mt-1 text-115 leading-relaxed text-muted">
-              Classifies every folder on this machine — nothing leaves it. Unlocks safety verdicts
-              on the treemap, findings on the Board, and cleanup recommendations. Runs as a
-              background rescan; you can keep working.
+              Let Bird's Eye read your folders and it will tell you what's safe to delete and why —
+              on the Map, in Findings, and in Clean up. It reads your own folder structure on this
+              machine; nothing is uploaded. Runs in the background, so keep working.
             </div>
           </div>
         </div>
         {error ? (
           <div className="mt-3 rounded-lg border border-danger/40 bg-danger/10 px-2.5 py-1.5 text-11 text-danger">
-            Couldn't enable: {error}
+            Couldn't start the analysis: {error}
           </div>
         ) : null}
         <div className="mt-3 flex justify-end gap-2">
@@ -56,7 +65,7 @@ export function EnableIntelligence() {
             Not now
           </Button>
           <Button variant="primary" size="sm" icon={Sparkles} disabled={busy} onClick={() => void enable()}>
-            {busy ? "Starting…" : "Enable intelligence"}
+            {busy ? "Starting…" : "Run the analysis"}
           </Button>
         </div>
       </Card>

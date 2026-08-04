@@ -190,8 +190,8 @@ export function TimelineView() {
         tint: "var(--color-faint)",
         body: (
           <>
-            <Val>{pctText(staleYrBytes, totalAgeBytes)}</Val> of indexed bytes — <Val>{formatBytes(staleYrBytes)}</Val> —
-            are digital rot, unmodified for a year or more.
+            <Val>{pctText(staleYrBytes, totalAgeBytes)}</Val> of what's indexed — <Val>{formatBytes(staleYrBytes)}</Val> —
+            hasn't changed in a year or more.
           </>
         ),
       });
@@ -231,11 +231,11 @@ export function TimelineView() {
   if (status === "no-index") {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <ViewHeader title="Timeline" sub="when your files were last touched" />
+        <ViewHeader title="By age" sub="when you last touched your files" />
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <EmptyState
             icon={ScanLine}
-            title="Scan a folder to see its timeline"
+            title="Scan a folder to see how old its files are"
             hint="Bird's Eye reads last-modified dates during a scan and turns them into an activity history."
             action={{ label: "Scan a folder", icon: ScanLine, onClick: () => setOverlay("scan") }}
           />
@@ -246,7 +246,7 @@ export function TimelineView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ViewHeader title="Timeline" sub="when your files were last touched" />
+      <ViewHeader title="By age" sub="when you last touched your files" />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[1080px] flex-col gap-4 p-4">
           {/* Stat tiles */}
@@ -367,7 +367,8 @@ export function TimelineView() {
                             path: f.path,
                             name,
                             bytes: f.size,
-                            reason: "stale 1yr+",
+                            // Always the number, never a category.
+                            reason: days !== null ? `untouched ${formatAge(days)}` : null,
                             verdict: "review",
                             kind: "file",
                           });

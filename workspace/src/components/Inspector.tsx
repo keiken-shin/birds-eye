@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  Anchor,
   Check,
   ExternalLink,
   File as FileIcon,
@@ -23,7 +22,7 @@ import {
 } from "@bridge/nativeClient";
 import { useIndexData } from "../state/indexData";
 import { useWorkspace } from "../state/workspaceStore";
-import { canStage, explainFolder, verdictForFolder } from "../lib/verdict";
+import { VERDICT_STYLES, canStage, explainFolder, verdictForFolder } from "../lib/verdict";
 import { categoryOf } from "../lib/categories";
 import { Card, EmptyState, SectionLabel } from "./ui/Card";
 import { Button, IconButton } from "./ui/Button";
@@ -35,12 +34,16 @@ import { FilePreview } from "./FilePreview";
 import { MoveDialog } from "./MoveDialog";
 import type { Verdict } from "../state/types";
 
-/** Verdict presentation on the design tokens — icon, label, token classes. */
-const VERDICT_UI: Record<Verdict, { icon: LucideIcon; label: string; cls: string }> = {
-  safe: { icon: ShieldCheck, label: "Safe to remove", cls: "bg-safe-bg border-safe-bd text-safe-tx" },
-  review: { icon: Scale, label: "Review recommended", cls: "bg-review-bg border-review-bd text-review-tx" },
-  protected: { icon: Lock, label: "Protected", cls: "bg-protected-bg border-protected-bd text-protected-tx" },
-  keep: { icon: Anchor, label: "Keep — in use", cls: "bg-keep-bg border-keep-bd text-keep-tx" },
+/**
+ * Verdict presentation on the design tokens — icon and token classes only; the
+ * words come from VERDICT_STYLES, where `protected` and `keep` read the same.
+ */
+const DONT_TOUCH_UI = { icon: Lock, cls: "bg-keep-bg border-keep-bd text-keep-tx" };
+const VERDICT_UI: Record<Verdict, { icon: LucideIcon; cls: string }> = {
+  safe: { icon: ShieldCheck, cls: "bg-safe-bg border-safe-bd text-safe-tx" },
+  review: { icon: Scale, cls: "bg-review-bg border-review-bd text-review-tx" },
+  protected: DONT_TOUCH_UI,
+  keep: DONT_TOUCH_UI,
 };
 
 function Fact({ label, value }: { label: string; value: ReactNode }) {
@@ -165,7 +168,7 @@ export function Inspector() {
           <EmptyState
             icon={MousePointerClick}
             title="Select anything to inspect it"
-            hint="Click a folder on the treemap or a file in Files — size, what it is, and whether it's safe to remove land here."
+            hint="Click a folder on the Map or a file in Files — its size, what it is, and whether it's safe to delete land here."
           />
         </div>
       ) : (
@@ -220,8 +223,8 @@ export function Inspector() {
                   </Card>
                 ) : null}
                 <div className="text-11 leading-relaxed text-faint">
-                  Verdicts are folder-level — select this file's folder on the map for the full
-                  picture. Staged files are re-verified before removal.
+                  Bird's Eye works this out folder by folder — select this file's folder on the Map
+                  for the full picture. It checks again before it removes anything.
                 </div>
               </>
             ) : (
@@ -252,39 +255,43 @@ export function Inspector() {
                 ) : (
                   <>
                     <div className="mb-4">
-                      <SectionLabel className="mb-1.5">Why it exists</SectionLabel>
+                      <SectionLabel className="mb-1.5">What this is</SectionLabel>
                       <div className="text-125 leading-relaxed text-ink-soft">
                         {lensRow
                           ? explainFolder(lensRow)
-                          : "Not yet classified — re-run enrichment to analyze this folder."}
+                          : "Bird's Eye hasn't looked at this folder yet — run the analysis again to include it."}
                       </div>
                     </div>
 
                     <div>
-                      <SectionLabel className="mb-1.5">Safety verdict</SectionLabel>
-                      {vu && VerdictIcon ? (
+                      <SectionLabel className="mb-1.5">Is it safe to delete?</SectionLabel>
+                      {verdict && vu && VerdictIcon ? (
                         <div className={`rounded-lg border p-3 ${vu.cls}`}>
                           <div className="mb-1 flex items-center gap-2 text-125 font-semibold">
                             <VerdictIcon size={14} strokeWidth={2} aria-hidden />
-                            {vu.label}
+                            {VERDICT_STYLES[verdict].label}
                           </div>
+                          {/* "Don't touch" always carries the reason — that is the
+                              whole difference between grey and a shrug. */}
                           <div className="text-115 leading-snug opacity-90">
                             {reclaimable > 0 ? (
                               <>
                                 <span className="mono font-semibold">
                                   {formatBytes(reclaimable)}
                                 </span>{" "}
-                                reclaimable{reasonLabel ? ` · ${reasonLabel}` : ""}
+                                you can free{reasonLabel ? ` · ${reasonLabel}` : ""}
                               </>
                             ) : verdict === "protected" ? (
-                              "Protected — never auto-staged."
+                              "Bird's Eye won't remove this one, whatever you stage."
                             ) : (
-                              "In active use — nothing reclaimable."
+                              "You're using it — there's nothing to free here."
                             )}
                           </div>
                         </div>
                       ) : (
-                        <div className="text-115 italic text-label">Not classified.</div>
+                        <div className="text-115 italic text-label">
+                          Bird's Eye hasn't classified this folder yet.
+                        </div>
                       )}
                     </div>
                   </>
@@ -313,19 +320,19 @@ export function Inspector() {
                 onClick={onStage}
               >
                 {verdict === "protected"
-                  ? "Protected"
+                  ? "Don't touch"
                   : staged
                     ? "Staged — remove"
                     : stageable
                       ? "Add to cleanup tray"
-                      : "Nothing to reclaim"}
+                      : "Nothing to free"}
               </Button>
             ) : null}
 
             <div className="flex items-center gap-1">
               <IconButton
                 icon={Network}
-                label={pinned ? "Already on board" : "Pin to board"}
+                label={pinned ? "Already pinned to Findings" : "Pin to Findings"}
                 active={pinned}
                 disabled={pinned}
                 onClick={() =>

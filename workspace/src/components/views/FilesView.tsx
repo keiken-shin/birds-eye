@@ -19,7 +19,6 @@ import { ViewHeader } from "./ViewHeader";
 
 const SEARCH_LIMIT = 500;
 const RENDER_CAP = 200;
-const STALE_DAYS = 180;
 
 type SortKey = "size" | "newest" | "oldest";
 const SORTS: Array<{ key: SortKey; label: string }> = [
@@ -248,7 +247,7 @@ export function FilesView() {
           <EmptyState
             icon={ScanLine}
             title="Scan a folder to search your files"
-            hint="Bird's Eye indexes names, sizes, types and ages locally — nothing leaves this machine."
+            hint="Bird's Eye indexes names, sizes, types and ages on this machine. Nothing is uploaded."
             action={{ label: "Scan a folder", icon: ScanLine, onClick: () => setOverlay("scan") }}
           />
         </div>
@@ -347,7 +346,7 @@ export function FilesView() {
                   active={resultsQuery?.kind === "view" && resultsQuery.viewId === v.id}
                   icon={v.protective ? Lock : undefined}
                   disabled={!ontologyEnabled}
-                  title={ontologyEnabled ? v.description : "Enable intelligence to use curated views"}
+                  title={ontologyEnabled ? v.description : "Run the analysis to use the curated views"}
                   onClick={() => runQuery({ kind: "view", viewId: v.id, viewName: v.name })}
                   className="disabled:cursor-not-allowed disabled:opacity-40"
                 >
@@ -366,8 +365,8 @@ export function FilesView() {
           {viewNeedsIntel ? (
             <EmptyState
               icon={Lock}
-              title="This curated view needs intelligence"
-              hint="Saved views read the roles and relationships found during enrichment. Enable intelligence on the Board, or run a plain search instead."
+              title="This view needs the analysis"
+              hint="Curated views read what Bird's Eye found about your folders. Run the analysis from Findings, or just search instead."
               className="be-rise be-d3"
             />
           ) : (
@@ -400,7 +399,7 @@ export function FilesView() {
                   title="No files match"
                   hint={
                     resultsQuery?.kind === "view"
-                      ? "Some curated views only fill in after enrichment finishes or findings are confirmed on the Board."
+                      ? "Some curated views only fill in once the analysis finishes, or once you confirm findings."
                       : "Try a shorter term, or clear the category filter."
                   }
                 />
@@ -441,10 +440,10 @@ export function FilesView() {
                     const cat = categoryOf(r.kind);
                     const Icon = cat.icon;
                     // Reset/lost mtimes (pre-1990) resolve to null — an unknown
-                    // age, never "stale". `dateLost` distinguishes that from a
-                    // file that simply carries no timestamp.
+                    // age. `dateLost` distinguishes that from a file that simply
+                    // carries no timestamp. The age column below is the only age
+                    // signal: a number, never a "Stale" badge.
                     const days = ageDays(r.modifiedAt, nowSec);
-                    const stale = days !== null && days > STALE_DAYS;
                     const dateLost = r.modifiedAt !== null && days === null;
                     const staged = isStaged(r.path);
                     const sel = selected?.path === r.path;
@@ -479,7 +478,6 @@ export function FilesView() {
                           <div className="flex min-w-0 items-center gap-1.5">
                             <span className="truncate text-12 font-medium text-ink-soft">{r.name}</span>
                             {r.extension ? <Tag>{r.extension}</Tag> : null}
-                            {stale ? <Tag tone="amber">Stale</Tag> : null}
                           </div>
                           <div className="mono truncate text-10 text-dim">{r.path}</div>
                         </div>
@@ -505,7 +503,11 @@ export function FilesView() {
                           variant={staged ? "subtle" : "ghost"}
                           icon={staged ? Check : Plus}
                           className="flex-none"
-                          title={staged ? "Remove from cleanup tray" : "Stage for cleanup (re-verified before removal)"}
+                          title={
+                            staged
+                              ? "Remove from the cleanup tray"
+                              : "Add to the cleanup tray — Bird's Eye checks again before it removes anything"
+                          }
                           onClick={(e) => {
                             e.stopPropagation();
                             toggleStaged({

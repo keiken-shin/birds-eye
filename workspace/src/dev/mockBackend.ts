@@ -66,6 +66,39 @@ const FOLDERS: FolderFix[] = [
 ];
 
 /* ------------------------------------------------------------------ */
+/* Fixed drives (list_fixed_drives)                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Shaped like a real machine: a nearly-full OS drive, a roomier data drive,
+ * and one volume whose capacity can't be read (BitLocker-locked / unformatted).
+ * The last one is the point — it must still appear, with its size unknown.
+ */
+const DRIVES = [
+  {
+    root_path: "C:\\",
+    volume_label: "OS",
+    total_bytes: Math.round(966 * GB),
+    free_bytes: Math.round(294 * GB),
+    drive_type: "fixed",
+  },
+  {
+    root_path: "D:\\",
+    volume_label: "New Volume",
+    total_bytes: Math.round(1048 * GB),
+    free_bytes: Math.round(212 * GB),
+    drive_type: "fixed",
+  },
+  {
+    root_path: "E:\\",
+    volume_label: null,
+    total_bytes: null,
+    free_bytes: null,
+    drive_type: "fixed",
+  },
+];
+
+/* ------------------------------------------------------------------ */
 /* Files (largest-first, like query_index.files)                       */
 /* ------------------------------------------------------------------ */
 
@@ -367,15 +400,23 @@ type LensFix = {
   lifecycle: string | null;
   cleanup_reason: string | null;
   reclaimable_bytes: number;
+  modified_at: number | null;
 };
 
+/**
+ * `ageDays` = how long since anything under the folder was touched (the real
+ * backend rolls up MAX(files.modified_at) over the whole subtree). `null`
+ * mirrors a subtree where nothing carries a timestamp — the row must say so
+ * rather than show an invented age.
+ */
 const lens = (
   path: string,
   role: string | null,
   replaceability: string | null,
   lifecycle: string | null,
   reason: string | null,
-  reclaimGb: number
+  reclaimGb: number,
+  ageDays: number | null = 30
 ): LensFix => ({
   folder_path: path,
   role,
@@ -383,6 +424,7 @@ const lens = (
   lifecycle,
   cleanup_reason: reason,
   reclaimable_bytes: Math.round(reclaimGb * GB),
+  modified_at: ageDays === null ? null : NOW - Math.round(ageDays * DAY),
 });
 
 const LENS: LensFix[] = [
@@ -399,26 +441,27 @@ const LENS: LensFix[] = [
   lens(j("Photos", "2021"), "asset", "irreplaceable", null, null, 0),
   lens(j("Photos", "Older"), null, null, null, null, 0),
   lens(j("Photos", "Lightroom"), null, null, null, null, 9.4),
-  lens(j("Photos", "Lightroom", "Previews"), "derivative", "regenerable", null, "safe-derivative", 9.4),
+  lens(j("Photos", "Lightroom", "Previews"), "derivative", "regenerable", null, "safe-derivative", 9.4, 122),
   lens(j("Projects"), null, null, null, null, 28.7),
   lens(j("Projects", "forge"), null, null, "active", null, 16.4),
   lens(j("Projects", "forge", "src"), "source", "irreplaceable", "active", null, 0),
-  lens(j("Projects", "forge", "target"), "derivative", "regenerable", null, "safe-derivative", 16.4),
-  lens(j("Projects", "webshop"), null, null, "finished", "finished-project-cruft", 12.3),
-  lens(j("Projects", "webshop", "node_modules"), "scratch", "regenerable", null, "scratch", 12.3),
+  lens(j("Projects", "forge", "target"), "derivative", "regenerable", null, "safe-derivative", 16.4, 88),
+  lens(j("Projects", "webshop"), null, null, "finished", "finished-project-cruft", 12.3, 214),
+  lens(j("Projects", "webshop", "node_modules"), "scratch", "regenerable", null, "scratch", 12.3, 240),
   lens(j("Projects", "ml-lab"), null, null, null, null, 0),
   lens(j("Projects", "ml-lab", "checkpoints"), null, "regenerable", null, null, 0),
   lens(j("Downloads"), null, null, null, null, 15.6),
-  lens(j("Downloads", "Installers"), null, "regenerable", null, "scratch", 15.6),
+  lens(j("Downloads", "Installers"), null, "regenerable", null, "scratch", 15.6, 380),
   lens(j("Backups"), null, null, null, null, 48.2),
-  lens(j("Backups", "OldLaptop"), "backup", "regenerable", null, "redundant-backup", 41.2),
-  lens(j("Backups", "PhoneSync"), "backup", null, null, null, 7.0),
+  lens(j("Backups", "OldLaptop"), "backup", "regenerable", null, "redundant-backup", 41.2, 660),
+  // Phone-sync copies land without timestamps — the honest "date unknown" path.
+  lens(j("Backups", "PhoneSync"), "backup", null, null, null, 7.0, null),
   lens(j("Music"), "asset", null, null, null, 0),
   lens(j("Documents"), "source", "irreplaceable", null, null, 0),
   lens(j("VMs"), null, null, null, null, 12.8),
   lens(j("AppData"), null, null, null, null, 20.0),
-  lens(j("AppData", "Cache"), "scratch", "regenerable", null, "scratch", 14.2),
-  lens(j("AppData", "Temp"), "scratch", "regenerable", null, "scratch", 5.8),
+  lens(j("AppData", "Cache"), "scratch", "regenerable", null, "scratch", 14.2, 34),
+  lens(j("AppData", "Temp"), "scratch", "regenerable", null, "scratch", 5.8, 9),
 ];
 
 /* ------------------------------------------------------------------ */
@@ -613,7 +656,7 @@ let CLEANUP_LOG: CleanupLogFix[] = [
 
 let nextLogId = 3;
 let nextPlanId = 2;
-const PLANS = new Map<number, { total_bytes: number; candidates: Array<{ file_id: number; entity_id: number; path: string; size: number; reason: string }> }>();
+const PLANS = new Map<number, { total_bytes: number; candidates: Array<{ file_id: number; entity_id: number; path: string; size: number; modified_at: number | null; reason: string }> }>();
 
 /* ------------------------------------------------------------------ */
 /* Index entries                                                       */
@@ -686,7 +729,7 @@ let nextJobId = 1;
 const SCAN_LOG_LINES: Array<[string, string]> = [
   ["walk", "Videos\\Screen Recordings — 2,301 entries"],
   ["stat", "Photos\\2024 — 18,204 entries · 22.1 GB"],
-  ["hash", "graduation-uncut.mp4 — 4.1 GB xxh3:9f3a1c88"],
+  ["hash", "graduation-uncut.mp4 — 4.1 GB xxh3:9f3a1c88"], // copy-ok: a fixture filename, not prose
   ["walk", "Projects\\webshop\\node_modules — 61,204 entries"],
   ["skip", "symlink → ..\\shared (follow off)"],
   ["index", "Backups\\OldLaptop — +44.6 GB"],
@@ -702,6 +745,9 @@ function emitJob(jobId: number, event: JobEvent) {
   jobBuffers.set(jobId, buf);
   listeners.forEach((cb) => cb(event));
 }
+
+/** Files that share a size with another file — what the hashing pass actually compares. */
+const DUP_CANDIDATE_FILES = 11_204;
 
 function startMockScan(root: string): { job_id: number; index_path: string } {
   const jobId = nextJobId++;
@@ -738,7 +784,8 @@ function startMockScan(root: string): { job_id: number; index_path: string } {
       emitJob(jobId, {
         job_id: jobId,
         status: "Completed",
-        message: "Scan complete",
+        // The real backend's terminal message, verbatim — the overlay says it plainly.
+        message: "Duplicate analysis complete",
         files_scanned: totalFiles,
         folders_scanned: 24_618,
         bytes_scanned: totalBytes,
@@ -759,18 +806,25 @@ function startMockScan(root: string): { job_id: number; index_path: string } {
     // Counter and log events are DISTINCT, matching the real emitter — the
     // frontend treats any event carrying log_line as log-only and skips its
     // counters (useScanJob.apply).
+    // Real backend message strings (jobs.rs / writer.rs), so dev mode exercises
+    // the same plain-English mapping the app applies to them. During sampling the
+    // real progress_total counts duplicate CANDIDATES, not every file — mirror that.
+    const sampling = frac >= 0.55 && frac < 0.85;
     const progress = {
       job_id: jobId,
       status: "Running",
-      message: frac < 0.55 ? "Walking file tree" : frac < 0.85 ? "Hashing duplicate candidates" : "Writing index",
+      message: frac < 0.55 ? "progress" : sampling ? "Sampling duplicate candidates" : "Finalizing index",
       files_scanned: Math.round(totalFiles * frac),
       folders_scanned: Math.round(24_618 * frac),
       bytes_scanned: Math.round(totalBytes * frac),
       queue_depth: Math.max(0, Math.round((1 - frac) * 34)),
       active_workers: 8,
-      current_path: `${root}\\${line[1].split(" — ")[0]}`,
-      progress_current: Math.round(totalFiles * frac),
-      progress_total: totalFiles,
+      // The real emitter sends the directory a worker is in, not a log line.
+      current_path: FOLDERS[tick % FOLDERS.length].path,
+      progress_current: sampling
+        ? Math.round(DUP_CANDIDATE_FILES * ((frac - 0.55) / 0.3))
+        : Math.round(totalFiles * frac),
+      progress_total: sampling ? DUP_CANDIDATE_FILES : totalFiles,
     };
     emitJob(jobId, progress);
     emitJob(jobId, { ...progress, log_line: { phase: line[0], message: line[1], elapsed_ms: tick * 130 } });
@@ -824,13 +878,15 @@ function searchFiles(args: {
     }));
 }
 
+/** Names and descriptions must match src/ontology/saved_views.rs verbatim — browser
+ *  dev mode is meant to read exactly like the real app. Ids never change. */
 const SAVED_VIEWS = [
-  { id: "finished-untouched", name: "Finished & untouched", description: "Files in finished projects untouched for a year", protective: false },
-  { id: "regenerable-large", name: "Large & regenerable", description: "Caches, build outputs and other regenerable data over 100 MB", protective: false },
-  { id: "unprojected-files", name: "Loose files", description: "Large files that belong to no project", protective: false },
-  { id: "unclassified", name: "Unclassified", description: "Files the intelligence layer has not classified yet", protective: false },
-  { id: "orphan-sources", name: "Orphan sources", description: "Source files whose derivatives disappeared", protective: true },
-  { id: "orphan-backups", name: "Orphan backups", description: "Backups whose originals are gone", protective: true },
+  { id: "finished-untouched", name: "Finished projects, untouched a year", description: "Files in projects you've finished that you haven't opened in a year", protective: false },
+  { id: "regenerable-large", name: "Big files you can rebuild", description: "Build output, caches and other files over 100 MB you can make again", protective: false },
+  { id: "unprojected-files", name: "Files not in any project", description: "Big files that don't belong to a project", protective: false },
+  { id: "unclassified", name: "Not sorted yet", description: "Files Bird's Eye hasn't worked out yet", protective: false },
+  { id: "orphan-sources", name: "Originals with nothing made from them", description: "Originals whose copies and exports have gone", protective: true },
+  { id: "orphan-backups", name: "Backups whose original is gone", description: "Backups of something that no longer exists", protective: true },
 ];
 
 function runSavedView(viewId: string): Array<{ file_id: number; path: string; size: number }> {
@@ -893,6 +949,8 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
         timeline: TIMELINE,
         age_buckets: AGE_BUCKETS,
       });
+    case "list_fixed_drives":
+      return done(DRIVES);
     case "scan_issues":
       return done(SCAN_ISSUES[String(request.index_path)] ?? []);
     case "retry_scan_issues": {
@@ -1093,6 +1151,7 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
             entity_id: 500 + i,
             path: p,
             size: lensRow?.reclaimable_bytes ?? folder?.total_bytes ?? 0,
+            modified_at: lensRow?.modified_at ?? null,
             reason: r,
           };
         })

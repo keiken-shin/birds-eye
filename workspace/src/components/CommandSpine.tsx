@@ -88,8 +88,9 @@ export function CommandSpine() {
         </button>
       ) : null}
 
-      {/* The one stage switcher: active segment shows its label, the rest are
-          icons with hover tooltips. */}
+      {/* The one stage switcher. Every view shows its word, always — an
+          unlabelled glyph is a guess. Icons are the first thing dropped when
+          the window is narrow; the words are the point. */}
       <div
         role="tablist"
         aria-label="Stage view"
@@ -106,12 +107,12 @@ export function CommandSpine() {
               aria-selected={active}
               title={`${item.label} (${item.key})`}
               onClick={() => setView(item.view)}
-              className={`relative flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-11 font-medium transition-colors ${
+              className={`relative flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-11 font-medium whitespace-nowrap transition-colors ${
                 active ? "bg-primary text-on-primary" : "text-faint hover:bg-inset hover:text-ink"
               }`}
             >
-              <Icon size={14} strokeWidth={active ? 2.2 : 1.8} aria-hidden />
-              {active ? <span>{item.label}</span> : null}
+              <Icon size={14} strokeWidth={active ? 2.2 : 1.8} aria-hidden className="hidden xl:block" />
+              <span>{item.label}</span>
               {item.view === "board" && boardBadge > 0 && !active ? (
                 <span className="absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
               ) : null}
