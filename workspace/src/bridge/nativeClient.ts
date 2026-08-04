@@ -115,6 +115,27 @@ export type NativeDuplicateFile = {
   hash_state: 0 | 2 | 4;
 };
 
+/**
+ * One fixed drive, as the first-run picker lists it.
+ *
+ * Capacity is nullable on purpose (`Option<u64>` in `src/native/drives.rs`): an
+ * unformatted, BitLocker-locked or empty-card-reader volume still enumerates as
+ * a fixed drive but can't report its size. Such a drive stays in the list with
+ * its capacity shown as unknown — never dropped, never rendered as 0 B.
+ */
+export type NativeDriveInfo = {
+  root_path: string;
+  volume_label: string | null;
+  total_bytes: number | null;
+  free_bytes: number | null;
+  drive_type: string;
+};
+
+/** The machine's fixed drives — the first thing the scan sheet shows. */
+export async function listFixedDrives() {
+  return invoke<NativeDriveInfo[]>("list_fixed_drives");
+}
+
 export async function isNativeRuntime() {
   return isTauri();
 }
@@ -308,6 +329,9 @@ export type NativeCleanupCandidate = {
   entity_id: number;
   path: string;
   size: number;
+  /** Unix seconds from `files.modified_at`. Null when the scanner never
+   *  recorded one — the row says so rather than showing an invented age. */
+  modified_at: number | null;
   reason: string;
 };
 
@@ -497,6 +521,10 @@ export type NativeTreemapLensFolder = {
   lifecycle: string | null;
   cleanup_reason: string | null;
   reclaimable_bytes: number;
+  /** Unix seconds: the newest modified time anywhere in this folder's subtree —
+   *  "how long since you touched it" for the recommendation row. Null when
+   *  nothing under it carries a timestamp. */
+  modified_at: number | null;
 };
 
 export async function treemapLensData(indexPath: string) {
@@ -629,14 +657,15 @@ export async function deleteCatalogRule(indexPath: string, id: number) {
 
 // ---- Shared display constants ----
 
+/**
+ * The backend's cleanup reasons, said out loud. These render in the review gate — the screen
+ * where someone confirms a deletion — so title-casing the enum ("Safe derivative",
+ * "Finished-project cruft") put the taxonomy in front of the user at the highest-stakes moment.
+ * Written as noun phrases so they read after an em dash too: "Bird's Eye won't remove this — …".
+ */
 export const REASON_LABELS: Record<string, string> = {
-  "safe-derivative": "Safe derivative",
-  "redundant-backup": "Redundant backup",
-  scratch: "Scratch / cache",
-  "finished-project-cruft": "Finished-project cruft",
-};
-
-export const DISCOVERY_KIND_LABELS: Record<string, string> = {
-  "derivedFrom-pattern": "Derived-from suggestions",
-  "backupOf-pair": "Backup-of suggestions",
+  "safe-derivative": "Something a build made",
+  "redundant-backup": "A copy you already have twice",
+  scratch: "A build cache",
+  "finished-project-cruft": "Left over from a finished project",
 };
