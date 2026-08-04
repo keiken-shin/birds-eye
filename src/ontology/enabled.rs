@@ -1,7 +1,8 @@
-//! Ontology-enabled toggle (per-index opt-in).
+//! Ontology-enabled toggle (on unless explicitly turned off).
 //!
 //! A single row in `ontology_enabled` controls whether populators run and
-//! ontology surfaces are exposed. Missing row means disabled.
+//! ontology surfaces are exposed. The analysis runs by default: a missing
+//! row means enabled, and only an explicit `0` disables it.
 
 use crate::ontology::OntologyError;
 use rusqlite::{params, Connection};
@@ -20,11 +21,13 @@ pub fn is_enabled(conn: &Connection) -> Result<bool, OntologyError> {
     let row: Option<i64> = stmt
         .query_row([], |r| r.get(0))
         .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(0),
+            rusqlite::Error::QueryReturnedNoRows => Ok(1),
             other => Err(other),
         })
         .ok();
-    Ok(matches!(row, Some(1)))
+    // Enabled unless the stored value is explicitly 0 — a missing row (or a
+    // read error) fails open to enabled, matching the "on unless turned off" default.
+    Ok(row != Some(0))
 }
 
 fn set_enabled(conn: &Connection, enabled: bool) -> Result<(), OntologyError> {
@@ -60,9 +63,9 @@ mod tests {
     }
 
     #[test]
-    fn defaults_to_disabled() {
+    fn defaults_to_enabled() {
         let conn = migrated_conn();
-        assert!(!is_enabled(&conn).unwrap());
+        assert!(is_enabled(&conn).unwrap());
     }
 
     #[test]
