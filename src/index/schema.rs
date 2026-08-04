@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 11;
+pub const CURRENT_SCHEMA_VERSION: u32 = 13;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -553,6 +553,139 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (11, strftime('%s', 'now'));
 "#;
 
+pub const MIGRATION_012: &str = r#"
+-- v_cleanup_candidates gains modified_at so a cleanup recommendation can show
+-- "how long since you touched it" without a second per-candidate query. A
+-- view has no stored data, so redefining it is a plain drop-and-recreate --
+-- not the table-rebuild dance MIGRATION_008 needed for a CHECK constraint.
+DROP VIEW IF EXISTS v_cleanup_candidates;
+
+CREATE VIEW v_cleanup_candidates AS
+SELECT file_id, entity_id, path, size, modified_at, reason
+FROM (
+  WITH file_facts AS (
+    SELECT
+      f.id   AS file_id,
+      f.size AS size,
+      f.path AS path,
+      f.modified_at AS modified_at,
+      e.id   AS entity_id,
+      (SELECT a.value FROM ontology_attrs a
+         WHERE a.entity_id = e.id AND a.key = 'role'
+         ORDER BY a.confidence DESC, a.asserted_at DESC LIMIT 1) AS role,
+      (SELECT a.confidence FROM ontology_attrs a
+         WHERE a.entity_id = e.id AND a.key = 'role'
+         ORDER BY a.confidence DESC, a.asserted_at DESC LIMIT 1) AS role_conf,
+      (SELECT a.value FROM ontology_attrs a
+         WHERE a.entity_id = e.id AND a.key = 'replaceability'
+         ORDER BY a.confidence DESC, a.asserted_at DESC LIMIT 1) AS replaceability,
+      (SELECT a.value FROM ontology_attrs a
+         WHERE a.entity_id = e.id AND a.key = 'sensitivity'
+         ORDER BY a.confidence DESC, a.asserted_at DESC LIMIT 1) AS sensitivity,
+      EXISTS(SELECT 1 FROM ontology_pinned_files p WHERE p.file_id = f.id) AS is_pinned
+    FROM files f
+    JOIN ontology_entities e ON e.kind = 'File' AND e.linked_file_id = f.id
+    WHERE f.deleted_at IS NULL
+  ),
+  project_lifecycles AS (
+    SELECT
+      r.subject_id AS file_entity_id,
+      (SELECT a.value FROM ontology_attrs a
+         WHERE a.entity_id = pe.id AND a.key = 'lifecycle'
+         ORDER BY a.confidence DESC, a.asserted_at DESC LIMIT 1) AS lifecycle
+    FROM ontology_relations r
+    JOIN ontology_entities pe ON pe.id = r.object_id AND pe.kind = 'Project'
+    WHERE r.predicate = 'partOf'
+  ),
+  hard_excluded AS (
+    SELECT ff.file_id
+    FROM file_facts ff
+    LEFT JOIN project_lifecycles pl ON pl.file_entity_id = ff.entity_id
+    WHERE ff.sensitivity IN ('private', 'restricted')
+       OR ff.replaceability = 'irreplaceable'
+       OR ff.role IN ('source', 'system', 'asset', 'tool')
+       OR pl.lifecycle = 'active'
+       OR ff.is_pinned = 1
+  )
+  SELECT
+    ff.file_id,
+    ff.entity_id,
+    ff.path,
+    ff.size,
+    ff.modified_at,
+    CASE
+      WHEN ff.role = 'derivative'
+           AND ff.replaceability = 'regenerable'
+           AND EXISTS (
+             SELECT 1 FROM ontology_relations r
+             JOIN ontology_entities src ON src.id = r.object_id
+             JOIN files srcf ON srcf.id = src.linked_file_id
+             WHERE r.predicate = 'derivedFrom'
+               AND r.subject_id = ff.entity_id
+               AND srcf.deleted_at IS NULL
+           )
+        THEN 'safe-derivative'
+      WHEN ff.role = 'backup'
+           AND EXISTS (
+             SELECT 1 FROM ontology_relations r
+             JOIN ontology_entities org ON org.id = r.object_id
+             JOIN files orgf ON orgf.id = org.linked_file_id
+             WHERE r.predicate = 'backupOf'
+               AND r.subject_id = ff.entity_id
+               AND orgf.deleted_at IS NULL
+           )
+        THEN 'redundant-backup'
+      WHEN ff.role = 'scratch' AND ff.role_conf >= 0.9
+        THEN 'scratch'
+      WHEN ff.role = 'derivative'
+           AND EXISTS (
+             SELECT 1 FROM project_lifecycles pl
+             WHERE pl.file_entity_id = ff.entity_id
+               AND pl.lifecycle IN ('finished', 'archived')
+           )
+        THEN 'finished-project-cruft'
+      ELSE NULL
+    END AS reason
+  FROM file_facts ff
+  WHERE ff.file_id NOT IN (SELECT file_id FROM hard_excluded)
+)
+WHERE reason IS NOT NULL;
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (12, strftime('%s', 'now'));
+"#;
+
+pub const MIGRATION_013: &str = r#"
+-- Durable undo for moves, mirroring ontology_cleanup_log. A deletion has been
+-- recoverable across restarts since MIGRATION_005; a move was only ever undoable
+-- from React state, so closing the app made it permanent. Same shape: one
+-- append-only row per file, written the moment the bytes land, with a status
+-- that only ever goes moved -> restored.
+--
+-- No expires_at column: a moved file sits at a real path on disk, not in the
+-- recycle bin, so nothing takes it away after a retention window.
+CREATE TABLE IF NOT EXISTS ontology_relocation_log (
+  id INTEGER PRIMARY KEY,
+  -- The index row for the source at move time. Nullable because a manual move
+  -- can name a path the current scan never indexed.
+  file_id INTEGER,
+  from_path TEXT NOT NULL,
+  to_path TEXT NOT NULL,
+  -- Size and last-modified read from the destination straight after the move.
+  -- Restore compares both against the file on disk, so a file that was edited
+  -- or replaced since is refused rather than yanked back over newer work.
+  size INTEGER NOT NULL,
+  moved_at INTEGER NOT NULL,
+  modified_at INTEGER,
+  restore_status TEXT NOT NULL CHECK (restore_status IN ('moved', 'restored')) DEFAULT 'moved'
+);
+
+CREATE INDEX IF NOT EXISTS idx_relocation_log_moved_at ON ontology_relocation_log(moved_at DESC, id DESC);
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (13, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -565,6 +698,8 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (9, MIGRATION_009),
     (10, MIGRATION_010),
     (11, MIGRATION_011),
+    (12, MIGRATION_012),
+    (13, MIGRATION_013),
 ];
 
 #[cfg(test)]
@@ -573,8 +708,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 11);
-        assert_eq!(ALL_MIGRATIONS.len(), 11);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 13);
+        assert_eq!(ALL_MIGRATIONS.len(), 13);
     }
 
     #[test]
@@ -631,6 +766,34 @@ mod tests {
                 .expect("query sqlite_master");
             assert_eq!(count, 1, "{index} must exist after migrations");
         }
+    }
+
+    #[test]
+    fn migration_013_creates_the_move_log() {
+        use rusqlite::Connection;
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).expect("migration applies");
+        }
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name IN
+                   ('ontology_relocation_log', 'idx_relocation_log_moved_at')",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query sqlite_master");
+        assert_eq!(count, 2, "the move log and its index must exist after migrations");
+
+        // The status column is the transition guard: nothing outside the two
+        // legal values may be stored.
+        conn.execute(
+            "INSERT INTO ontology_relocation_log
+                (from_path, to_path, size, moved_at, restore_status)
+             VALUES ('a', 'b', 1, 0, 'somewhere-else')",
+            [],
+        )
+        .expect_err("restore_status must be constrained");
     }
 
     #[test]
