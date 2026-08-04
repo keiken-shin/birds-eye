@@ -1,7 +1,11 @@
 use crate::index::writer::ScanMode;
 use crate::index::IndexWriter;
 use crate::ontology::attrs::{assert_attr, get_attrs, NewAssertion};
+use crate::ontology::catalog::executor::SystemMover;
 use crate::ontology::catalog::payload::RELOCATION_KIND;
+use crate::ontology::catalog::relocation_log::{
+    log_move, recently_moved, restore_move_with, RelocationLogEntry,
+};
 use crate::ontology::cleanup::executor::{execute_plan_with, CleanupResult, SystemTrasher, DEFAULT_RETENTION_DAYS};
 use crate::ontology::cleanup::plans::{candidates_for_plan, create_plan, CleanupScope};
 use crate::ontology::cleanup::predicate::list_all_candidates;
@@ -196,6 +200,20 @@ pub struct RestoreCleanupRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct RecentlyMovedRequest {
+    pub index_path: PathBuf,
+    pub limit: u32,
+    #[serde(default)]
+    pub offset: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RestoreMoveRequest {
+    pub index_path: PathBuf,
+    pub entry_id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct PinFileRequest {
     pub index_path: PathBuf,
     pub file_id: i64,
@@ -222,6 +240,11 @@ pub struct TreemapLensFolderDto {
     pub lifecycle: Option<String>,
     pub cleanup_reason: Option<String>,
     pub reclaimable_bytes: i64,
+    /// The newest `modified_at` (unix seconds) among every file anywhere in
+    /// this folder's subtree -- "how long since you touched it" for the
+    /// recommendation row. `None` when nothing under the folder carries a
+    /// timestamp; never invented, never defaulted to 0.
+    pub modified_at: Option<i64>,
 }
 
 pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
@@ -261,30 +284,50 @@ fn mark_deleted_in_index(index_path: &Path, paths: &[String]) {
     }
 }
 
-/// Reconciles the index after a batch of successful `move_files` moves:
-/// sources get `deleted_at` set, same as any other delete-from-index call
-/// (`mark_deleted_in_index` above); destinations get `deleted_at` CLEARED
-/// wherever a row already sits at that exact path.
+/// Records a batch of successful `move_files` moves, in `(source, destination)`
+/// lockstep order.
 ///
-/// That second half is what makes a relocate's undo — reversed pairs run back
+/// Three writes per pair. First the durable move log — the row that makes an
+/// undo survive closing the app, written while the source row is still live so
+/// its id can be captured. Then the source gets `deleted_at` set, same as any
+/// other delete-from-index call (`mark_deleted_in_index` above), and the
+/// destination gets `deleted_at` CLEARED wherever a row already sits at that
+/// exact path.
+///
+/// That last half is what makes a relocate's undo — reversed pairs run back
 /// through this same function — leave the index consistent immediately,
 /// rather than only after the next rescan. Undo's destination is the file's
 /// original path, and that row was soft-deleted when the forward move ran;
 /// moving the file back there un-deletes it as the exact inverse of that
 /// step. Scoped to `deleted_at IS NOT NULL` so a live row already occupying
 /// that path (an unrelated, current file) is never touched.
+///
+/// Every write is best-effort, as index reconciliation here always has been: a
+/// move that already happened on disk must not be reported as failed because a
+/// bookkeeping statement did not land. A lost log row costs the undo button,
+/// not the file — the next scan still finds it at its new path.
 fn reconcile_index_after_move(index_path: &Path, sources: &[String], destinations: &[String]) {
-    mark_deleted_in_index(index_path, sources);
-    if destinations.is_empty() {
-        return;
-    }
     let Ok(conn) = crate::index::open_index_connection(index_path) else {
         return;
     };
-    for path in destinations {
+    for (from, to) in sources.iter().zip(destinations) {
+        let file_id: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM files WHERE path = ?1",
+                rusqlite::params![from],
+                |row| row.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten();
+        let _ = log_move(&conn, from, to, file_id);
+        let _ = conn.execute(
+            "UPDATE files SET deleted_at = strftime('%s','now') WHERE path = ?1",
+            rusqlite::params![from],
+        );
         let _ = conn.execute(
             "UPDATE files SET deleted_at = NULL WHERE path = ?1 AND deleted_at IS NOT NULL",
-            rusqlite::params![path],
+            rusqlite::params![to],
         );
     }
 }
@@ -422,6 +465,23 @@ pub fn restore_from_cleanup_log(request: RestoreCleanupRequest) -> Result<(), St
     restore_with(&mut conn, request.entry_id, &SystemRestorer).map_err(|e| e.to_string())
 }
 
+/// List the persistent "Recently moved" log, newest first.
+pub fn recently_moved_log(
+    request: RecentlyMovedRequest,
+) -> Result<Vec<RelocationLogEntry>, String> {
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    recently_moved(&conn, request.limit, request.offset).map_err(|e| e.to_string())
+}
+
+/// Put a moved file back where it came from. `index_path: None` on the mover so
+/// the put-back does not append a second log row — the entry being restored
+/// already tells that story, and its status records the outcome.
+pub fn restore_from_relocation_log(request: RestoreMoveRequest) -> Result<(), String> {
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    restore_move_with(&conn, request.entry_id, &SystemMover { index_path: None })
+        .map_err(|e| e.to_string())
+}
+
 /// Pin a file so it is permanently excluded from cleanup queues.
 pub fn pin_file(request: PinFileRequest) -> Result<(), String> {
     let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
@@ -474,7 +534,13 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
     let mut lifecycle = DominantByFolder::default();
     let mut cleanup_reason = DominantByFolder::default();
     let mut reclaimable: HashMap<String, i64> = HashMap::new();
+    let mut newest_modified: HashMap<String, i64> = HashMap::new();
 
+    // f.modified_at rides along on the same per-file pass already fetching
+    // role/replaceability/lifecycle -- no new scan, join, or sort, so
+    // idx_files_modified (which only helps a WHERE/ORDER BY on that column)
+    // is irrelevant here and the cost of this addition is one more integer
+    // read per row already being visited.
     let mut stmt = conn.prepare_cached(
         "SELECT f.path,
                 COALESCE(f.size, 0) AS size,
@@ -488,7 +554,8 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
                  JOIN ontology_entities pe ON pe.id = r.object_id AND pe.kind = 'Project'
                  JOIN ontology_attrs pa ON pa.entity_id = pe.id AND pa.key = 'lifecycle' AND pa.display_in_global_views = 1
                  WHERE r.subject_id = e.id AND r.predicate = 'partOf'
-                 ORDER BY pa.confidence DESC, pa.asserted_at DESC LIMIT 1) AS lifecycle
+                 ORDER BY pa.confidence DESC, pa.asserted_at DESC LIMIT 1) AS lifecycle,
+                f.modified_at AS modified_at
          FROM files f
          JOIN ontology_entities e ON e.kind = 'File' AND e.linked_file_id = f.id
          WHERE f.deleted_at IS NULL",
@@ -500,11 +567,12 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
             row.get::<_, Option<String>>(2)?,
             row.get::<_, Option<String>>(3)?,
             row.get::<_, Option<String>>(4)?,
+            row.get::<_, Option<i64>>(5)?,
         ))
     })?;
 
     for row in rows {
-        let (file_path, size, row_role, row_replaceability, row_lifecycle) = row?;
+        let (file_path, size, row_role, row_replaceability, row_lifecycle, row_modified_at) = row?;
         for ancestor in path_ancestors(&file_path) {
             if !folder_set.contains(ancestor) {
                 continue;
@@ -512,6 +580,20 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
             role.add(ancestor, row_role.as_deref(), size);
             replaceability.add(ancestor, row_replaceability.as_deref(), size);
             lifecycle.add(ancestor, row_lifecycle.as_deref(), size);
+            // "How long since you touched it" is the newest touch anywhere in
+            // the subtree (MAX, not MIN): a folder reads as stale only when
+            // NOTHING under it -- at any depth -- has been touched recently,
+            // so one live file far below it should keep the whole folder off
+            // the stale list. The folder row's own filesystem mtime is not a
+            // substitute: on Windows it changes whenever a direct child is
+            // added or removed, which says nothing about the contents, and it
+            // wouldn't see past direct children anyway.
+            if let Some(modified_at) = row_modified_at {
+                newest_modified
+                    .entry(ancestor.to_owned())
+                    .and_modify(|newest| *newest = (*newest).max(modified_at))
+                    .or_insert(modified_at);
+            }
         }
     }
 
@@ -543,6 +625,7 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
             lifecycle: lifecycle.get(&folder_path),
             cleanup_reason: cleanup_reason.get(&folder_path),
             reclaimable_bytes: reclaimable.get(&folder_path).copied().unwrap_or(0),
+            modified_at: newest_modified.get(&folder_path).copied(),
             folder_path,
         })
         .collect())
@@ -1492,13 +1575,16 @@ pub fn relocation_plan(request: RelocationPlanRequest) -> Result<RelocationPlanR
 pub fn execute_relocation_plan(
     request: ExecuteRelocationPlanRequest,
 ) -> Result<crate::ontology::catalog::executor::RelocationResult, String> {
-    use crate::ontology::catalog::executor::{execute_plan_with, SystemMover};
+    use crate::ontology::catalog::executor::execute_plan_with;
 
     let mut conn =
         crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
 
-    let result = execute_plan_with(&mut conn, request.plan_id, &SystemMover)
-        .map_err(|e| e.to_string())?;
+    let mover = SystemMover {
+        index_path: Some(request.index_path.clone()),
+    };
+    let result =
+        execute_plan_with(&mut conn, request.plan_id, &mover).map_err(|e| e.to_string())?;
 
     let confirmable_ids: Vec<i64> = {
         let mut stmt = conn
@@ -2312,6 +2398,107 @@ mod tests {
     }
 
     #[test]
+    fn treemap_lens_modified_at_is_the_newest_file_seen() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use crate::ontology::entities::upsert_entity;
+        use crate::ontology::vocabulary::EntityKind;
+        use rusqlite::Connection;
+
+        let conn = Connection::open_in_memory().unwrap();
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (1, NULL, '/root', 'root', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, modified_at, indexed_at)
+             VALUES (1, 1, '/root/old.txt', 'old.txt', 10, 1000, 0)",
+            [],
+        )
+        .unwrap();
+        upsert_entity(&conn, EntityKind::File, "/root/old.txt", Some(1), None, None).unwrap();
+
+        let data = treemap_lens_data_for_conn(&conn).unwrap();
+        let root = data.iter().find(|entry| entry.folder_path == "/root").unwrap();
+        assert_eq!(root.modified_at, Some(1000), "a folder whose only file is old must report that old age");
+    }
+
+    #[test]
+    fn treemap_lens_modified_at_reaches_into_nested_subfolders() {
+        // Regression guard for the MIN/direct-children mistake: the newest
+        // touch can be several levels deep, and a folder is stale only if
+        // NOTHING under it -- at any depth -- has been touched recently.
+        use crate::index::schema::ALL_MIGRATIONS;
+        use crate::ontology::entities::upsert_entity;
+        use crate::ontology::vocabulary::EntityKind;
+        use rusqlite::Connection;
+
+        let conn = Connection::open_in_memory().unwrap();
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (1, NULL, '/root', 'root', 0, 0),
+                    (2, 1, '/root/proj', 'proj', 1, 0),
+                    (3, 2, '/root/proj/sub', 'sub', 2, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, modified_at, indexed_at)
+             VALUES (1, 2, '/root/proj/old.txt', 'old.txt', 10, 1000, 0),
+                    (2, 3, '/root/proj/sub/new.txt', 'new.txt', 10, 9000, 0)",
+            [],
+        )
+        .unwrap();
+        upsert_entity(&conn, EntityKind::File, "/root/proj/old.txt", Some(1), None, None).unwrap();
+        upsert_entity(&conn, EntityKind::File, "/root/proj/sub/new.txt", Some(2), None, None).unwrap();
+
+        let data = treemap_lens_data_for_conn(&conn).unwrap();
+        let proj = data.iter().find(|entry| entry.folder_path == "/root/proj").unwrap();
+        assert_eq!(
+            proj.modified_at,
+            Some(9000),
+            "the deeply nested recent file must win over both the direct child and a MIN"
+        );
+    }
+
+    #[test]
+    fn treemap_lens_modified_at_is_none_without_timestamps() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use crate::ontology::entities::upsert_entity;
+        use crate::ontology::vocabulary::EntityKind;
+        use rusqlite::Connection;
+
+        let conn = Connection::open_in_memory().unwrap();
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (1, NULL, '/root', 'root', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, indexed_at)
+             VALUES (1, 1, '/root/mystery.bin', 'mystery.bin', 10, 0)",
+            [],
+        )
+        .unwrap();
+        upsert_entity(&conn, EntityKind::File, "/root/mystery.bin", Some(1), None, None).unwrap();
+
+        let data = treemap_lens_data_for_conn(&conn).unwrap();
+        let root = data.iter().find(|entry| entry.folder_path == "/root").unwrap();
+        assert_eq!(root.modified_at, None, "no file has a timestamp, so the folder must not invent one");
+    }
+
+    #[test]
     fn run_ontology_enrichment_respects_budget_tiers() {
         use crate::index::schema::ALL_MIGRATIONS;
         use crate::ontology::enabled::enable;
@@ -2484,6 +2671,108 @@ mod tests {
         assert_eq!(result.pairs.len(), 1);
         assert!(to.exists(), "the file landed at the destination");
         assert!(!from.exists(), "the source is gone");
+
+        // The plan executor is one of the two ways a file moves, and it must
+        // leave the same durable trail as a manual move: undo has to survive
+        // closing the app, not just the toast.
+        let logged = recently_moved_log(RecentlyMovedRequest {
+            index_path: index_path.clone(),
+            limit: 10,
+            offset: 0,
+        })
+        .expect("recently_moved_log");
+        assert_eq!(logged.len(), 1);
+        assert_eq!(logged[0].from_path, from.to_string_lossy());
+        assert_eq!(logged[0].to_path, to.to_string_lossy());
+        assert_eq!(logged[0].file_id, Some(1));
+        assert_eq!(logged[0].size, 9);
+        assert_eq!(logged[0].restore_status, "moved");
+
+        cleanup(&root);
+    }
+
+    /// The whole seam end to end through the public API: a move writes a row
+    /// that outlives the process, and that row alone is enough to put the file
+    /// back — no React state involved.
+    #[test]
+    fn a_move_is_logged_and_restorable_from_the_log_alone() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("move-log-round-trip");
+        let inbox = root.join("inbox");
+        let dest = root.join("dest");
+        fs::create_dir_all(&inbox).expect("create inbox");
+        fs::create_dir_all(&dest).expect("create dest");
+        let from = inbox.join("a.exe");
+        write_file(&from, b"payload!!");
+        let to = dest.join("a.exe");
+        let index_path = root.join("index.sqlite");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, ?1, 'inbox', 0, 0)",
+                rusqlite::params![inbox.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (1, 1, ?1, 'a.exe', 9, 'installer', 0)",
+                rusqlite::params![from.to_string_lossy()],
+            )
+            .unwrap();
+        }
+
+        let response = move_files(MoveFilesRequest {
+            moves: vec![MoveSpec {
+                from: from.to_string_lossy().to_string(),
+                to: to.to_string_lossy().to_string(),
+            }],
+            index_path: Some(index_path.clone()),
+        });
+        assert_eq!(response.moved, 1);
+
+        let logged = recently_moved_log(RecentlyMovedRequest {
+            index_path: index_path.clone(),
+            limit: 10,
+            offset: 0,
+        })
+        .expect("recently_moved_log");
+        assert_eq!(logged.len(), 1, "a manual move is logged too");
+
+        restore_from_relocation_log(RestoreMoveRequest {
+            index_path: index_path.clone(),
+            entry_id: logged[0].id,
+        })
+        .expect("restore");
+
+        assert!(from.exists(), "the file is back where it started");
+        assert!(!to.exists());
+
+        let after = recently_moved_log(RecentlyMovedRequest {
+            index_path: index_path.clone(),
+            limit: 10,
+            offset: 0,
+        })
+        .expect("recently_moved_log");
+        assert_eq!(
+            after.len(),
+            1,
+            "putting a file back must not append a second row and double the list"
+        );
+        assert_eq!(after[0].restore_status, "restored");
+
+        let conn = Connection::open(&index_path).unwrap();
+        let deleted_at: Option<i64> = conn
+            .query_row("SELECT deleted_at FROM files WHERE id = 1", [], |r| r.get(0))
+            .expect("row still present");
+        assert!(deleted_at.is_none(), "the index row is live again");
+        drop(conn);
 
         cleanup(&root);
     }
@@ -2794,4 +3083,15 @@ fn parse_budget_tier(value: &str) -> Result<BudgetTier, String> {
         "all-opt-in" => Ok(BudgetTier::AllOptIn),
         other => Err(format!("unknown enrichment budget: {other}")),
     }
+}
+
+// ---- Drives (first-run drive picker) ----
+
+/// Fixed drives only, each with capacity for a used-space bar. See
+/// `native::drives` for the Win32 enumeration and its per-drive fault
+/// tolerance — an unreadable drive (BitLocker-locked, unformatted, an empty
+/// card reader) stays in the list with capacity left `None` rather than
+/// failing the whole call.
+pub fn list_fixed_drives() -> Result<Vec<crate::native::drives::DriveInfoDto>, String> {
+    crate::native::drives::enumerate_fixed_drives()
 }

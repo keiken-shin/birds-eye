@@ -45,11 +45,17 @@ use birds_eye::native::api::{
     catalog_rules as do_catalog_rules,
     save_catalog_rule as do_save_catalog_rule,
     delete_catalog_rule as do_delete_catalog_rule,
+    recently_moved_log as do_recently_moved_log,
+    restore_from_relocation_log as do_restore_from_relocation_log,
     CatalogRulesRequest, DeleteCatalogRuleRequest, ExecuteRelocationPlanRequest,
-    RelocationMembersRequest, RelocationPlanRequest, RelocationPlanResponse,
-    SaveCatalogRuleRequest,
+    RecentlyMovedRequest, RelocationMembersRequest, RelocationPlanRequest,
+    RelocationPlanResponse, RestoreMoveRequest, SaveCatalogRuleRequest,
+    // Drives (first-run drive picker)
+    list_fixed_drives as query_fixed_drives,
 };
+use birds_eye::native::drives::DriveInfoDto;
 use birds_eye::ontology::cleanup::executor::CleanupResult;
+use birds_eye::ontology::catalog::relocation_log::RelocationLogEntry;
 use birds_eye::ontology::cleanup::restore::CleanupLogEntry;
 use birds_eye::ontology::cleanup::CleanupCandidate;
 use birds_eye::ontology::discoveries::Discovery;
@@ -325,6 +331,17 @@ fn restore_from_cleanup_log(request: RestoreCleanupRequest) -> Result<(), String
     do_restore_from_cleanup_log(request)
 }
 
+/// The durable half of undo for moves: what was moved, and putting it back.
+#[tauri::command(async)]
+fn recently_moved(request: RecentlyMovedRequest) -> Result<Vec<RelocationLogEntry>, String> {
+    do_recently_moved_log(request)
+}
+
+#[tauri::command(async)]
+fn restore_from_relocation_log(request: RestoreMoveRequest) -> Result<(), String> {
+    do_restore_from_relocation_log(request)
+}
+
 #[tauri::command(async)]
 fn pin_file(request: PinFileRequest) -> Result<(), String> {
     do_pin_file(request)
@@ -408,6 +425,11 @@ fn run_ontology_enrichment(
     do_run_ontology_enrichment(request)
 }
 
+#[tauri::command(async)]
+fn list_fixed_drives() -> Result<Vec<DriveInfoDto>, String> {
+    query_fixed_drives()
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -443,6 +465,8 @@ fn main() {
             delete_catalog_rule,
             recently_cleaned,
             restore_from_cleanup_log,
+            recently_moved,
+            restore_from_relocation_log,
             pin_file,
             unpin_file,
             list_cleanup_candidates,
@@ -459,6 +483,7 @@ fn main() {
             ontology_status,
             set_ontology_enabled,
             run_ontology_enrichment,
+            list_fixed_drives,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Birds Eye desktop shell");
