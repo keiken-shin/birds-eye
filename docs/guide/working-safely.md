@@ -1,67 +1,71 @@
 # Working safely
 
-Deleting files is easy to make fast and hard to make *safe*. Bird's Eye optimizes for the
-second. The design principle is simple: **reversibility beats confirmation dialogs.** You
-shouldn't have to be certain before you act — you should be able to undo.
+Deleting files is easy to make fast and hard to make *safe*. Bird's Eye is built for the second.
+The principle behind it is simple: **being able to undo beats being asked "are you sure?"** You
+shouldn't have to be certain before you act — you should be able to change your mind after.
 
 ## Nothing moves without review
 
-There is exactly one path from the workspace to your disk, for either kind of change you
-can stage:
+There is exactly one path from the app to your disk, whichever kind of change you've staged:
 
-```
-Cleanup tray  →  Review gate  →  OS Recycle Bin
-Move tray     →  Review gate  →  the destination you chose
+```text
+Cleanup tray  →  Review  →  Recycle Bin
+Move tray     →  Review  →  the folder you chose
 ```
 
-You stage candidates from any view — including a **Catalog** suggestion — into the tray.
-When you're ready, the **Review gate** re-verifies the batch against the current index —
-sizes, verdicts, and paths — and shows you precisely what will happen. Only after you
-confirm does anything move. No view has a shortcut around this gate.
+You collect things from any view — including an **Organise** suggestion — into the tray. When
+you're ready, Bird's Eye **checks every item again** against what's actually on your drive right
+now — sizes, labels and paths — and shows you precisely what will happen. Only after you
+confirm does anything move. No view has a shortcut around this.
 
 ## Everything is reversible
 
-- **Recycle Bin first, always.** Cleaned items go to the OS Recycle Bin with a tracked
-  entry, not to oblivion.
-- **Restorable for 30 days** from **Recently cleaned**, or reverted instantly with
-  **Undo** right after the action.
-- **Move instead of delete.** Sometimes the right answer isn't deletion — it's putting a
-  file somewhere sensible. The **Catalog** view surfaces these candidates on its own, or
-  move files by hand; either way Bird's Eye relocates them and **heals the index** with a
-  background rescan. A move is undoable right after it happens — it never touches the
-  Recycle Bin, so there's no 30-day window the way a clean has.
+- **Recycle Bin first, always.** Deleted items go to the Windows Recycle Bin with a record of
+  what happened, not to oblivion.
+- **Restorable for 30 days** from **Recently cleaned**, or undone instantly with **Undo** right
+  after the action.
+- **Move instead of delete.** Sometimes the right answer isn't deleting — it's putting a file
+  somewhere sensible. The **Organise** view finds these for you, or move files by hand; either
+  way Bird's Eye brings its records up to date with a background rescan afterwards. A move can
+  be undone right after it happens — it never touches the Recycle Bin, so it doesn't have the
+  30-day window a deletion has.
 
-## Verdicts, and what they mean
+## The three labels
 
-Every candidate carries a verdict, and every verdict is shown with its **size**, its
-**staleness**, and a **reason** — never a bare recommendation.
+Everything Bird's Eye recommends carries a label, and every label comes with its **size**, **how
+long since you touched it**, and **a reason** — never a bare instruction.
 
-| Verdict | Meaning |
+| Label | What it means |
 |---|---|
-| <span class="be-chip be-chip--safe">safe</span> | Regenerable or clearly disposable — caches, build output, installer leftovers. |
-| <span class="be-chip be-chip--review">review</span> | Probably fine, but worth a human glance before it goes. |
-| <span class="be-chip be-chip--protected">protected</span> | Held back by the safety predicate — system-adjacent or depended-on. Shown, never hidden. |
-| <span class="be-chip be-chip--keep">keep</span> | Active or important; not a cleanup candidate. |
+| **Safe to delete** | You can rebuild it, it's temporary, or it's a duplicate — build output, caches, installer leftovers. |
+| **Check first** | Probably fine, but worth your eyes on it first. Here's what it is; you decide. |
+| **Don't touch** | In use, part of Windows, something depends on it, or you pinned it. Shown with the reason, never hidden. |
 
-## Held-back items are shown, not hidden
+There are three, and there will never be a fourth. Three is as many as anyone can read at a
+glance down a list of hundreds of rows.
 
-When the safety predicate holds something back, Bird's Eye does **not** silently drop it
-from the list. It stays visible with its reason, and you retain the final say: an
-explicit, clearly-marked **override** lets you remove it anyway. The app's job is to give
-you the evidence, not to overrule you.
+## Things it holds back are shown, not hidden
 
-## The intelligence layer is honest
+When Bird's Eye decides something shouldn't be removed, it does **not** quietly drop it from the
+list. It stays visible with the reason it was held back, and you keep the final say: an
+explicit, clearly-marked **override** lets you remove it anyway. The app's job is to give you
+the evidence, not to overrule you.
 
-The classifications behind these verdicts come from the **opt-in, per-index intelligence
-layer**. It's worth being precise about what it is and isn't:
+## The analysis is honest about what it knows
 
-- **Heuristic, on-device.** No machine learning, no cloud calls, no external services.
-- **Transparent.** It shows the reasoning behind each verdict.
-- **Never fabricated.** If it can't classify a folder, it says *unclassified* — it doesn't
-  invent a purpose or a confidence it doesn't have.
+The labels and the reasons come from the analysis that runs alongside every scan. It's worth
+being precise about what that is and isn't:
 
-## Anti-scareware, on purpose
+- **It's a set of rules, running on your PC.** No machine learning, no cloud, no external
+  services. No model ever sees your files.
+- **It shows its working.** Every recommendation comes with the reason it was made.
+- **It never makes anything up.** If it can't tell what a folder is, it says so rather than
+  inventing a purpose or a confidence it doesn't have.
 
-Bird's Eye will never nag you, never auto-delete, and never manufacture urgency to push a
-"clean now" button. It's a calm, quantified instrument: it tells you what's there, what it
-thinks, and why — and then it waits for you.
+If you'd rather just see sizes, you can turn the analysis off in **Settings**.
+
+## No scare tactics, on purpose
+
+Bird's Eye will never nag you, never delete anything on its own, and never invent urgency to
+push you at a "clean now" button. There is no health score, no "247 issues found," no red badge,
+no countdown. It tells you what's there, what it thinks, and why — and then it waits for you.

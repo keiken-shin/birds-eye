@@ -1,115 +1,119 @@
 # The workspace
 
-Bird's Eye is **one persistent workspace**, not a stack of pages. A single index sits
-underneath, and the top-bar switcher flips between eight views of it. Three things travel
-with you across every view:
+Bird's Eye is **one workspace**, not a stack of pages. A single scan sits underneath, and the
+top-bar switcher flips between eight views of it. Three things travel with you across every
+view:
 
-- **The Inspector** — select anything and it explains *why it exists*, its composition,
-  and its safety verdict.
-- **The Cleanup Tray** — collects candidates from anywhere you find them.
-- **The Review gate** — the one and only path to disk mutation. Tray → Review → Recycle
-  Bin, or a relocation's destination. Nothing skips it.
+- **The Inspector** — click anything and it tells you what it is, what it's made of, and
+  whether it's safe to remove.
+- **The Cleanup Tray** — collects what you want to get rid of, from wherever you found it.
+- **The Review gate** — the one and only path to your disk. Tray → Review → Recycle Bin, or the
+  place you're moving a file to. Nothing skips it.
 
-Switch views with the top-bar segments or number keys **1–8**. `Ctrl+I` toggles the
+Switch views with the top-bar segments or number keys **1–8**. `Ctrl+I` opens and closes the
 Inspector.
 
 ## 1 · Overview
 
-The hub, and the default view. A capacity bar, a category donut, top consumers, an age
-snapshot, quick actions, and a headline verdict — *“X GB can likely be freed.”* Start
-here to see where you stand before changing anything.
+The hub, and the view you land on. A capacity bar, a breakdown of what's taking the space, your
+biggest folders, how old everything is, quick actions, and a headline — *"X GB can likely be
+freed."* Start here to see where you stand before changing anything.
 
 <figure markdown="span">
-  ![Overview — capacity bar, category donut, top consumers, and the headline verdict](../assets/screenshots/overview.png){ .be-shot }
-  <figcaption>The Overview — capacity, categories, top consumers, and the “can likely be freed” headline.</figcaption>
+  ![Overview — capacity bar, what's taking the space, biggest folders, and the headline](../assets/screenshots/overview.png){ .be-shot }
+  <figcaption>The Overview — capacity, what's taking the space, your biggest folders, and the "can likely be freed" headline.</figcaption>
 </figure>
 
-## 2 · Treemap
+## 2 · Map
 
-A squarified space map where area is size. Color it by **type** (the nine media
-categories) or by **safety verdict** —
-<span class="be-chip be-chip--safe">safe</span>
-<span class="be-chip be-chip--review">review</span>
-<span class="be-chip be-chip--protected">protected</span>
-<span class="be-chip be-chip--keep">keep</span> — and drill to any depth. Small items
-aggregate so the picture stays legible; layout order is stable, so the thing you spotted
-last time is where you left it.
+A space map where area is size. Colour it by **safety** — **Safe to delete**, **Check first**,
+**Don't touch** — or by **kind of file**, and drill into any folder to any depth. Small items
+are grouped together so the picture stays readable, and the layout is stable, so the thing you
+spotted last time is where you left it.
 
 <figure markdown="span">
-  ![Treemap — a squarified space map colored by category or safety verdict](../assets/screenshots/treemap.png){ .be-shot }
-  <figcaption>The Treemap — size as area, colored by category or safety verdict, drillable to any depth.</figcaption>
+  ![Map — a space map where area is size, coloured by safety or by kind of file](../assets/screenshots/treemap.png){ .be-shot }
+  <figcaption>The Map — size as area, coloured by safety or by kind of file, drillable to any depth.</figcaption>
 </figure>
 
-## 3 · Board
+## 3 · Findings
 
-A true open canvas of the investigation. Findings become typed cards that cluster around
-shared-source hubs with labeled edges; duplicate groups link to related findings. Card
-positions are stable, so spatial memory works — marquee-select, group-drag, auto-arrange,
-and use the minimap and fit-to-view to navigate a large board.
+An open canvas of everything the scan turned up. Findings become cards that cluster around
+whatever they have in common, joined by labelled links, and duplicate groups connect to related
+findings. Card positions stay put, so you can remember where things are — select a group with a
+marquee, drag several at once, or let it arrange them for you, and use the minimap to get around
+a big board.
 
 <figure markdown="span">
-  ![Board — findings as typed cards clustered around shared-source hubs with labeled edges](../assets/screenshots/board.png){ .be-shot }
-  <figcaption>The Board — an open canvas where findings cluster around shared-source hubs.</figcaption>
+  ![Findings — cards clustered around what they have in common, joined by labelled links](../assets/screenshots/board.png){ .be-shot }
+  <figcaption>Findings — an open canvas where related findings cluster together.</figcaption>
 </figure>
 
 ## 4 · Files
 
-Ranked search over the whole index: category chips, size bars, sort by size or date, and
-staleness tags. Curated **saved views** — *“Large & regenerable,” “Finished & untouched”*
-— turn common questions into one click, and a large-files preset gets you to the heavy
-hitters immediately. Select several rows to move them together, and if the files you moved
-share a name pattern, Bird's Eye offers to save the move as a rule so the same match is
-handled automatically next time.
+Ranked search over everything you've scanned: filter by kind, sort by size or date, and see how
+long each file has sat untouched. **Saved views** turn the questions you ask every time into
+one click — big files you can rebuild from something else, files in projects you finished and
+haven't opened in a year — and a large-files preset gets you straight to the heavy hitters.
+Select several rows to move them together, and if the files you
+moved share a name pattern, Bird's Eye offers to remember it so the same match is handled for
+you next time.
 
 <figure markdown="span">
-  ![Files — ranked search with category chips, size bars, staleness tags, and saved views](../assets/screenshots/files.png){ .be-shot }
-  <figcaption>Files — ranked search with category chips, size bars, and curated saved views.</figcaption>
+  ![Files — ranked search with filters, size bars, and saved views](../assets/screenshots/files.png){ .be-shot }
+  <figcaption>Files — ranked search with filters, size bars, and saved views.</figcaption>
 </figure>
 
 ## 5 · Duplicates
 
-Duplicate detection, promoted from a modal to a first-class view. Groups are ranked by
-**wasted space**, with side-by-side thumbnail comparison. Keep the newest and stage the
+The same file, kept more than once. Groups are ranked by **how much space they waste**, with
+the copies side by side so you can see they really are the same. Keep the newest and stage the
 rest, or move a copy to where it actually belongs.
 
 <figure markdown="span">
-  ![Duplicates — waste-ranked groups with side-by-side previews and keep-newest actions](../assets/screenshots/duplicates.png){ .be-shot }
-  <figcaption>Duplicates — groups ranked by wasted space, with side-by-side comparison.</figcaption>
+  ![Duplicates — groups ranked by wasted space, with copies side by side](../assets/screenshots/duplicates.png){ .be-shot }
+  <figcaption>Duplicates — groups ranked by how much space they waste, with side-by-side comparison.</figcaption>
 </figure>
 
-## 6 · Cleanup
+## 6 · Clean up
 
-Risk-labeled recommendations — safe · review · caution — with multi-select staging
-straight into the Cleanup Tray. Every recommendation pairs a **size**, a **staleness**,
-and a **reason**, so you're never asked to trust a number without evidence.
+The recommendations, in one list. Every row carries three things — **how much space**, **how
+long since you touched it**, and **a reason in plain English** — and a label: **Safe to
+delete**, **Check first**, or **Don't touch**. Select as many as you like and send them to the
+tray in one go. You are never asked to trust a number without the reason next to it.
 
 <figure markdown="span">
-  ![Cleanup — risk-labeled recommendations with multi-select staging into the tray](../assets/screenshots/cleanup.png){ .be-shot }
-  <figcaption>Cleanup — risk-labeled recommendations, each with a size, a staleness, and a reason.</figcaption>
+  ![Clean up — recommendations with a size, an age, a reason and a label](../assets/screenshots/cleanup.png){ .be-shot }
+  <figcaption>Clean up — every recommendation with a size, how long it's sat untouched, and a reason.</figcaption>
 </figure>
 
-## 7 · Timeline
+## 7 · By age
 
-How storage evolved and aged. A monthly activity chart, a file-age distribution, and
-staleness insights like *“34% untouched 6+ months”* surface the *“large & untouched”*
-candidates that are usually the easiest, safest wins.
+What you've been using, and what you haven't. A month-by-month activity chart, a breakdown of
+how old your files are, and lines like *"34% untouched 6+ months"* that lead you to the big,
+forgotten items — usually the easiest and safest wins on the drive.
 
 <figure markdown="span">
-  ![Timeline — monthly activity chart, file-age distribution, and large & untouched candidates](../assets/screenshots/timeline.png){ .be-shot }
-  <figcaption>Timeline — monthly activity, age distribution, and the “large & untouched” candidates.</figcaption>
+  ![By age — monthly activity, how old your files are, and the large, untouched items](../assets/screenshots/timeline.png){ .be-shot }
+  <figcaption>By age — monthly activity, how old your files are, and the large-and-untouched items.</figcaption>
 </figure>
 
-## 8 · Catalog
+## 8 · Organise
 
-Grouped suggestions for files that look like they belong somewhere else. Bird's Eye only
-looks at **inbox zones** — Downloads, Desktop, drive roots — and leaves folders you've
-deliberately organized alone. Each card proposes a destination, in order of trust: a rule
-you've taught the app, a **learned home** (wherever you already keep most files of that
-kind), or a sensible fallback — with the reasoning shown alongside. Accept a card and its
-files stage into the same tray as Cleanup; nothing moves until you confirm it in review.
+Grouped suggestions for files that look like they belong somewhere else. Bird's Eye only looks
+where things pile up — Downloads, the Desktop, the top level of a drive — and leaves folders
+you've deliberately sorted alone. Each card proposes a destination, and tells you where the idea
+came from: something you've taught it, wherever you already keep most files of that kind, or a
+sensible fallback. Accept a card and its files go into the same tray as a cleanup; nothing moves
+until you confirm it in review.
 
-Catalog needs the intelligence layer turned on. With it off, the view shows a prompt to
-enable it instead of an empty list.
+Organise needs the analysis to be running. If you've switched it off in **Settings**, this view
+offers to turn it back on instead of showing an empty list.
+
+<figure markdown="span">
+  ![Organise — grouped suggestions for files that belong somewhere else, each with a destination](../assets/screenshots/organise.png){ .be-shot }
+  <figcaption>Organise — grouped suggestions, each proposing a destination and saying where the idea came from.</figcaption>
+</figure>
 
 ---
 
@@ -117,21 +121,21 @@ enable it instead of an empty list.
 
 ### Inspector
 
-The persistent detail panel. For any folder or file it answers three questions: **why it
-exists**, **what it's made of**, and **is it safe** — the same three the whole product is
-organized around. Drag-resize it, or collapse it with `Ctrl+I`.
+The detail panel that's always there. For any folder or file it answers three questions: **what
+is this**, **what's in it**, and **is it safe to remove** — the same three the whole app is
+organised around. Drag it wider, or close it with `Ctrl+I`.
 
 ### Cleanup Tray
 
-A staging area that follows you. Add candidates from the Overview, a treemap cell, a
-search result, a duplicate group, or a Catalog suggestion — they all land in the same
-tray, ready for one reviewed pass. Cleanups and relocations stage side by side, each
-reviewed on its own path.
+A holding area that follows you around. Add things from the Overview, a cell on the Map, a
+search result, a duplicate group, or an Organise suggestion — they all land in the same tray,
+ready for one reviewed pass. Deletions and moves sit side by side, each reviewed on its own
+path.
 
 ### Review gate
 
-The single disk-mutating path. Before anything moves, the gate **re-verifies** the batch
-against the current index, shows you exactly what will happen, and only then acts — sending
-items to the Recycle Bin, or moving them to the destination a Catalog suggestion proposed.
-This is what makes "clean" (and "move") safe to click. Details in
+The only way anything reaches your disk. Before it moves, the gate **checks the batch again**
+against what's actually on the drive right now, shows you exactly what will happen, and only
+then acts — sending things to the Recycle Bin, or moving them where an Organise suggestion
+proposed. This is what makes "clean" (and "move") safe to click. Details in
 [Working safely](working-safely.md).

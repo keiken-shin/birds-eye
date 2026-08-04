@@ -83,20 +83,34 @@ the reserved **Birds Eye** name.
 - The winapp build leaves `priconfig.xml` / `pri.resfiles` in the stage — harmless, they
   don't affect certification.
 
+## Store and listing copy
+
+Every user-facing string that lives outside the app — the Store short and long descriptions,
+the GitHub About field, the one-liner — is kept in [Store and listing copy](store-listing.md).
+Copy from there rather than rewriting; those strings are the positioning, and they should stay
+identical across every surface.
+
 ## Regenerating the demo
 
 The demo on the README and docs landing page is `docs/assets/demo.gif`. Overwrite that one
-file to refresh it everywhere. The full recipe — resolutions, the eight-view walkthrough,
-and export settings — is in
+file to refresh it everywhere. The full recipe — resolutions and export settings — is in
 [`scripts/record-demo.md`](https://github.com/keiken-shin/birds-eye/blob/main/scripts/record-demo.md).
 Record at a real 16:9 resolution so it isn't squashed.
 
+The demo is **one story, not a feature tour**: a full drive → a scan → *"you can safely free
+148.9 GB"* → a row hovered so its reason is readable → review → Recycle Bin → the space back.
+The frame that must be legible when someone pauses it is **the reason line**, not the map.
+Reasoning is the thing that doesn't photograph, and the demo is the one place you can force it
+to.
+
 ## Updating this documentation site
 
-The docs are built with MkDocs Material and deployed to GitHub Pages by
-`.github/workflows/docs.yml` on every push to `main`. To preview locally:
+The pages you're reading are the markdown files in `docs/`. A small generator in `docs-site/`
+reads them, renders them into `site/`, and `.github/workflows/docs.yml` publishes that to
+GitHub Pages on every push to `main`. To preview locally:
 
 ```powershell
-pip install mkdocs-material
-mkdocs serve            # http://127.0.0.1:8000
+cd docs-site
+npm install
+npm run serve           # builds site/, then serves it on http://localhost:8000
 ```
