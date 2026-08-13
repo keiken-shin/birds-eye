@@ -7,6 +7,7 @@ import { DuplicatesView } from "./views/DuplicatesView";
 import { CleanupView } from "./views/CleanupView";
 import { TimelineView } from "./views/TimelineView";
 import { ScansView } from "./views/ScansView";
+import { CatalogView } from "./views/CatalogView";
 
 /** The stage: exactly one view at a time; the rail is the only switcher. */
 export function CenterStage() {
@@ -21,6 +22,7 @@ export function CenterStage() {
       {view === "cleanup" && <CleanupView />}
       {view === "timeline" && <TimelineView />}
       {view === "scans" && <ScansView />}
+      {view === "catalog" && <CatalogView />}
     </div>
   );
 }

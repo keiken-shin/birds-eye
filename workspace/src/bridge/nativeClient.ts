@@ -115,6 +115,27 @@ export type NativeDuplicateFile = {
   hash_state: 0 | 2 | 4;
 };
 
+/**
+ * One fixed drive, as the first-run picker lists it.
+ *
+ * Capacity is nullable on purpose (`Option<u64>` in `src/native/drives.rs`): an
+ * unformatted, BitLocker-locked or empty-card-reader volume still enumerates as
+ * a fixed drive but can't report its size. Such a drive stays in the list with
+ * its capacity shown as unknown — never dropped, never rendered as 0 B.
+ */
+export type NativeDriveInfo = {
+  root_path: string;
+  volume_label: string | null;
+  total_bytes: number | null;
+  free_bytes: number | null;
+  drive_type: string;
+};
+
+/** The machine's fixed drives — the first thing the scan sheet shows. */
+export async function listFixedDrives() {
+  return invoke<NativeDriveInfo[]>("list_fixed_drives");
+}
+
 export async function isNativeRuntime() {
   return isTauri();
 }
@@ -308,6 +329,9 @@ export type NativeCleanupCandidate = {
   entity_id: number;
   path: string;
   size: number;
+  /** Unix seconds from `files.modified_at`. Null when the scanner never
+   *  recorded one — the row says so rather than showing an invented age. */
+  modified_at: number | null;
   reason: string;
 };
 
@@ -466,7 +490,8 @@ export type NativePopulatorState = {
 
 export type NativeOntologyStatus = {
   enabled: boolean;
-  pending_discoveries: number;
+  pending_findings: number;
+  pending_relocations: number;
   total_files: number;
   populators: NativePopulatorState[];
 };
@@ -496,6 +521,10 @@ export type NativeTreemapLensFolder = {
   lifecycle: string | null;
   cleanup_reason: string | null;
   reclaimable_bytes: number;
+  /** Unix seconds: the newest modified time anywhere in this folder's subtree —
+   *  "how long since you touched it" for the recommendation row. Null when
+   *  nothing under it carries a timestamp. */
+  modified_at: number | null;
 };
 
 export async function treemapLensData(indexPath: string) {
@@ -504,16 +533,172 @@ export async function treemapLensData(indexPath: string) {
   });
 }
 
-// ---- Shared display constants ----
+// ---- Ontology: cataloging ----
 
-export const REASON_LABELS: Record<string, string> = {
-  "safe-derivative": "Safe derivative",
-  "redundant-backup": "Redundant backup",
-  scratch: "Scratch / cache",
-  "finished-project-cruft": "Finished-project cruft",
+export type NativeRelocationMember = {
+  file_id: number;
+  path: string;
+  name: string;
+  size: number;
 };
 
-export const DISCOVERY_KIND_LABELS: Record<string, string> = {
-  "derivedFrom-pattern": "Derived-from suggestions",
-  "backupOf-pair": "Backup-of suggestions",
+export type NativeRelocationPayload = {
+  fingerprint: string;
+  member_hash: string;
+  destination: string;
+  destination_exists: boolean;
+  source: "rule" | "learned" | "template";
+  reason: string;
+  zone: string;
+  kind: string;
+  member_count: number;
+  total_bytes: number;
+  members: NativeRelocationMember[];
+};
+
+export type NativeRelocationPlanItem = {
+  id: number;
+  file_id: number;
+  from_path: string;
+  to_path: string;
+  size: number;
+  status: string;
+  note: string | null;
+};
+
+export type NativeRelocationPlan = {
+  plan_id: number;
+  total_files: number;
+  total_bytes: number;
+  items: NativeRelocationPlanItem[];
+  dropped: Array<{ path: string; reason: string }>;
+};
+
+export type NativeRelocationResult = {
+  plan_id: number;
+  moved: number;
+  bytes_moved: number;
+  pairs: Array<{ from: string; to: string }>;
+  failed: Array<{ path: string; reason: string }>;
+};
+
+export type NativeCatalogRule = {
+  id: number;
+  name: string;
+  criteria: { kind: string | null; name_contains: string | null; zone: string | null };
+  destination: string;
+  source: string;
+  enabled: boolean;
+};
+
+/** Pending relocation cards. Reuses the discoveries queue, filtered by kind. */
+export async function relocationCards(indexPath: string, limit = 50) {
+  return invoke<NativeDiscovery[]>("discoveries", {
+    request: { index_path: indexPath, kind: "relocation", limit },
+  });
+}
+
+/** The full member list for one card — the payload embeds only the first 50. */
+export async function relocationMembers(indexPath: string, discoveryId: number) {
+  return invoke<NativeRelocationMember[]>("relocation_members", {
+    request: { index_path: indexPath, discovery_id: discoveryId },
+  });
+}
+
+/** Re-verify the staged moves and persist a draft plan. */
+export async function buildRelocationPlan(
+  indexPath: string,
+  moves: Array<{ file_id: number; from: string; to: string; discovery_id: number | null }>
+) {
+  return invoke<NativeRelocationPlan>("relocation_plan", {
+    request: { index_path: indexPath, moves },
+  });
+}
+
+export async function executeRelocationPlan(indexPath: string, planId: number) {
+  return invoke<NativeRelocationResult>("execute_relocation_plan", {
+    request: { index_path: indexPath, plan_id: planId },
+  });
+}
+
+/** One row of the durable move log. `restore_status` is "moved" until it is put back. */
+export type NativeRelocationLogEntry = {
+  id: number;
+  file_id: number | null;
+  from_path: string;
+  to_path: string;
+  size: number;
+  moved_at: number;
+  modified_at: number | null;
+  restore_status: string;
+};
+
+/**
+ * Moves that can still be put back, newest first. This is the durable half of undo:
+ * the toast lives in React state and dies with the window, this survives a restart.
+ */
+export async function recentlyMoved(indexPath: string, limit = 50, offset = 0) {
+  return invoke<NativeRelocationLogEntry[]>("recently_moved", {
+    request: { index_path: indexPath, limit, offset },
+  });
+}
+
+/**
+ * Put one logged move back at its original path. The backend refuses rather than
+ * guesses — gone, changed, already restored, or something sitting at the original
+ * path all come back as an error message written for the person reading it.
+ */
+export async function restoreMove(indexPath: string, entryId: number) {
+  return invoke<void>("restore_from_relocation_log", {
+    request: { index_path: indexPath, entry_id: entryId },
+  });
+}
+
+export async function catalogRules(indexPath: string) {
+  return invoke<NativeCatalogRule[]>("catalog_rules", {
+    request: { index_path: indexPath },
+  });
+}
+
+export async function saveCatalogRule(
+  indexPath: string,
+  rule: {
+    name: string;
+    kind?: string | null;
+    nameContains?: string | null;
+    zone?: string | null;
+    destination: string;
+    source: "saved-after-move" | "saved-after-edit";
+  }
+) {
+  return invoke<number>("save_catalog_rule", {
+    request: {
+      index_path: indexPath,
+      name: rule.name,
+      kind: rule.kind ?? null,
+      name_contains: rule.nameContains ?? null,
+      zone: rule.zone ?? null,
+      destination: rule.destination,
+      source: rule.source,
+    },
+  });
+}
+
+export async function deleteCatalogRule(indexPath: string, id: number) {
+  await invoke("delete_catalog_rule", { request: { index_path: indexPath, id } });
+}
+
+// ---- Shared display constants ----
+
+/**
+ * The backend's cleanup reasons, said out loud. These render in the review gate — the screen
+ * where someone confirms a deletion — so title-casing the enum ("Safe derivative",
+ * "Finished-project cruft") put the taxonomy in front of the user at the highest-stakes moment.
+ * Written as noun phrases so they read after an em dash too: "Bird's Eye won't remove this — …".
+ */
+export const REASON_LABELS: Record<string, string> = {
+  "safe-derivative": "Something a build made",
+  "redundant-backup": "A copy you already have twice",
+  scratch: "A build cache",
+  "finished-project-cruft": "Left over from a finished project",
 };

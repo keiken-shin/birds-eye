@@ -34,12 +34,12 @@ pub struct ViewParams {
 
 pub fn list_saved_views() -> Vec<SavedView> {
     vec![
-        SavedView { id: "finished-untouched".into(), name: "Finished projects untouched 1+ year".into(), description: "Files in projects marked finished or archived, not accessed in over a year.".into(), protective: false },
-        SavedView { id: "regenerable-large".into(), name: "Regenerable derivatives over 100 MB".into(), description: "Large derivative files that can be regenerated from a surviving source.".into(), protective: false },
-        SavedView { id: "unprojected-files".into(), name: "Files in folders not part of any Project".into(), description: "Files whose folder has no project membership yet.".into(), protective: false },
-        SavedView { id: "unclassified".into(), name: "Files with no classification yet".into(), description: "Files lacking any role — an invitation to classify.".into(), protective: false },
-        SavedView { id: "orphan-sources".into(), name: "Sources with no surviving derivatives".into(), description: "Source files whose derivatives are gone — archive candidates.".into(), protective: false },
-        SavedView { id: "orphan-backups".into(), name: "Backups whose origin no longer exists".into(), description: "Protected: the only surviving copy. Never cleanup candidates.".into(), protective: true },
+        SavedView { id: "finished-untouched".into(), name: "Finished projects, untouched a year".into(), description: "Files in projects you marked finished or archived, not opened in over a year.".into(), protective: false },
+        SavedView { id: "regenerable-large".into(), name: "Big files you can rebuild".into(), description: "Files over 100 MB that you can make again from something you still have.".into(), protective: false },
+        SavedView { id: "unprojected-files".into(), name: "Files not in any project".into(), description: "Files sitting in folders that aren't part of a project yet.".into(), protective: false },
+        SavedView { id: "unclassified".into(), name: "Not sorted yet".into(), description: "Files Bird's Eye hasn't worked out a purpose for.".into(), protective: false },
+        SavedView { id: "orphan-sources".into(), name: "Originals with nothing made from them".into(), description: "Source files whose outputs are gone — good candidates to archive.".into(), protective: false },
+        SavedView { id: "orphan-backups".into(), name: "Backups whose original is gone".into(), description: "The only surviving copy — Bird's Eye never offers these for deletion.".into(), protective: true },
     ]
 }
 

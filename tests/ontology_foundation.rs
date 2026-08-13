@@ -37,6 +37,9 @@ fn migrated() -> Connection {
 fn end_to_end_foundation_behavior() {
     let conn = migrated();
 
+    // The default is enabled; disable explicitly to exercise the off state
+    // before the enable/disable lifecycle below.
+    disable(&conn).unwrap();
     assert!(!is_enabled(&conn).unwrap());
     enable(&conn).unwrap();
     assert!(is_enabled(&conn).unwrap());

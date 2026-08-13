@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+
+PackageIdentifier: keiken-shin.BirdsEye
+PackageVersion: 0.2.1
+Installers:
+  - Architecture: x64
+    Platform:
+      - Windows.Desktop
+    MinimumOSVersion: 10.0.17763.0
+    InstallerType: portable
+    InstallerUrl: https://github.com/keiken-shin/birds-eye/releases/download/v0.2.1/birds-eye-windows-portable-x64.exe
+    # PLACEHOLDER - not a real hash. Run packaging/update-manifests.ps1 -Version 0.2.1 to fill this in.
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    Commands:
+      - birds-eye
+    ReleaseDate: 2026-07-31
+ManifestType: installer
+ManifestVersion: 1.12.0

@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { Verdict } from "../../state/types";
+import { VERDICT_STYLES } from "../../lib/verdict";
 
 export type ChipProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   active?: boolean;
@@ -28,21 +29,23 @@ export function Chip({ active = false, icon: Icon, dot, children, className = ""
   );
 }
 
-const VERDICT_TAG: Record<Verdict, { cls: string; label: string }> = {
-  safe: { cls: "bg-safe-bg border-safe-bd text-safe-tx", label: "SAFE" },
-  review: { cls: "bg-review-bg border-review-bd text-review-tx", label: "REVIEW" },
-  protected: { cls: "bg-protected-bg border-protected-bd text-protected-tx", label: "PROTECTED" },
-  keep: { cls: "bg-keep-bg border-keep-bd text-keep-tx", label: "KEEP" },
+/** Colour only — the words live in VERDICT_STYLES so there is one set of them.
+ *  `protected` and `keep` share the one grey, same as their shared label. */
+const DONT_TOUCH_CLS = "bg-keep-bg border-keep-bd text-keep-tx";
+const VERDICT_CLS: Record<Verdict, string> = {
+  safe: "bg-safe-bg border-safe-bd text-safe-tx",
+  review: "bg-review-bg border-review-bd text-review-tx",
+  protected: DONT_TOUCH_CLS,
+  keep: DONT_TOUCH_CLS,
 };
 
-/** Small uppercase verdict/status tag. */
+/** Small safety tag. Three words across four states — `protected` and `keep` read the same. */
 export function VerdictTag({ verdict, label }: { verdict: Verdict; label?: string }) {
-  const style = VERDICT_TAG[verdict];
   return (
     <span
-      className={`inline-flex items-center rounded-[5px] border px-1.5 py-0.5 text-9 font-semibold tracking-[0.08em] ${style.cls}`}
+      className={`inline-flex items-center whitespace-nowrap rounded-[5px] border px-1.5 py-0.5 text-9 font-semibold tracking-[0.04em] ${VERDICT_CLS[verdict]}`}
     >
-      {label ?? style.label}
+      {label ?? VERDICT_STYLES[verdict].label}
     </span>
   );
 }
@@ -58,7 +61,7 @@ export function Tag({
   const tones: Record<string, string> = {
     neutral: "border-line-modal text-faint",
     green: "border-primary-edge text-primary-ink bg-primary-wash",
-    amber: "border-protected-bd text-protected-tx bg-protected-bg",
+    amber: "border-review-bd text-review-tx bg-review-bg",
     red: "border-danger/40 text-danger",
     blue: "border-history/40 text-history",
   };

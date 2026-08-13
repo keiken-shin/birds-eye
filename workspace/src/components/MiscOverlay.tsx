@@ -7,13 +7,13 @@ import { Kbd } from "./ui/Chip";
 
 type Row = { label: string; keys: string };
 
-/** Derived from STAGE_VIEWS so the 1–7 bindings can never drift from the switcher. */
+/** Derived from STAGE_VIEWS so the 1–8 bindings can never drift from the switcher. */
 const GROUPS: Array<{ title: string; rows: Row[] }> = [
   {
     title: "Views",
     rows: [
       ...STAGE_VIEWS.map((v) => ({ label: v.label, keys: v.key })),
-      { label: "Up one level (treemap)", keys: isMac ? "⌫" : "Backspace" },
+      { label: "Up one level (on the Map)", keys: isMac ? "⌫" : "Backspace" },
       { label: "Toggle inspector", keys: `${MOD}I` },
     ],
   },
@@ -22,7 +22,7 @@ const GROUPS: Array<{ title: string; rows: Row[] }> = [
     rows: [{ label: "Focus command bar", keys: isMac ? "⌘K" : "Ctrl+K" }],
   },
   {
-    title: "Board canvas",
+    title: "Findings canvas",
     rows: [
       { label: "Marquee select", keys: "Shift+Drag" },
       { label: "Add / remove from selection", keys: "Shift+Click" },
@@ -32,10 +32,11 @@ const GROUPS: Array<{ title: string; rows: Row[] }> = [
     ],
   },
   {
-    title: "Cleanup",
+    title: "Staging",
     rows: [
       { label: "Stage selection", keys: isMac ? "⇧↵" : "Shift+Enter" },
       { label: "Review & clean", keys: isMac ? "⌘↵" : "Ctrl+Enter" },
+      { label: "Review & move", keys: isMac ? "⌘↵" : "Ctrl+Enter" },
       { label: "Undo last clean", keys: `${MOD}Z` },
     ],
   },

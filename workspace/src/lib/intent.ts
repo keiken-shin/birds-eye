@@ -19,6 +19,7 @@ const STAGE_TRIGGERS: Array<{ view: StageView; words: string[] }> = [
   { view: "timeline", words: ["timeline", "activity", "history", "growth"] },
   { view: "treemap", words: ["treemap", "map"] },
   { view: "overview", words: ["overview", "home", "dashboard"] },
+  { view: "catalog", words: ["catalog", "organize", "tidy", "sort", "misplaced", "arrange"] },
   { view: "files", words: ["large files", "big files", "biggest files", "largest files"] },
   { view: "scans", words: ["scans", "scan queue", "queue", "rescan", "indexes"] },
 ];

@@ -66,6 +66,39 @@ const FOLDERS: FolderFix[] = [
 ];
 
 /* ------------------------------------------------------------------ */
+/* Fixed drives (list_fixed_drives)                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Shaped like a real machine: a nearly-full OS drive, a roomier data drive,
+ * and one volume whose capacity can't be read (BitLocker-locked / unformatted).
+ * The last one is the point — it must still appear, with its size unknown.
+ */
+const DRIVES = [
+  {
+    root_path: "C:\\",
+    volume_label: "OS",
+    total_bytes: Math.round(966 * GB),
+    free_bytes: Math.round(294 * GB),
+    drive_type: "fixed",
+  },
+  {
+    root_path: "D:\\",
+    volume_label: "New Volume",
+    total_bytes: Math.round(1048 * GB),
+    free_bytes: Math.round(212 * GB),
+    drive_type: "fixed",
+  },
+  {
+    root_path: "E:\\",
+    volume_label: null,
+    total_bytes: null,
+    free_bytes: null,
+    drive_type: "fixed",
+  },
+];
+
+/* ------------------------------------------------------------------ */
 /* Files (largest-first, like query_index.files)                       */
 /* ------------------------------------------------------------------ */
 
@@ -367,15 +400,23 @@ type LensFix = {
   lifecycle: string | null;
   cleanup_reason: string | null;
   reclaimable_bytes: number;
+  modified_at: number | null;
 };
 
+/**
+ * `ageDays` = how long since anything under the folder was touched (the real
+ * backend rolls up MAX(files.modified_at) over the whole subtree). `null`
+ * mirrors a subtree where nothing carries a timestamp — the row must say so
+ * rather than show an invented age.
+ */
 const lens = (
   path: string,
   role: string | null,
   replaceability: string | null,
   lifecycle: string | null,
   reason: string | null,
-  reclaimGb: number
+  reclaimGb: number,
+  ageDays: number | null = 30
 ): LensFix => ({
   folder_path: path,
   role,
@@ -383,6 +424,7 @@ const lens = (
   lifecycle,
   cleanup_reason: reason,
   reclaimable_bytes: Math.round(reclaimGb * GB),
+  modified_at: ageDays === null ? null : NOW - Math.round(ageDays * DAY),
 });
 
 const LENS: LensFix[] = [
@@ -399,26 +441,27 @@ const LENS: LensFix[] = [
   lens(j("Photos", "2021"), "asset", "irreplaceable", null, null, 0),
   lens(j("Photos", "Older"), null, null, null, null, 0),
   lens(j("Photos", "Lightroom"), null, null, null, null, 9.4),
-  lens(j("Photos", "Lightroom", "Previews"), "derivative", "regenerable", null, "safe-derivative", 9.4),
+  lens(j("Photos", "Lightroom", "Previews"), "derivative", "regenerable", null, "safe-derivative", 9.4, 122),
   lens(j("Projects"), null, null, null, null, 28.7),
   lens(j("Projects", "forge"), null, null, "active", null, 16.4),
   lens(j("Projects", "forge", "src"), "source", "irreplaceable", "active", null, 0),
-  lens(j("Projects", "forge", "target"), "derivative", "regenerable", null, "safe-derivative", 16.4),
-  lens(j("Projects", "webshop"), null, null, "finished", "finished-project-cruft", 12.3),
-  lens(j("Projects", "webshop", "node_modules"), "scratch", "regenerable", null, "scratch", 12.3),
+  lens(j("Projects", "forge", "target"), "derivative", "regenerable", null, "safe-derivative", 16.4, 88),
+  lens(j("Projects", "webshop"), null, null, "finished", "finished-project-cruft", 12.3, 214),
+  lens(j("Projects", "webshop", "node_modules"), "scratch", "regenerable", null, "scratch", 12.3, 240),
   lens(j("Projects", "ml-lab"), null, null, null, null, 0),
   lens(j("Projects", "ml-lab", "checkpoints"), null, "regenerable", null, null, 0),
   lens(j("Downloads"), null, null, null, null, 15.6),
-  lens(j("Downloads", "Installers"), null, "regenerable", null, "scratch", 15.6),
+  lens(j("Downloads", "Installers"), null, "regenerable", null, "scratch", 15.6, 380),
   lens(j("Backups"), null, null, null, null, 48.2),
-  lens(j("Backups", "OldLaptop"), "backup", "regenerable", null, "redundant-backup", 41.2),
-  lens(j("Backups", "PhoneSync"), "backup", null, null, null, 7.0),
+  lens(j("Backups", "OldLaptop"), "backup", "regenerable", null, "redundant-backup", 41.2, 660),
+  // Phone-sync copies land without timestamps — the honest "date unknown" path.
+  lens(j("Backups", "PhoneSync"), "backup", null, null, null, 7.0, null),
   lens(j("Music"), "asset", null, null, null, 0),
   lens(j("Documents"), "source", "irreplaceable", null, null, 0),
   lens(j("VMs"), null, null, null, null, 12.8),
   lens(j("AppData"), null, null, null, null, 20.0),
-  lens(j("AppData", "Cache"), "scratch", "regenerable", null, "scratch", 14.2),
-  lens(j("AppData", "Temp"), "scratch", "regenerable", null, "scratch", 5.8),
+  lens(j("AppData", "Cache"), "scratch", "regenerable", null, "scratch", 14.2, 34),
+  lens(j("AppData", "Temp"), "scratch", "regenerable", null, "scratch", 5.8, 9),
 ];
 
 /* ------------------------------------------------------------------ */
@@ -502,6 +545,75 @@ let DISCOVERIES: DiscoveryFix[] = [
 let ontologyEnabled = true;
 
 /* ------------------------------------------------------------------ */
+/* Relocation cards / catalog rules                                    */
+/* ------------------------------------------------------------------ */
+
+// Relocation cards are Discovery rows (kind: "relocation") — `status` mirrors
+// the real DiscoveryStatus enum's serde-default casing ("Pending"), same as
+// DISCOVERIES above, so both share the "discoveries" case's filter.
+let RELOCATION_CARDS = [
+  {
+    id: 9001,
+    kind: "relocation",
+    status: "Pending",
+    confidence: 0.91,
+    potential_bytes_unlocked: 4_812_000_000,
+    created_at: 1_800_000_000,
+    resolved_at: null,
+    payload: JSON.stringify({
+      fingerprint: "fp-installers",
+      member_hash: "mh-1",
+      destination: "D:\\Software\\Installers",
+      destination_exists: true,
+      source: "learned",
+      reason: "87% of your installers already live here",
+      zone: j("Downloads"),
+      kind: "installer",
+      member_count: 14,
+      total_bytes: 4_812_000_000,
+      members: Array.from({ length: 14 }, (_, i) => ({
+        file_id: 5000 + i,
+        path: `${j("Downloads")}\\setup-${i}.exe`,
+        name: `setup-${i}.exe`,
+        size: 343_714_285,
+      })),
+    }),
+  },
+  {
+    id: 9002,
+    kind: "relocation",
+    status: "Pending",
+    confidence: 0.55,
+    potential_bytes_unlocked: 92_000_000,
+    created_at: 1_800_000_000,
+    resolved_at: null,
+    payload: JSON.stringify({
+      fingerprint: "fp-shots",
+      member_hash: "mh-2",
+      // Destination doesn't exist yet — exercises the "will be created" path.
+      destination: j("Pictures", "Screenshots"),
+      destination_exists: false,
+      source: "template",
+      reason: "screenshots usually belong together",
+      zone: j("Desktop"),
+      kind: "screenshot",
+      member_count: 31,
+      total_bytes: 92_000_000,
+      members: Array.from({ length: 31 }, (_, i) => ({
+        file_id: 6000 + i,
+        path: `${j("Desktop")}\\Screenshot ${i}.png`,
+        name: `Screenshot ${i}.png`,
+        size: 2_967_741,
+      })),
+    }),
+  },
+];
+
+let CATALOG_RULES: Array<Record<string, unknown>> = [];
+/** Flip to true in the browser console to exercise the review gate's error path. */
+export let mockRelocationFails = false;
+
+/* ------------------------------------------------------------------ */
 /* Cleanup log                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -516,6 +628,32 @@ type CleanupLogFix = {
   restore_status: "pending" | "in_recycle_bin" | "restored" | "expired";
   expires_at: number | null;
 };
+
+/** Mirrors `ontology_relocation_log`: the durable half of undo for moves. */
+type MoveLogRow = {
+  id: number;
+  file_id: number | null;
+  from_path: string;
+  to_path: string;
+  size: number;
+  moved_at: number;
+  modified_at: number | null;
+  restore_status: "moved" | "restored";
+};
+
+let MOVE_LOG: MoveLogRow[] = [
+  {
+    id: 1,
+    file_id: 9101,
+    from_path: j("Downloads", "vacation-2019.zip"),
+    to_path: j("Archives", "vacation-2019.zip"),
+    size: Math.round(1.4 * GB),
+    moved_at: NOW - 3 * DAY,
+    modified_at: NOW - 400 * DAY,
+    restore_status: "moved",
+  },
+];
+let nextMoveLogId = 2;
 
 let CLEANUP_LOG: CleanupLogFix[] = [
   {
@@ -544,7 +682,7 @@ let CLEANUP_LOG: CleanupLogFix[] = [
 
 let nextLogId = 3;
 let nextPlanId = 2;
-const PLANS = new Map<number, { total_bytes: number; candidates: Array<{ file_id: number; entity_id: number; path: string; size: number; reason: string }> }>();
+const PLANS = new Map<number, { total_bytes: number; candidates: Array<{ file_id: number; entity_id: number; path: string; size: number; modified_at: number | null; reason: string }> }>();
 
 /* ------------------------------------------------------------------ */
 /* Index entries                                                       */
@@ -617,7 +755,7 @@ let nextJobId = 1;
 const SCAN_LOG_LINES: Array<[string, string]> = [
   ["walk", "Videos\\Screen Recordings — 2,301 entries"],
   ["stat", "Photos\\2024 — 18,204 entries · 22.1 GB"],
-  ["hash", "graduation-uncut.mp4 — 4.1 GB xxh3:9f3a1c88"],
+  ["hash", "graduation-uncut.mp4 — 4.1 GB xxh3:9f3a1c88"], // copy-ok: a fixture filename, not prose
   ["walk", "Projects\\webshop\\node_modules — 61,204 entries"],
   ["skip", "symlink → ..\\shared (follow off)"],
   ["index", "Backups\\OldLaptop — +44.6 GB"],
@@ -633,6 +771,9 @@ function emitJob(jobId: number, event: JobEvent) {
   jobBuffers.set(jobId, buf);
   listeners.forEach((cb) => cb(event));
 }
+
+/** Files that share a size with another file — what the hashing pass actually compares. */
+const DUP_CANDIDATE_FILES = 11_204;
 
 function startMockScan(root: string): { job_id: number; index_path: string } {
   const jobId = nextJobId++;
@@ -669,7 +810,8 @@ function startMockScan(root: string): { job_id: number; index_path: string } {
       emitJob(jobId, {
         job_id: jobId,
         status: "Completed",
-        message: "Scan complete",
+        // The real backend's terminal message, verbatim — the overlay says it plainly.
+        message: "Duplicate analysis complete",
         files_scanned: totalFiles,
         folders_scanned: 24_618,
         bytes_scanned: totalBytes,
@@ -690,18 +832,25 @@ function startMockScan(root: string): { job_id: number; index_path: string } {
     // Counter and log events are DISTINCT, matching the real emitter — the
     // frontend treats any event carrying log_line as log-only and skips its
     // counters (useScanJob.apply).
+    // Real backend message strings (jobs.rs / writer.rs), so dev mode exercises
+    // the same plain-English mapping the app applies to them. During sampling the
+    // real progress_total counts duplicate CANDIDATES, not every file — mirror that.
+    const sampling = frac >= 0.55 && frac < 0.85;
     const progress = {
       job_id: jobId,
       status: "Running",
-      message: frac < 0.55 ? "Walking file tree" : frac < 0.85 ? "Hashing duplicate candidates" : "Writing index",
+      message: frac < 0.55 ? "progress" : sampling ? "Sampling duplicate candidates" : "Finalizing index",
       files_scanned: Math.round(totalFiles * frac),
       folders_scanned: Math.round(24_618 * frac),
       bytes_scanned: Math.round(totalBytes * frac),
       queue_depth: Math.max(0, Math.round((1 - frac) * 34)),
       active_workers: 8,
-      current_path: `${root}\\${line[1].split(" — ")[0]}`,
-      progress_current: Math.round(totalFiles * frac),
-      progress_total: totalFiles,
+      // The real emitter sends the directory a worker is in, not a log line.
+      current_path: FOLDERS[tick % FOLDERS.length].path,
+      progress_current: sampling
+        ? Math.round(DUP_CANDIDATE_FILES * ((frac - 0.55) / 0.3))
+        : Math.round(totalFiles * frac),
+      progress_total: sampling ? DUP_CANDIDATE_FILES : totalFiles,
     };
     emitJob(jobId, progress);
     emitJob(jobId, { ...progress, log_line: { phase: line[0], message: line[1], elapsed_ms: tick * 130 } });
@@ -755,13 +904,15 @@ function searchFiles(args: {
     }));
 }
 
+/** Names and descriptions must match src/ontology/saved_views.rs verbatim — browser
+ *  dev mode is meant to read exactly like the real app. Ids never change. */
 const SAVED_VIEWS = [
-  { id: "finished-untouched", name: "Finished & untouched", description: "Files in finished projects untouched for a year", protective: false },
-  { id: "regenerable-large", name: "Large & regenerable", description: "Caches, build outputs and other regenerable data over 100 MB", protective: false },
-  { id: "unprojected-files", name: "Loose files", description: "Large files that belong to no project", protective: false },
-  { id: "unclassified", name: "Unclassified", description: "Files the intelligence layer has not classified yet", protective: false },
-  { id: "orphan-sources", name: "Orphan sources", description: "Source files whose derivatives disappeared", protective: true },
-  { id: "orphan-backups", name: "Orphan backups", description: "Backups whose originals are gone", protective: true },
+  { id: "finished-untouched", name: "Finished projects, untouched a year", description: "Files in projects you've finished that you haven't opened in a year", protective: false },
+  { id: "regenerable-large", name: "Big files you can rebuild", description: "Build output, caches and other files over 100 MB you can make again", protective: false },
+  { id: "unprojected-files", name: "Files not in any project", description: "Big files that don't belong to a project", protective: false },
+  { id: "unclassified", name: "Not sorted yet", description: "Files Bird's Eye hasn't worked out yet", protective: false },
+  { id: "orphan-sources", name: "Originals with nothing made from them", description: "Originals whose copies and exports have gone", protective: true },
+  { id: "orphan-backups", name: "Backups whose original is gone", description: "Backups of something that no longer exists", protective: true },
 ];
 
 function runSavedView(viewId: string): Array<{ file_id: number; path: string; size: number }> {
@@ -824,6 +975,8 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
         timeline: TIMELINE,
         age_buckets: AGE_BUCKETS,
       });
+    case "list_fixed_drives":
+      return done(DRIVES);
     case "scan_issues":
       return done(SCAN_ISSUES[String(request.index_path)] ?? []);
     case "retry_scan_issues": {
@@ -865,10 +1018,13 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
     }
     case "treemap_lens_data":
       return done(ontologyEnabled ? LENS : []);
-    case "ontology_status":
+    case "ontology_status": {
+      const pendingFindings = DISCOVERIES.filter((d) => d.status === "Pending").length;
+      const pendingRelocations = RELOCATION_CARDS.filter((c) => c.status === "Pending").length;
       return done({
         enabled: ontologyEnabled,
-        pending_discoveries: DISCOVERIES.filter((d) => d.status === "Pending").length,
+        pending_findings: pendingFindings,
+        pending_relocations: pendingRelocations,
         total_files: 391_208,
         populators: [
           { name: "heuristics", status: "completed", files_visited: 391_208, discoveries_emitted: 4, last_error: null },
@@ -876,6 +1032,7 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
           { name: "perceptual-hash", status: "completed", files_visited: 96_204, discoveries_emitted: 2, last_error: null },
         ],
       });
+    }
     case "set_ontology_enabled":
       ontologyEnabled = Boolean(request.enabled);
       return done(null);
@@ -883,9 +1040,9 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       return done({ ran: true });
     case "discoveries":
       return done(
-        DISCOVERIES.filter((d) => d.status === "Pending" && d.kind === request.kind).sort(
-          (a, b) => b.potential_bytes_unlocked - a.potential_bytes_unlocked
-        )
+        [...DISCOVERIES, ...RELOCATION_CARDS]
+          .filter((d) => d.status === "Pending" && d.kind === request.kind)
+          .sort((a, b) => b.potential_bytes_unlocked - a.potential_bytes_unlocked)
       );
     case "confirm_discovery":
     case "reject_discovery": {
@@ -895,7 +1052,108 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
           ? { ...d, status: cmd === "confirm_discovery" ? "Confirmed" : "Rejected", resolved_at: NOW }
           : d
       );
+      RELOCATION_CARDS = RELOCATION_CARDS.filter((c) => c.id !== id);
       return done(null);
+    }
+    case "relocation_members": {
+      const id = Number(request.discovery_id);
+      const card = RELOCATION_CARDS.find((c) => c.id === id);
+      if (!card) return done([]);
+      return done(JSON.parse(card.payload).members);
+    }
+    case "relocation_plan": {
+      const moves = (request.moves ?? []) as Array<{
+        file_id: number;
+        from: string;
+        to: string;
+        discovery_id: number | null;
+      }>;
+      // One dropped item whenever more than three are staged, so the "dropped"
+      // branch of the review gate is reachable in the browser.
+      const dropped = moves.length > 3 ? [{ path: moves[0].from, reason: "no longer on disk" }] : [];
+      const kept = moves.slice(dropped.length);
+      return done({
+        plan_id: 4242,
+        total_files: kept.length,
+        total_bytes: kept.length * 100_000_000,
+        items: kept.map((m, i) => ({
+          id: i + 1,
+          file_id: m.file_id,
+          from_path: m.from,
+          to_path: m.to,
+          size: 100_000_000,
+          status: "planned",
+          note: null,
+        })),
+        dropped,
+      });
+    }
+    case "execute_relocation_plan": {
+      const planId = Number(request.plan_id);
+      if (mockRelocationFails) {
+        return done({
+          plan_id: planId,
+          moved: 0,
+          bytes_moved: 0,
+          pairs: [],
+          failed: [{ path: `${j("Downloads")}\\setup-0.exe`, reason: "locked by another process" }],
+        });
+      }
+      const card = RELOCATION_CARDS[0];
+      const payload = JSON.parse(card.payload);
+      const pairs = payload.members.slice(0, 3).map((m: { path: string; name: string }) => ({
+        from: m.path,
+        to: `${payload.destination}\\${m.name}`,
+      }));
+      RELOCATION_CARDS = RELOCATION_CARDS.filter((c) => c.id !== card.id);
+      // A reviewed plan is still a move, so it leaves the same durable receipt.
+      for (const pair of pairs as Array<{ from: string; to: string }>) {
+        const f = FILES.find((x) => x.path === pair.from);
+        MOVE_LOG.push({
+          id: nextMoveLogId++,
+          file_id: null, // the fixtures carry paths, not row ids
+
+          from_path: pair.from,
+          to_path: pair.to,
+          size: f?.size ?? 100_000_000,
+          moved_at: Math.floor(Date.now() / 1000),
+          modified_at: f?.modified_at ?? null,
+          restore_status: "moved",
+        });
+        if (f) f.path = pair.to;
+      }
+      return done({
+        plan_id: planId,
+        moved: pairs.length,
+        bytes_moved: pairs.length * 100_000_000,
+        pairs,
+        failed: [],
+      });
+    }
+    case "catalog_rules":
+      return done(CATALOG_RULES);
+    case "save_catalog_rule": {
+      const id = CATALOG_RULES.length + 1;
+      CATALOG_RULES = [
+        ...CATALOG_RULES,
+        {
+          id,
+          name: request.name,
+          criteria: {
+            kind: request.kind ?? null,
+            name_contains: request.name_contains ?? null,
+            zone: request.zone ?? null,
+          },
+          destination: request.destination,
+          source: request.source,
+          enabled: true,
+        },
+      ];
+      return done(id);
+    }
+    case "delete_catalog_rule": {
+      CATALOG_RULES = CATALOG_RULES.filter((r) => r.id !== Number(request.id));
+      return done(undefined);
     }
     case "confirm_discovery_pattern":
     case "reject_discovery_pattern": {
@@ -935,6 +1193,7 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
             entity_id: 500 + i,
             path: p,
             size: lensRow?.reclaimable_bytes ?? folder?.total_bytes ?? 0,
+            modified_at: lensRow?.modified_at ?? null,
             reason: r,
           };
         })
@@ -978,6 +1237,25 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
     }
     case "recently_cleaned":
       return done(CLEANUP_LOG.slice(0, (request.limit as number) ?? 50));
+    case "recently_moved":
+      return done(
+        [...MOVE_LOG]
+          .sort((a, b) => b.moved_at - a.moved_at || b.id - a.id)
+          .slice(0, (request.limit as number) ?? 50)
+      );
+    case "restore_from_relocation_log": {
+      const id = request.entry_id as number;
+      const entry = MOVE_LOG.find((m) => m.id === id);
+      // The real backend refuses rather than guesses, and says so in a finished
+      // sentence. Mirror the shape so the error path is reachable in the browser.
+      if (!entry || entry.restore_status !== "moved") {
+        throw new Error("That move was already put back.");
+      }
+      const f = FILES.find((x) => x.path === entry.to_path);
+      if (f) f.path = entry.from_path;
+      entry.restore_status = "restored";
+      return done(null);
+    }
     case "restore_from_cleanup_log": {
       const id = request.entry_id as number;
       CLEANUP_LOG = CLEANUP_LOG.map((e) => (e.id === id ? { ...e, restore_status: "restored" } : e));
@@ -1002,6 +1280,20 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       let moved = 0;
       for (const m of moves) {
         const f = FILES.find((x) => x.path === m.from);
+        // Every relocation routes through here in the real backend, and that is
+        // where the durable receipt is written. Same here, so Recently cleaned
+        // can offer to put it back.
+        MOVE_LOG.push({
+          id: nextMoveLogId++,
+          file_id: null, // the fixtures carry paths, not row ids
+
+          from_path: m.from,
+          to_path: m.to,
+          size: f?.size ?? 0,
+          moved_at: Math.floor(Date.now() / 1000),
+          modified_at: f?.modified_at ?? null,
+          restore_status: "moved",
+        });
         if (f) f.path = m.to;
         // The real backend flags the source row deleted; the destination only
         // reappears after a rescan — so it leaves its duplicate group for now.

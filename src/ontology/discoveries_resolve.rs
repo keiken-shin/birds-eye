@@ -111,6 +111,16 @@ fn assert_user_relation(
     Ok(())
 }
 
+/// Discovery kinds that are user-resolvable but have no subject/predicate/object
+/// triple to graduate into. Confirming one records the decision and nothing else;
+/// crucially it must NOT write user-sourced facts, which resolve at confidence
+/// 1.0 and feed the cleanup candidate view.
+pub const NON_GRADUATING_KINDS: [&str; 1] = ["relocation"];
+
+fn is_non_graduating(kind: &str) -> bool {
+    NON_GRADUATING_KINDS.contains(&kind)
+}
+
 /// (subject_entity, predicate, object_entity, optional role_to_assert) for a discovery.
 fn graduation_plan(
     conn: &Connection,
@@ -157,6 +167,9 @@ pub fn confirm_discovery(conn: &Connection, id: i64) -> Result<(), OntologyError
     if d.status != DiscoveryStatus::Pending {
         return Ok(());
     }
+    if is_non_graduating(&d.kind) {
+        return set_status(conn, id, DiscoveryStatus::Confirmed);
+    }
     let (subject, predicate, object, role) = graduation_plan(conn, &d)?;
     if let Some(role) = role {
         assert_user_role(conn, subject, role)?;
@@ -178,6 +191,9 @@ pub fn reject_discovery(
         .ok_or_else(|| OntologyError::Populator(format!("discovery {id} not found")))?;
     if d.status != DiscoveryStatus::Pending {
         return Ok(());
+    }
+    if is_non_graduating(&d.kind) {
+        return set_status(conn, id, DiscoveryStatus::Rejected);
     }
     let (subject, predicate, object, _role) = graduation_plan(conn, &d)?;
     // Guard: skip the insert if this pair is already negatively asserted (e.g.
@@ -545,5 +561,63 @@ mod tests {
             crate::ontology::discoveries::count_pending(&conn).unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn relocation_rejects_without_graduating() {
+        let conn = migrated_conn();
+        let id = insert_discovery(
+            &conn,
+            &NewDiscovery {
+                kind: "relocation",
+                payload_json: r#"{"destination":"D:\\Docs"}"#,
+                confidence: 0.8,
+                potential_bytes_unlocked: 1024,
+            },
+        )
+        .unwrap()
+        .id;
+
+        reject_discovery(&conn, id, Some("not there")).expect("reject must not error");
+
+        let after = get_discovery(&conn, id).unwrap().unwrap();
+        assert_eq!(after.status, DiscoveryStatus::Rejected);
+
+        // A relocation has no subject/predicate/object triple, so nothing may be
+        // written to the negative-assertion table on its behalf.
+        let negatives: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_negative_assertions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(negatives, 0, "relocation rejection must not assert a negative pair");
+    }
+
+    #[test]
+    fn relocation_confirms_without_writing_facts() {
+        let conn = migrated_conn();
+        let id = insert_discovery(
+            &conn,
+            &NewDiscovery {
+                kind: "relocation",
+                payload_json: r#"{"destination":"D:\\Docs"}"#,
+                confidence: 0.8,
+                potential_bytes_unlocked: 1024,
+            },
+        )
+        .unwrap()
+        .id;
+
+        confirm_discovery(&conn, id).expect("confirm must not error");
+
+        assert_eq!(
+            get_discovery(&conn, id).unwrap().unwrap().status,
+            DiscoveryStatus::Confirmed
+        );
+        let attrs: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_attrs", [], |r| r.get(0))
+            .unwrap();
+        let relations: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_relations", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!((attrs, relations), (0, 0), "relocation must not graduate to facts");
     }
 }

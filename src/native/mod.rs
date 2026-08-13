@@ -1,4 +1,5 @@
 pub mod api;
+pub mod drives;
 pub mod jobs;
 pub mod lockinfo;
 pub mod phase_timer;

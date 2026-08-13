@@ -4,6 +4,7 @@ import {
   Copy,
   Database,
   Files as FilesIcon,
+  FolderInput,
   FolderTree,
   HardDrive,
   Recycle,
@@ -16,7 +17,10 @@ import { useIndexData } from "../../state/indexData";
 import { useWorkspace } from "../../state/workspaceStore";
 import { scopeChildren } from "../../lib/folderTree";
 import { categoryOf } from "../../lib/categories";
+import { ALL_CLEANUP_REASONS, folderRecommendations } from "../../lib/recommendations";
 import { Card, EmptyState, SectionLabel, StatCard, useCountUp } from "../ui/Card";
+import { Button } from "../ui/Button";
+import { VerdictTag } from "../ui/Chip";
 import { CategoryBar, Donut, BarList, DistBars, type Segment } from "../ui/charts";
 import { ViewHeader } from "./ViewHeader";
 import type { StageView } from "../../state/types";
@@ -88,6 +92,21 @@ export function OverviewView() {
     [overview]
   );
 
+  // The landing: the top reasons, biggest first. One row = name · size · how
+  // long since you touched it · why — the same rows Clean up lists in full.
+  const topReasons = useMemo(
+    () =>
+      folderRecommendations(
+        Array.from(lensByPath.values()),
+        new Set(ALL_CLEANUP_REASONS),
+        activeEntry?.root_path ?? null
+      ),
+    [lensByPath, activeEntry]
+  );
+  const topFive = topReasons.slice(0, 5);
+  const safeItems = useMemo(() => topReasons.filter((r) => r.verdict === "safe"), [topReasons]);
+  const safeBytes = useMemo(() => safeItems.reduce((s, r) => s + r.bytes, 0), [safeItems]);
+
   const animatedTotal = useCountUp(totalBytes);
   const animatedFiles = useCountUp(totalFiles);
   const animatedReclaim = useCountUp(reclaimableTotal);
@@ -99,7 +118,7 @@ export function OverviewView() {
         <EmptyState
           icon={ScanLine}
           title="Scan a folder to see your storage"
-          hint="Bird's Eye builds a local index of sizes, types, ages and duplicates — everything stays on this machine."
+          hint="Bird's Eye indexes sizes, types, ages and duplicates on this machine. Nothing is uploaded."
           action={{ label: "Scan a folder", icon: ScanLine, onClick: () => setOverlay("scan") }}
         />
       </div>
@@ -108,28 +127,73 @@ export function OverviewView() {
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <ViewHeader
-        title="Overview"
-        sub={activeEntry?.root_path ?? undefined}
-        actions={
-          reclaimableTotal > 0 ? (
-            <button
-              type="button"
-              onClick={() => setView("cleanup")}
-              className="rounded-full border border-primary-edge bg-primary-wash px-3 py-1 text-11 text-primary-ink transition-[filter] hover:brightness-125"
-            >
-              <span className="mono font-semibold">{formatBytes(reclaimableTotal)}</span> can likely be freed →
-            </button>
-          ) : undefined
-        }
-      />
+      <ViewHeader title="Overview" sub={activeEntry?.root_path ?? undefined} />
 
       <div className="mx-auto flex max-w-[1080px] flex-col gap-4 p-4">
+        {/* The landing: one number, one sentence, then the reasons. Above the
+            donut and the category charts, on purpose. */}
+        {reclaimableTotal > 0 || topFive.length ? (
+          <Card className="be-rise overflow-hidden">
+            <div className="px-4 pt-4 pb-3">
+              {/* Not animated: the one number the whole landing is about must be
+                  right the instant it paints, including when rAF never runs. */}
+              <h2 className="text-[26px] leading-tight font-semibold tracking-tight text-ink">
+                You can safely free{" "}
+                <span className="mono text-primary-ink">{formatBytes(reclaimableTotal)}</span>.
+              </h2>
+              <p className="mt-1 text-12 text-muted">
+                Here's where it is, biggest first — what each one is, and why it's safe to let go.
+              </p>
+            </div>
+
+            <div className="divide-y divide-line-soft border-t border-line-soft">
+              {topFive.map((item) => (
+                <button
+                  key={item.path}
+                  type="button"
+                  onClick={() => {
+                    select({ kind: "folder", path: item.path, name: item.name, bytes: item.bytes });
+                    setView("cleanup");
+                  }}
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-colors hover:bg-window"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline gap-2">
+                      <span className="truncate text-125 font-medium text-ink">{item.name}</span>
+                      <span className="mono flex-none text-11 font-semibold text-ink-soft">
+                        {formatBytes(item.bytes)}
+                      </span>
+                      <span className="flex-none truncate text-10 text-faint">
+                        {item.age ?? "date unknown"}
+                      </span>
+                      <span className="min-w-0 truncate text-10 text-dim">{item.why}</span>
+                    </span>
+                    <span className="mono block truncate text-10 text-dim">{item.path}</span>
+                  </span>
+                  <VerdictTag verdict={item.verdict} />
+                </button>
+              ))}
+            </div>
+
+            {safeItems.length ? (
+              <div className="flex items-center gap-3 border-t border-line-soft px-4 py-3">
+                <span className="min-w-0 flex-1 text-11 text-faint">
+                  You see the list before anything happens — then it goes to the Recycle Bin.
+                </span>
+                <Button variant="primary" size="md" onClick={() => setView("cleanup")}>
+                  Review {formatCount(safeItems.length)} safe{" "}
+                  {safeItems.length === 1 ? "item" : "items"} · {formatBytes(safeBytes)}
+                </Button>
+              </div>
+            ) : null}
+          </Card>
+        ) : null}
+
         {/* Stat tiles */}
         <div className="be-rise grid grid-cols-2 gap-3 xl:grid-cols-4">
           <StatCard label="Indexed" value={formatBytes(animatedTotal)} icon={HardDrive} tint="var(--color-history)" sub={<span className="mono">{formatCount(totalFiles)} files</span>} />
           <StatCard label="Files" value={formatCount(Math.round(animatedFiles))} icon={FilesIcon} tint="var(--color-cat-photo)" sub={<span className="mono">{formatCount(activeEntry?.folders_scanned ?? 0)} folders</span>} />
-          <StatCard label="Reclaimable" value={formatBytes(animatedReclaim)} icon={Sparkles} tint="var(--color-primary)" sub="review & clean safely" onClick={() => setView("cleanup")} />
+          <StatCard label="You can free" value={formatBytes(animatedReclaim)} icon={Sparkles} tint="var(--color-primary)" sub="review it, then clean" onClick={() => setView("cleanup")} />
           <StatCard label="Duplicate waste" value={formatBytes(animatedDup)} icon={Copy} tint="var(--color-danger)" sub={`${overview?.duplicate_groups.length ?? 0} groups`} onClick={() => setView("duplicates")} />
         </div>
 
@@ -196,10 +260,11 @@ export function OverviewView() {
           <Card className="be-rise be-d3 p-4">
             <SectionLabel className="mb-3">Quick actions</SectionLabel>
             <div className="grid grid-cols-2 gap-2.5">
-              <QuickAction icon={Copy} tint="var(--color-danger)" title="Find duplicates" sub={`${formatBytes(dupWaste)} recoverable`} onClick={() => setView("duplicates")} />
-              <QuickAction icon={Sparkles} tint="var(--color-primary)" title="Clean up" sub={`${formatBytes(reclaimableTotal)} reclaimable`} onClick={() => setView("cleanup")} />
-              <QuickAction icon={FolderTree} tint="var(--color-cat-archive)" title="Explore treemap" sub="visual space map" onClick={() => setView("treemap")} />
-              <QuickAction icon={Database} tint="var(--color-cat-document)" title="Largest files" sub="top space hogs" onClick={() => setView("files")} />
+              <QuickAction icon={Copy} tint="var(--color-danger)" title="Find duplicates" sub={`${formatBytes(dupWaste)} you can free`} onClick={() => setView("duplicates")} />
+              <QuickAction icon={Sparkles} tint="var(--color-primary)" title="Clean up" sub={`${formatBytes(reclaimableTotal)} you can free`} onClick={() => setView("cleanup")} />
+              <QuickAction icon={FolderTree} tint="var(--color-cat-archive)" title="Open the map" sub="see it by size and safety" onClick={() => setView("treemap")} />
+              <QuickAction icon={Database} tint="var(--color-cat-document)" title="Largest files" sub="biggest first" onClick={() => setView("files")} />
+              <QuickAction icon={FolderInput} tint="var(--color-cat-model)" title="Organise" sub="files that belong elsewhere" onClick={() => setView("catalog")} />
             </div>
           </Card>
 
@@ -212,7 +277,7 @@ export function OverviewView() {
                 onClick={() => setView("timeline")}
                 className="flex items-center gap-1 text-11 text-faint transition-colors hover:text-ink"
               >
-                <CalendarClock size={11} aria-hidden /> Timeline →
+                <CalendarClock size={11} aria-hidden /> By age →
               </button>
             </div>
             <DistBars buckets={ageBuckets} height={128} />

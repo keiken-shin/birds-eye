@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderOpen, Info, Play, Sparkles, Zap, type LucideIcon } from "lucide-react";
+import { FolderOpen, HardDrive, Info, Play, Sparkles, Zap, type LucideIcon } from "lucide-react";
 import {
   chooseNativeFolder,
   isNativeRuntime,
+  listFixedDrives,
   nativeJobEvents,
+  type NativeDriveInfo,
   type NativePhaseTimingEntry,
 } from "@bridge/nativeClient";
-import { formatBytes, formatCount, type ScanStrategy } from "@bridge/domain";
+import { formatBytes, formatCount, lastSegment, type ScanStrategy } from "@bridge/domain";
 import { useScanController } from "../state/scanController";
 import { useWorkspace } from "../state/workspaceStore";
 import {
@@ -24,6 +26,80 @@ const STRATEGIES: Array<{ id: ScanStrategy; icon: LucideIcon; title: string; not
   { id: "smart", icon: Sparkles, title: "Smart", note: "sizes, types and duplicate detection" },
   { id: "metadata", icon: Zap, title: "Metadata only", note: "fastest — sizes and dates" },
 ];
+
+/** "C:\" — a whole drive, as opposed to a folder inside one. */
+const DRIVE_ROOT = /^[A-Za-z]:[\\/]?$/;
+
+/** "C:\" → "C:" — what the button and the row call it. */
+const driveName = (root: string) => root.replace(/[\\/]+$/, "");
+
+/** Names the thing the button will do: "Scan C:", "Scan Projects". */
+function scanLabel(target: string): string {
+  const t = target.trim();
+  if (!t) return "Scan";
+  return `Scan ${DRIVE_ROOT.test(t) ? driveName(t) : lastSegment(t)}`;
+}
+
+/** How full a drive is, or null when its capacity couldn't be read. */
+function usedFraction(drive: NativeDriveInfo): number | null {
+  if (drive.total_bytes === null || drive.free_bytes === null || drive.total_bytes <= 0) return null;
+  return Math.max(0, Math.min(1, (drive.total_bytes - drive.free_bytes) / drive.total_bytes));
+}
+
+/** The fullest drive whose capacity we can read, else C:, else the first one. */
+/**
+ * The system drive wins, even when a data drive is fuller.
+ *
+ * The moment that makes someone install this is Windows saying it needs space, and Windows only
+ * ever says that about C:. A second drive sitting at 80% is normal and nobody is losing sleep
+ * over it. Preselecting the fullest drive would open on D: for most developers and quietly answer
+ * a question they didn't ask.
+ */
+function defaultDrive(drives: NativeDriveInfo[]): NativeDriveInfo | null {
+  const system = drives.find((d) => /^c:/i.test(d.root_path));
+  if (system) return system;
+  const measured = drives.filter((d) => usedFraction(d) !== null);
+  if (measured.length) {
+    return measured.reduce((a, b) => (usedFraction(b)! > usedFraction(a)! ? b : a));
+  }
+  return drives[0] ?? null;
+}
+
+/**
+ * The backend's own phase messages are engineering strings — "progress",
+ * "Sampling duplicate candidates", "Enrichment · fs-basic". This is what a
+ * person reads instead. Anything unmatched falls through to the walk line
+ * rather than putting a DTO string in front of someone.
+ */
+const PHASE_SAID_PLAINLY: Array<[RegExp, string]> = [
+  [/^progress$|^started scan\b/i, "Looking through your folders"],
+  [/^Marking missing files$/i, "Checking what's gone since last time"],
+  [/^Computing folder totals$/i, "Adding up folder sizes"],
+  [/^Building extension statistics$/i, "Sorting files by type"],
+  [/^Preparing duplicate analysis$/i, "Lining up files that could be duplicates"],
+  [/^Sampling duplicate candidates$/i, "Comparing files that could be duplicates"],
+  [/^Full hashing strong matches$/i, "Checking the close matches byte for byte"],
+  [/^Building duplicate groups$/i, "Grouping the duplicates it found"],
+  [/^Finalizing index$/i, "Saving what it found"],
+  [/^Enrichment\b/i, "Working out what's safe to delete"],
+  [/^Duplicate analysis complete$|^completed$|^Scan complete$/i, "Done — here's what it found"],
+];
+
+function saidPlainly(message: string): string {
+  for (const [pattern, text] of PHASE_SAID_PLAINLY) {
+    if (pattern.test(message)) return text;
+  }
+  const failed = message.match(/^error path=(.+) message=/);
+  if (failed) return `Couldn't read ${lastSegment(failed[1])}`;
+  return "Looking through your folders";
+}
+
+/** Phases where progress_total is a count of files, not a 0/1 stage marker. */
+const COUNTS_FILES = /^Sampling duplicate candidates$|^Full hashing strong matches$/i;
+
+/** The log phases worth a user's attention — a skipped folder or an unreadable
+ *  path. Everything else is developer output and lives behind the disclosure. */
+const PROBLEM_PHASE = /^(skip|warn|error)$/;
 
 /** Log phases → text color: read activity (blue), hashing/dedup (green ramp), problems (warm). */
 const PHASE_COLOR: Record<string, string> = {
@@ -46,10 +122,22 @@ export function ScanOverlay() {
   const [error, setError] = useState<string | null>(null);
   const [queued, setQueued] = useState(false);
   const [native, setNative] = useState(true);
+  const [drives, setDrives] = useState<NativeDriveInfo[]>([]);
   const [timings, setTimings] = useState<NativePhaseTimingEntry[] | null>(null);
 
   useEffect(() => {
     void isNativeRuntime().then(setNative);
+  }, []);
+
+  // The drives, listed before anything is asked of the user — never an empty
+  // window. An unreadable drive still shows up; it just says so.
+  useEffect(() => {
+    void listFixedDrives()
+      .then((list) => {
+        setDrives(list);
+        setFolder((current) => current || defaultDrive(list)?.root_path || "");
+      })
+      .catch(() => setDrives([]));
   }, []);
 
   // Opening the sheet after a finished (complete/failed/cancelled) job shows
@@ -123,11 +211,17 @@ export function ScanOverlay() {
         ) : scanning ? (
           "A scan is already running — starting another adds it to the queue."
         ) : (
-          "Re-scanning an indexed folder updates it incrementally."
+          "Nothing leaves this PC."
         )}
       </span>
-      <Button variant="primary" icon={Play} disabled={!trimmed} onClick={scanNow}>
-        Start scan
+      <Button
+        variant="primary"
+        icon={Play}
+        disabled={!trimmed}
+        onClick={scanNow}
+        title={trimmed ? `Scan ${trimmed}` : undefined}
+      >
+        {scanLabel(trimmed)}
       </Button>
     </div>
   );
@@ -176,8 +270,24 @@ export function ScanOverlay() {
         <ScanProgress view={view} timings={timings} />
       ) : (
         <div className="flex flex-col gap-4 px-4.5 py-4">
+          {drives.length ? (
+            <section>
+              <SectionLabel className="mb-2">Your drives</SectionLabel>
+              <div role="radiogroup" aria-label="Drive to scan" className="flex flex-col gap-1.5">
+                {drives.map((d) => (
+                  <DriveRow
+                    key={d.root_path}
+                    drive={d}
+                    selected={trimmed.toLowerCase() === d.root_path.toLowerCase()}
+                    onSelect={() => setFolder(d.root_path)}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
           <section>
-            <SectionLabel className="mb-2">Source</SectionLabel>
+            <SectionLabel className="mb-2">Or a folder</SectionLabel>
             <div className="flex gap-2">
               <input
                 value={folder}
@@ -185,7 +295,7 @@ export function ScanOverlay() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter") scanNow();
                 }}
-                placeholder="Choose or paste a folder to scan…"
+                placeholder="C:\Projects"
                 spellCheck={false}
                 className="mono min-w-0 flex-1 rounded-[9px] border border-line-input bg-field px-3 py-2.5 text-12 text-ink placeholder:text-dim focus:border-primary-edge focus:outline-none"
               />
@@ -249,21 +359,22 @@ export function ScanOverlay() {
               />
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5 text-12 font-medium text-ink-soft">
-                  Enable intelligence
+                  Work out what's safe to delete
                   <span
                     className="inline-flex text-dim"
                     title={
-                      "Classifies every folder on-device — why it exists, what depends on it, what's reclaimable. " +
-                      "Unlocks safety verdicts, Board findings and cleanup recommendations. " +
-                      "Reads file contents (media metadata, image fingerprints) beyond names and sizes — " +
-                      "nothing ever leaves this machine. Runs at the end of this same scan."
+                      "Bird's Eye reads your folder structure and works out what each folder is, " +
+                      "what depends on it and what you can free — so the Map, Findings and Clean up " +
+                      "can tell you what's safe to delete and why. " +
+                      "It reads some file contents (media metadata, image fingerprints) as well as " +
+                      "names and sizes. Nothing is uploaded. It runs at the end of this same scan."
                     }
                   >
                     <Info size={12} strokeWidth={2} aria-hidden />
                   </span>
                 </span>
                 <span className="text-105 leading-relaxed text-dim">
-                  Enrichment runs with this scan — no second pass needed.
+                  Runs with this scan — no second pass needed.
                   {intelligence && strategy === "metadata"
                     ? " Note: this reads some file contents, which goes beyond metadata-only."
                     : ""}
@@ -271,9 +382,78 @@ export function ScanOverlay() {
               </span>
             </label>
           </section>
+
+          <p className="text-105 leading-relaxed text-faint">
+            The first scan takes a few minutes, because it's reading more than sizes. After that it
+            only looks at what changed — so the second scan is seconds.
+          </p>
         </div>
       )}
     </OverlayShell>
+  );
+}
+
+/**
+ * One drive, the way every radial-consumer tool shows it: name, capacity, and a
+ * used bar. A drive whose capacity couldn't be read (locked or unformatted) is
+ * still listed — it says its size is unknown rather than claiming 0 B.
+ */
+function DriveRow({
+  drive,
+  selected,
+  onSelect,
+}: {
+  drive: NativeDriveInfo;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const used = usedFraction(drive);
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      className={`flex items-center gap-3 rounded-[10px] border p-3 text-left transition-colors ${
+        selected ? "border-primary-edge bg-primary-dim" : "border-line-modal hover:border-line-strong"
+      }`}
+    >
+      <span
+        className={`flex h-8 w-8 flex-none items-center justify-center rounded-lg ${
+          selected ? "text-primary-ink" : "text-label"
+        }`}
+        style={{ background: "color-mix(in srgb, var(--color-history) 13%, transparent)" }}
+      >
+        <HardDrive size={15} strokeWidth={2} aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
+          <span className={`mono text-12 font-semibold ${selected ? "text-primary-ink" : "text-ink"}`}>
+            {driveName(drive.root_path)}
+          </span>
+          {drive.volume_label ? (
+            <span className="truncate text-11 text-muted">{drive.volume_label}</span>
+          ) : null}
+          <span className="mono ml-auto flex-none text-105 text-dim">
+            {used === null
+              ? "size unknown"
+              : `${formatBytes(drive.free_bytes ?? 0)} free of ${formatBytes(drive.total_bytes ?? 0)}`}
+          </span>
+        </span>
+        {used === null ? (
+          <span className="mt-1.5 block text-105 text-faint">
+            Bird's Eye couldn't read this drive's size — it may be locked or unformatted.
+          </span>
+        ) : (
+          <Meter
+            fraction={used}
+            color="var(--color-history)"
+            height={6}
+            className="mt-2"
+          />
+        )}
+      </span>
+    </button>
   );
 }
 
@@ -287,6 +467,7 @@ function ScanProgress({
   const running = view.status === "scanning";
   const complete = view.status === "complete";
   const logRef = useRef<HTMLDivElement>(null);
+  const problems = view.lines.filter((l) => PROBLEM_PHASE.test(l.phase));
 
   // Follow the newest log line.
   useEffect(() => {
@@ -304,13 +485,27 @@ function ScanProgress({
 
       <div>
         <div className="mb-1.5 flex items-baseline justify-between gap-3">
-          <span className="min-w-0 truncate text-115 text-muted" title={view.currentPath || undefined}>
-            {view.message || "Scanning…"}
+          <span className="min-w-0 truncate text-115 text-ink-soft">
+            {complete ? "Done — here's what it found" : saidPlainly(view.message)}
           </span>
           {view.pct >= 0 ? (
             <span className="mono flex-none text-11 text-primary-ink">{Math.round(view.pct)}%</span>
           ) : null}
         </div>
+        {/* What it's finding, as it finds it — the folder it's in now, and the
+            one count the backend genuinely reports for this phase. */}
+        {running ? (
+          <div className="mb-1.5 flex items-baseline justify-between gap-3">
+            <span className="mono min-w-0 truncate text-105 text-dim" title={view.currentPath || undefined}>
+              {view.currentPath || " "}
+            </span>
+            {COUNTS_FILES.test(view.message) && view.progressTotal > 1 ? (
+              <span className="mono flex-none text-105 text-primary-ink">
+                {formatCount(view.progressTotal)} files could be duplicates
+              </span>
+            ) : null}
+          </div>
+        ) : null}
         {view.pct < 0 && running ? (
           <div style={{ animation: "bePulse 1.6s ease infinite" }}>
             <Meter fraction={1} height={8} />
@@ -320,20 +515,47 @@ function ScanProgress({
         )}
       </div>
 
-      <div
-        ref={logRef}
-        className="mono max-h-64 overflow-auto rounded-[9px] bg-field px-3 py-2.5 text-105 leading-[1.7]"
-      >
-        {view.lines.map((l) => (
-          <div key={l.n} className="flex gap-2">
-            <span className={`w-10 flex-none ${PHASE_COLOR[l.phase] ?? "text-faint"}`}>{l.phase}</span>
-            <span className="min-w-0 flex-1 truncate text-ink-soft" title={l.message}>
-              {l.message}
-            </span>
-          </div>
-        ))}
-        {!view.lines.length ? <div className="text-dim">Waiting for activity…</div> : null}
-      </div>
+      {/* Things the user should see: what was skipped, and what couldn't be read. */}
+      {problems.length ? (
+        <div className="flex flex-col gap-1">
+          {problems.slice(-5).map((l) => (
+            <div key={l.n} className="flex gap-2 text-105 leading-[1.7]">
+              <span className={`mono w-10 flex-none ${PHASE_COLOR[l.phase] ?? "text-faint"}`}>
+                {l.phase}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-muted" title={l.message}>
+                {l.message}
+              </span>
+            </div>
+          ))}
+          {problems.length > 5 ? (
+            <div className="text-105 text-faint">
+              +{formatCount(problems.length - 5)} more in the details below
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* The raw log is developer output — available, never the default view. */}
+      <details>
+        <summary className="cursor-pointer text-105 text-faint hover:text-ink">
+          Details {view.lines.length ? `(${formatCount(view.lines.length)} lines)` : ""}
+        </summary>
+        <div
+          ref={logRef}
+          className="mono mt-2 max-h-64 overflow-auto rounded-[9px] bg-field px-3 py-2.5 text-105 leading-[1.7]"
+        >
+          {view.lines.map((l) => (
+            <div key={l.n} className="flex gap-2">
+              <span className={`w-10 flex-none ${PHASE_COLOR[l.phase] ?? "text-faint"}`}>{l.phase}</span>
+              <span className="min-w-0 flex-1 truncate text-ink-soft" title={l.message}>
+                {l.message}
+              </span>
+            </div>
+          ))}
+          {!view.lines.length ? <div className="text-dim">Waiting for activity…</div> : null}
+        </div>
+      </details>
 
       {complete && timings?.length ? (
         <div className="flex flex-wrap items-center gap-1.5">

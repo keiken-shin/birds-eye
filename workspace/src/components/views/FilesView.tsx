@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Lock, Plus, ScanLine, Search, SearchX, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, FolderInput, Lock, Plus, ScanLine, Search, SearchX, X } from "lucide-react";
 import { ageDays, formatAge, formatBytes, formatCount } from "@bridge/domain";
 import {
   listSavedViews,
   runSavedView,
+  saveCatalogRule,
   searchNativeIndex,
   type NativeSavedView,
 } from "@bridge/nativeClient";
@@ -13,11 +14,11 @@ import { CATEGORIES, CATEGORY_ORDER, categoryOf, type MediaKind } from "../../li
 import { Card, EmptyState } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Chip, Tag } from "../ui/Chip";
+import { MoveDialog } from "../MoveDialog";
 import { ViewHeader } from "./ViewHeader";
 
 const SEARCH_LIMIT = 500;
 const RENDER_CAP = 200;
-const STALE_DAYS = 180;
 
 type SortKey = "size" | "newest" | "oldest";
 const SORTS: Array<{ key: SortKey; label: string }> = [
@@ -68,9 +69,38 @@ export function FilesView() {
   const [text, setText] = useState(resultsQuery?.kind === "search" ? resultsQuery.text : "");
   const [kindFilter, setKindFilter] = useState<MediaKind | null>(null);
   const [sort, setSort] = useState<SortKey>("size");
+  /** Bulk-select for the results list — local to this view, not the global store. */
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [rulePrompt, setRulePrompt] = useState<{ text: string; destination: string } | null>(null);
   const reqId = useRef(0);
   /** The last committed selection key — a change means clear old rows and show loading. */
   const lastSel = useRef("");
+  /** Content signature of the last query the selection-clearing effect saw. */
+  const lastQuerySig = useRef("");
+  /** Paths that have actually moved so far in the open move dialog's session. */
+  const movedPathsRef = useRef<string[]>([]);
+
+  const togglePick = useCallback((path: string) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+
+  // A different query invalidates any in-progress bulk selection — the rows
+  // it referred to are no longer the ones on screen. Compared by content, not
+  // object identity: `runQuery` always hands back a fresh literal, so
+  // re-clicking the active view chip or re-submitting the same search text
+  // must not wipe a selection the visible rows haven't actually changed under.
+  useEffect(() => {
+    const sig = JSON.stringify(resultsQuery);
+    if (sig === lastQuerySig.current) return;
+    lastQuerySig.current = sig;
+    setPicked(new Set());
+  }, [resultsQuery]);
 
   useEffect(() => {
     void listSavedViews().then(setSavedViews).catch(() => setSavedViews([]));
@@ -192,6 +222,12 @@ export function FilesView() {
     return sorted;
   }, [resultsQuery, fetched, presetRows, kindFilter, sort]);
 
+  // "All loaded", never "all matching": search_files has no OFFSET and returns
+  // no total, so the frontend only ever holds the first SEARCH_LIMIT rows.
+  const pickAllLoaded = useCallback(() => {
+    setPicked(new Set(rows.map((r) => r.path)));
+  }, [rows]);
+
   const totalBytes = useMemo(() => rows.reduce((s, r) => s + Math.max(0, r.size), 0), [rows]);
   const shown = rows.slice(0, RENDER_CAP);
   const overflow = rows.length - shown.length;
@@ -211,7 +247,7 @@ export function FilesView() {
           <EmptyState
             icon={ScanLine}
             title="Scan a folder to search your files"
-            hint="Bird's Eye indexes names, sizes, types and ages locally — nothing leaves this machine."
+            hint="Bird's Eye indexes names, sizes, types and ages on this machine. Nothing is uploaded."
             action={{ label: "Scan a folder", icon: ScanLine, onClick: () => setOverlay("scan") }}
           />
         </div>
@@ -310,7 +346,7 @@ export function FilesView() {
                   active={resultsQuery?.kind === "view" && resultsQuery.viewId === v.id}
                   icon={v.protective ? Lock : undefined}
                   disabled={!ontologyEnabled}
-                  title={ontologyEnabled ? v.description : "Enable intelligence to use curated views"}
+                  title={ontologyEnabled ? v.description : "Run the analysis to use the curated views"}
                   onClick={() => runQuery({ kind: "view", viewId: v.id, viewName: v.name })}
                   className="disabled:cursor-not-allowed disabled:opacity-40"
                 >
@@ -329,16 +365,24 @@ export function FilesView() {
           {viewNeedsIntel ? (
             <EmptyState
               icon={Lock}
-              title="This curated view needs intelligence"
-              hint="Saved views read the roles and relationships found during enrichment. Enable intelligence on the Board, or run a plain search instead."
+              title="This view needs the analysis"
+              hint="Curated views read what Bird's Eye found about your folders. Run the analysis from Findings, or just search instead."
               className="be-rise be-d3"
             />
           ) : (
             <div className="be-rise be-d3 flex flex-col gap-2">
-              {/* Count line */}
+              {/* Count line — a capped search never claims to be the whole match set. */}
               <div className="flex items-baseline gap-1.5 text-11 text-faint">
-                <span className="mono font-semibold text-ink-soft">{formatCount(rows.length)}</span>
-                <span>files ·</span>
+                {resultsQuery?.kind === "search" && rows.length >= SEARCH_LIMIT ? (
+                  <span className="mono font-semibold text-ink-soft">
+                    showing first {SEARCH_LIMIT} matches
+                  </span>
+                ) : (
+                  <>
+                    <span className="mono font-semibold text-ink-soft">{formatCount(rows.length)}</span>
+                    <span>files ·</span>
+                  </>
+                )}
                 <span className="mono font-semibold text-ink-soft">{formatBytes(totalBytes)}</span>
                 <span>total</span>
               </div>
@@ -355,20 +399,51 @@ export function FilesView() {
                   title="No files match"
                   hint={
                     resultsQuery?.kind === "view"
-                      ? "Some curated views only fill in after enrichment finishes or findings are confirmed on the Board."
+                      ? "Some curated views only fill in once the analysis finishes, or once you confirm findings."
                       : "Try a shorter term, or clear the category filter."
                   }
                 />
               ) : (
                 <Card className="overflow-hidden">
+                  {picked.size ? (
+                    <div className="flex flex-none items-center gap-2 border-b border-line bg-inset px-3 py-2">
+                      <span className="text-115 text-ink">{picked.size} selected</span>
+                      <button
+                        type="button"
+                        onClick={pickAllLoaded}
+                        className="text-115 text-primary-ink hover:underline"
+                      >
+                        Select all {rows.length} loaded
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPicked(new Set())}
+                        className="text-115 text-faint hover:text-ink"
+                      >
+                        Clear
+                      </button>
+                      <span className="flex-1" />
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        icon={FolderInput}
+                        onClick={() => {
+                          movedPathsRef.current = [];
+                          setMoveOpen(true);
+                        }}
+                      >
+                        Move to…
+                      </Button>
+                    </div>
+                  ) : null}
                   {shown.map((r) => {
                     const cat = categoryOf(r.kind);
                     const Icon = cat.icon;
                     // Reset/lost mtimes (pre-1990) resolve to null — an unknown
-                    // age, never "stale". `dateLost` distinguishes that from a
-                    // file that simply carries no timestamp.
+                    // age. `dateLost` distinguishes that from a file that simply
+                    // carries no timestamp. The age column below is the only age
+                    // signal: a number, never a "Stale" badge.
                     const days = ageDays(r.modifiedAt, nowSec);
-                    const stale = days !== null && days > STALE_DAYS;
                     const dateLost = r.modifiedAt !== null && days === null;
                     const staged = isStaged(r.path);
                     const sel = selected?.path === r.path;
@@ -382,6 +457,14 @@ export function FilesView() {
                             : "hover:bg-raised/50"
                         }`}
                       >
+                        <input
+                          type="checkbox"
+                          checked={picked.has(r.path)}
+                          aria-label={`Select ${r.name}`}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => togglePick(r.path)}
+                          className="flex-none"
+                        />
                         <span
                           className="flex h-8 w-8 flex-none items-center justify-center rounded-lg"
                           style={{
@@ -395,7 +478,6 @@ export function FilesView() {
                           <div className="flex min-w-0 items-center gap-1.5">
                             <span className="truncate text-12 font-medium text-ink-soft">{r.name}</span>
                             {r.extension ? <Tag>{r.extension}</Tag> : null}
-                            {stale ? <Tag tone="amber">Stale</Tag> : null}
                           </div>
                           <div className="mono truncate text-10 text-dim">{r.path}</div>
                         </div>
@@ -421,7 +503,11 @@ export function FilesView() {
                           variant={staged ? "subtle" : "ghost"}
                           icon={staged ? Check : Plus}
                           className="flex-none"
-                          title={staged ? "Remove from cleanup tray" : "Stage for cleanup (re-verified before removal)"}
+                          title={
+                            staged
+                              ? "Remove from the cleanup tray"
+                              : "Add to the cleanup tray — Bird's Eye checks again before it removes anything"
+                          }
                           onClick={(e) => {
                             e.stopPropagation();
                             toggleStaged({
@@ -450,6 +536,70 @@ export function FilesView() {
           )}
         </div>
       </div>
+
+      {moveOpen ? (
+        <MoveDialog
+          paths={[...picked]}
+          onClose={() => setMoveOpen(false)}
+          onMoved={(destination, movedPaths, allMoved) => {
+            // Drop only the paths that actually moved — a partial failure
+            // leaves the still-selected failures at their original location.
+            movedPathsRef.current.push(...movedPaths);
+            setPicked((prev) => {
+              const next = new Set(prev);
+              for (const p of movedPaths) next.delete(p);
+              return next;
+            });
+            if (!allMoved) return;
+            const moved = movedPathsRef.current;
+            movedPathsRef.current = [];
+            // Only offer the rule when it would actually fire: the backend
+            // matcher tests the file's own name, never its containing path,
+            // so a search that matched some files only via their folder path
+            // (e.g. "Invoices" matching everything under a `\Invoices\`
+            // folder) must not save a rule that can never apply to them.
+            if (
+              resultsQuery?.kind === "search" &&
+              destination &&
+              indexPath &&
+              moved.length > 0 &&
+              moved.every((p) => fileName(p).toLowerCase().includes(resultsQuery.text.toLowerCase()))
+            ) {
+              setRulePrompt({ text: resultsQuery.text, destination });
+            }
+          }}
+        />
+      ) : null}
+
+      {rulePrompt ? (
+        <div className="flex flex-none items-center gap-2 border-t border-line bg-inset px-3 py-2">
+          <span className="text-115 text-dim">
+            Always move files matching “{rulePrompt.text}” to {rulePrompt.destination}?
+          </span>
+          <Button
+            onClick={() => {
+              if (indexPath) {
+                saveCatalogRule(indexPath, {
+                  name: `Files matching “${rulePrompt.text}”`,
+                  nameContains: rulePrompt.text,
+                  destination: rulePrompt.destination,
+                  source: "saved-after-move",
+                }).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+              }
+              setRulePrompt(null);
+            }}
+          >
+            Save as rule
+          </Button>
+          <button
+            type="button"
+            onClick={() => setRulePrompt(null)}
+            className="text-115 text-faint hover:text-ink"
+          >
+            No thanks
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

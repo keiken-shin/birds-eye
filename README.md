@@ -2,9 +2,9 @@
 
 <img src="./workspace/public/favicon.svg" width="88" alt="Bird's Eye logo" />
 
-# Bird's Eye
+# Bird's Eye — disk cleanup for Windows
 
-**Storage cognition for your own machine — not just _"what's big?"_ but _"what's safe to delete, and why?"_**
+**It tells you what's safe to delete, and why — not just what's big.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-3ddc84.svg)](./LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-backend-orange)](./src)
@@ -16,45 +16,93 @@
 [**Download portable (.exe)**](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe) ·
 [**Documentation**](https://birds-eye.keiken.dev/)
 
-![Bird's Eye demo](./docs/assets/demo.gif)
-
 </div>
 
-Bird's Eye is an offline desktop app that scans local folders into a persistent SQLite index,
-then (optionally) runs an on-device **intelligence layer** that classifies every folder — why it
-exists, whether it's regenerable, what depends on it — and turns that into safety verdicts,
-reclaimable-space estimates, and a reviewed, reversible cleanup flow.
+**Bird's Eye is a free, offline disk cleanup tool for Windows.**
 
-**Everything runs locally. Nothing ever leaves your machine.**
+It doesn't just show you what's big — it tells you what's safe to delete and why. Build caches,
+installers you already ran, duplicate downloads, projects you finished two years ago: each one
+gets a size, a last-touched date, and a plain-English reason.
 
-## Features
+Nothing is deleted until you review it. Everything goes to the Recycle Bin and stays restorable
+for 30 days. Nothing is ever uploaded — no account, no telemetry, not a filename. MIT-licensed,
+so read the code.
 
-One persistent workspace — the top-bar switcher flips between views of the same index, never
-"pages":
+![Bird's Eye demo](./docs/assets/demo.gif)
+
+## What it finds
+
+- Build outputs and package caches — `node_modules`, `target`, `.gradle`, pip
+- Installers you already ran, sitting in Downloads
+- Duplicate files, ranked by how much space they waste
+- Projects you finished and haven't opened in a year
+- Old backups, VM disks and model files you forgot about
+
+Every one of them arrives with three things: **how much space it takes**, **how long since you
+touched it**, and **a reason in plain English**.
+
+```text
+node_modules · 12.3 GB · untouched 8 months · rebuildable from package.json
+```
+
+## What it will never do
+
+- No "health score." No "247 issues found."
+- No registry cleaning. No startup "optimisation."
+- No nagging, no countdowns, no upsell.
+- No account, and no data leaving your machine.
+
+There is no AI and no cloud in here. Bird's Eye reads your own folder structure and tells you
+what it found.
+
+## How long a scan takes
+
+The first scan takes a few minutes, because it's reading more than sizes. After that it only
+looks at what changed — so the second scan is seconds.
+
+## Safety
+
+- **Nothing is deleted until you review it.** You see a list of exactly what will happen, and
+  Bird's Eye checks every item again before it moves anything.
+- **Everything goes to the Recycle Bin**, restorable for 30 days from **Recently cleaned** — or
+  undone instantly right after the action.
+- **Moving a file gets the same review step.** Nothing moves until you confirm the plan, and a
+  move can be undone right after it happens.
+- **Things it won't touch are shown to you with the reason**, never silently dropped from the
+  list — and you can still remove them yourself through an explicit, clearly-marked override.
+- **Everything is labelled one of three ways**, and never a fourth:
+
+| Label | Means |
+|---|---|
+| **Safe to delete** | Rebuildable, temporary, or a duplicate. |
+| **Check first** | Might matter — here's what it is, you decide. |
+| **Don't touch** | In use, system, or you pinned it — shown with the reason. |
+
+- **The analysis just runs.** It's heuristic — no machine learning, no cloud, no external
+  services — and it shows its reasoning for every recommendation. If it can't work out what
+  something is, it says so instead of inventing an answer. If you only want sizes, there's an
+  opt-out in Settings.
+
+## The views
+
+One workspace, one index. The top-bar switcher flips between views of the same scan (number
+keys **1–8**) — never a page reload:
 
 | View | What it gives you |
 |---|---|
-| **Overview** | The hub: capacity bar, category donut, top consumers, age snapshot, quick actions, and a headline — *"X GB can likely be freed"*. |
-| **Treemap** | Squarified space map, colored by **type** or by **safety verdict** (safe / review / protected / keep), drillable to any depth. |
-| **Board** | An open canvas of the investigation: findings cluster around shared-source hubs with labeled edges, duplicate groups link to related findings, and you can marquee-select, group-drag, and auto-arrange. |
-| **Files** | Ranked search with category filters, size/date sorting, staleness tags, and curated saved views ("Large & regenerable", "Finished & untouched"). |
-| **Duplicates** | Waste-ranked groups with side-by-side previews — keep the newest, stage the rest, or move a copy where it belongs. |
-| **Cleanup** | Risk-labeled recommendations (safe / review / caution) with multi-select staging. |
-| **Timeline** | Monthly activity, file-age distribution, and "large & untouched" candidates. |
+| **Overview** | Where you stand: capacity bar, what's taking the space, an age snapshot, and a headline — *"X GB can likely be freed"*. |
+| **Map** | A space map where area is size, coloured by safety or by kind of file, drillable to any depth. |
+| **Findings** | An open canvas of what the scan turned up: findings cluster around shared sources with labelled links, and duplicate groups connect to related findings. |
+| **Files** | Ranked search with filters, size and date sorting, and saved views for the questions you ask every time — big files you can rebuild, projects you finished and haven't opened in a year. |
+| **Duplicates** | Groups ranked by how much space they waste, with side-by-side previews — keep the newest, stage the rest, or move a copy where it belongs. |
+| **Clean up** | The recommendations, each labelled and each with a size, an age and a reason, with multi-select staging. |
+| **By age** | Monthly activity, how old your files are, and the large-and-untouched items that are usually the easiest wins. |
+| **Organise** | Grouped "these files belong somewhere else" suggestions, learned from where you already keep things, reviewed before anything moves. |
 
-Around every view: an **Inspector** (why it exists · composition · safety verdict), a **Cleanup
-Tray** that collects from anywhere, and a **Review gate** that re-verifies before anything moves.
-Files can also be **moved to a better home** instead of deleted — the index heals itself with a
-background rescan.
-
-## Safety model
-
-- Nothing is deleted without an explicit review step; every clean goes to the **OS Recycle Bin**
-  with a tracked entry, restorable for 30 days from **Recently cleaned** (or instantly via Undo).
-- Items the safety predicate holds back are shown — never silently dropped — and *you* can still
-  remove them through an explicit, clearly-marked override.
-- The intelligence layer is **opt-in per index**, heuristic (no ML, no cloud), and shows its
-  reasoning; unclassified means unclassified, never invented data.
+Around every view: an **Inspector** (what something is · what it's made of · whether it's safe
+to remove), a **Cleanup Tray** that collects from anywhere, and a **Review gate** that checks
+everything again before it moves. Files can also be **moved to a better home** instead of
+deleted — the index heals itself with a background rescan.
 
 ## Install
 
@@ -99,14 +147,14 @@ npx vitest run                                    # frontend unit tests
 - `src/scanner/` — parallel filesystem scanner (cancellation, symlink-safe traversal).
 - `src/index/` — SQLite schema, index writer, rollups, search, timeline/age aggregates,
   duplicate detection.
-- `src/ontology/` — the intelligence layer: populators (heuristics, metadata extraction,
-  perceptual-hash near-duplicates), discoveries, saved views, and the cleanup engine
-  (plans → safety predicate → recycle-bin executor → restore).
+- `src/ontology/` — the analysis: heuristic populators, metadata extraction, perceptual-hash
+  near-duplicates, findings, saved views, and the cleanup engine (plans → safety predicate →
+  recycle-bin executor → restore).
 - `src/native/` — Tauri-shaped DTOs and background job APIs.
 - `src-tauri/` — desktop shell and Tauri commands.
 - `workspace/` — the React 19 + Tailwind 4 frontend (`src/bridge/` is the typed Tauri bridge,
   `src/dev/` the browser-mode mock backend, `src/components/ui/` the design-system primitives).
-- `docs/` — the documentation site (MkDocs Material), published to
+- `docs/` — the documentation site, published to
   [birds-eye.keiken.dev](https://birds-eye.keiken.dev/). Start with
   [Architecture](https://birds-eye.keiken.dev/develop/architecture/) for the
   developer tour.

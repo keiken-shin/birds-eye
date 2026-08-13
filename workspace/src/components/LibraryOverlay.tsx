@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { ArchiveRestore } from "lucide-react";
+import { ArchiveRestore, Undo2 } from "lucide-react";
 import {
   recentlyCleaned,
+  recentlyMoved,
   restoreCleanupEntry,
+  restoreMove,
   type NativeCleanupLogEntry,
+  type NativeRelocationLogEntry,
 } from "@bridge/nativeClient";
 import { formatBytes, formatCount, lastSegment } from "@bridge/domain";
 import { useWorkspace } from "../state/workspaceStore";
@@ -29,9 +32,11 @@ export function LibraryOverlay() {
   const { refreshData } = useIndexData();
 
   const [entries, setEntries] = useState<NativeCleanupLogEntry[]>([]);
+  const [moves, setMoves] = useState<NativeRelocationLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [restoringId, setRestoringId] = useState<number | null>(null);
+  const [restoringMoveId, setRestoringMoveId] = useState<number | null>(null);
   const reqId = useRef(0);
 
   useEffect(() => {
@@ -42,9 +47,16 @@ export function LibraryOverlay() {
 
     void (async () => {
       try {
-        const result = await recentlyCleaned(indexPath, 200, 0);
+        // Both halves of undo: what was deleted, and what was moved. The move log is
+        // durable in SQLite, so it is still here after a restart — the toast is not.
+        const cleaned = await recentlyCleaned(indexPath, 200, 0);
         if (id !== reqId.current) return;
-        setEntries(result);
+        setEntries(cleaned);
+        // The move log must never take the cleanup list down with it. Getting a deleted
+        // file back is the more safety-critical half, so it is fetched first and this one
+        // degrades to empty rather than failing the whole panel.
+        const moved = await recentlyMoved(indexPath, 200, 0).catch(() => []);
+        if (id === reqId.current) setMoves(moved);
       } catch (e) {
         if (id === reqId.current) setError(String(e));
       } finally {
@@ -72,9 +84,29 @@ export function LibraryOverlay() {
     }
   };
 
+  const restoreMoved = async (entry: NativeRelocationLogEntry) => {
+    if (!indexPath) return;
+    setRestoringMoveId(entry.id);
+    setError(null);
+    try {
+      await restoreMove(indexPath, entry.id);
+      const id = ++reqId.current;
+      const result = await recentlyMoved(indexPath, 200, 0);
+      if (id === reqId.current) setMoves(result);
+      await refreshData();
+    } catch (e) {
+      // The backend writes its refusals as finished sentences, so show it as-is.
+      setError(String(e));
+    } finally {
+      setRestoringMoveId(null);
+    }
+  };
+
   if (overlay !== "library") return null;
 
-  const restorable = entries.filter((e) => RESTORABLE.has(e.restore_status)).length;
+  const movable = moves.filter((m) => m.restore_status === "moved");
+  const restorable =
+    entries.filter((e) => RESTORABLE.has(e.restore_status)).length + movable.length;
   const nowSec = Math.floor(Date.now() / 1000);
 
   return (
@@ -157,6 +189,50 @@ export function LibraryOverlay() {
                 </Card>
               );
             })}
+          </div>
+        )}
+        {!loading && movable.length > 0 && (
+          <div className="mt-5">
+            <div className="mb-1.5 text-115 font-medium text-ink">Moved files</div>
+            <div className="mb-3 text-105 leading-relaxed text-dim">
+              Moves are logged too, so they survive closing the app. Restore puts a file back
+              where it came from — nothing already sitting there is overwritten.
+            </div>
+            <div className="flex flex-col gap-2">
+              {movable.map((entry) => {
+                const isRestoring = restoringMoveId === entry.id;
+                return (
+                  <Card key={entry.id} className="flex items-center gap-3 px-3 py-2.5">
+                    <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-primary-dim text-primary-ink">
+                      <Undo2 size={15} strokeWidth={2} aria-hidden />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-125 font-medium text-ink">
+                          {lastSegment(entry.to_path)}
+                        </span>
+                        <Tag tone="blue">MOVED</Tag>
+                      </div>
+                      <div className="mono truncate text-105 text-dim" title={entry.from_path}>
+                        was {entry.from_path}
+                      </div>
+                    </div>
+                    <span className="mono flex-none text-115 font-semibold text-ink-soft">
+                      {formatBytes(entry.size)}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="flex-none"
+                      disabled={isRestoring || restoringMoveId !== null}
+                      onClick={() => void restoreMoved(entry)}
+                    >
+                      {isRestoring ? "Putting back…" : "Put back"}
+                    </Button>
+                  </Card>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

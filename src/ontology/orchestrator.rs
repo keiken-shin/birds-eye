@@ -5,6 +5,7 @@
 //! can resume across process runs.
 
 use crate::ontology::enabled::is_enabled;
+use crate::ontology::populators::catalog::CatalogPopulator;
 use crate::ontology::populators::extractors::MetadataExtractorPopulator;
 use crate::ontology::populators::heuristics::StructuralHeuristicPopulator;
 use crate::ontology::populators::phash::PerceptualHashPopulator;
@@ -164,6 +165,7 @@ impl Default for PopulatorOrchestrator {
     fn default() -> Self {
         Self::new(vec![
             Box::new(RulePopulator::with_starter_bundle()),
+            Box::new(CatalogPopulator::new()),
             Box::new(StructuralHeuristicPopulator::new()),
             Box::new(MetadataExtractorPopulator::new()),
             Box::new(PerceptualHashPopulator::new()),
@@ -339,7 +341,7 @@ fn unix_now() -> i64 {
 mod tests {
     use super::*;
     use crate::index::schema::ALL_MIGRATIONS;
-    use crate::ontology::enabled::enable;
+    use crate::ontology::enabled::{disable, enable};
     use rusqlite::Connection;
     use std::sync::atomic::AtomicBool;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -382,6 +384,18 @@ mod tests {
 
     fn pause() -> Arc<AtomicBool> {
         Arc::new(AtomicBool::new(false))
+    }
+
+    #[test]
+    fn catalog_runs_last_among_cheap_populators() {
+        let orchestrator = PopulatorOrchestrator::default();
+        let names: Vec<&str> = orchestrator.ordered().iter().map(|p| p.name()).collect();
+        let catalog = names.iter().position(|n| *n == "CatalogPopulator").expect("registered");
+        let rules = names.iter().position(|n| *n == "RulePopulator").expect("registered");
+        assert!(
+            rules < catalog,
+            "CatalogPopulator must see RulePopulator's role facts: {names:?}"
+        );
     }
 
     #[test]
@@ -573,6 +587,7 @@ mod tests {
         for (_, sql) in ALL_MIGRATIONS {
             conn.execute_batch(sql).unwrap();
         }
+        disable(&conn).unwrap();
         drop(conn);
 
         assert!(!run_phase2(&path, BudgetTier::CheapOnly, pause()).unwrap());

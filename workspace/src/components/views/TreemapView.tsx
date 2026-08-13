@@ -5,16 +5,21 @@ import { useIndexData } from "../../state/indexData";
 import { useWorkspace } from "../../state/workspaceStore";
 import { nodeName, scopeChildren, scopeTotalBytes, type FolderNode } from "../../lib/folderTree";
 import { squarify } from "../../lib/squarify";
-import { NEUTRAL_STYLE, VERDICT_STYLES, verdictForFolder } from "../../lib/verdict";
+import { NEUTRAL_STYLE, VERDICT_LEGEND, VERDICT_STYLES, verdictForFolder } from "../../lib/verdict";
 import { CATEGORIES, categoryOf, type MediaKind } from "../../lib/categories";
 import { EmptyState } from "../ui/Card";
 import { Button } from "../ui/Button";
-import type { Verdict } from "../../state/types";
 
 const GAP = 3;
 const MAX_TILES = 24;
 
-type ColorMode = "type" | "safety";
+type ColorMode = "safety" | "type";
+
+/** Safety first — colouring the map by what's safe to delete is the thing no other disk tool does. */
+const COLOR_MODES: Array<{ id: ColorMode; label: string; title: string }> = [
+  { id: "safety", label: "Safety", title: "Colour by what's safe to delete" },
+  { id: "type", label: "File type", title: "Colour by file type" },
+];
 
 type TileStyle = { bg: string; bd: string; tx: string };
 
@@ -45,6 +50,8 @@ export function TreemapView() {
   const [size, setSize] = useState({ w: 640, h: 560 });
   const [hover, setHover] = useState<string | null>(null);
   const [mode, setMode] = useState<ColorMode | null>(null);
+  // Safety is the landing state. Only fall back to file type when there is no
+  // analysis to colour by — a map of uniform grey tells you nothing.
   const colorMode: ColorMode = mode ?? (ontologyEnabled ? "safety" : "type");
 
   useEffect(() => {
@@ -117,11 +124,14 @@ export function TreemapView() {
     crumbs.push({ name: nodeName(p), popTo: i + 1 });
   });
 
+  // Three entries, never four: `protected` and `keep` are one grey called "Don't touch".
   const legend =
     colorMode === "safety"
-      ? (Object.entries(VERDICT_STYLES) as Array<[Verdict, (typeof VERDICT_STYLES)[Verdict]]>).map(
-          ([verdict, s]) => ({ key: verdict, label: s.label.split(" — ")[0], color: s.bd })
-        )
+      ? VERDICT_LEGEND.map((verdict) => ({
+          key: verdict,
+          label: VERDICT_STYLES[verdict].label,
+          color: VERDICT_STYLES[verdict].bd,
+        }))
       : Array.from(new Set(drawn.map((n) => (dominantKind.get(n.path)?.kind ?? "other") as MediaKind)))
           .slice(0, 7)
           .map((kind) => ({ key: kind, label: CATEGORIES[kind]?.label ?? kind, color: CATEGORIES[kind]?.color ?? CATEGORIES.other.color }));
@@ -148,20 +158,22 @@ export function TreemapView() {
         <span className="ml-auto flex items-center gap-3">
           <span className="mono text-11 text-dim">{formatBytes(scopeTotal)}</span>
           {reclaimableTotal > 0 ? (
-            <span className="text-11 text-primary-ink">{formatBytes(reclaimableTotal)} reclaimable</span>
+            <span className="text-11 text-primary-ink">
+              {formatBytes(reclaimableTotal)} you can free
+            </span>
           ) : null}
           <span className="flex gap-[2px] rounded-lg border border-line-input bg-field p-[2px] text-10">
-            {(["type", "safety"] as ColorMode[]).map((m) => (
+            {COLOR_MODES.map((m) => (
               <button
-                key={m}
+                key={m.id}
                 type="button"
-                onClick={() => setMode(m)}
-                className={`rounded-md px-2 py-1 font-medium tracking-wide uppercase transition-colors ${
-                  colorMode === m ? "bg-primary text-on-primary" : "text-faint hover:text-ink"
+                onClick={() => setMode(m.id)}
+                className={`rounded-md px-2 py-1 font-medium tracking-wide whitespace-nowrap transition-colors ${
+                  colorMode === m.id ? "bg-primary text-on-primary" : "text-faint hover:text-ink"
                 }`}
-                title={m === "type" ? "Color by file type" : "Color by safety verdict"}
+                title={m.title}
               >
-                {m}
+                {m.label}
               </button>
             ))}
           </span>
@@ -244,7 +256,7 @@ export function TreemapView() {
                           border: "1px solid var(--color-primary-edge)",
                         }
                   }
-                  title={staged ? "Staged for cleanup" : `${formatBytes(reclaimable)} reclaimable`}
+                  title={staged ? "Staged for cleanup" : `${formatBytes(reclaimable)} you can free`}
                 >
                   {staged ? <Check size={11} strokeWidth={3} /> : <ArrowUp size={11} strokeWidth={2.5} />}
                 </div>
@@ -283,7 +295,7 @@ export function TreemapView() {
             <EmptyState
               icon={ScanLine}
               title="No storage indexed yet"
-              hint="Scan a folder or drive to map what's inside it — everything stays on this machine."
+              hint="Scan a folder or drive to map what's inside it — nothing is uploaded, it all stays on this machine."
               action={{ label: "Scan a folder", onClick: () => setOverlay("scan") }}
               className="h-full"
             />

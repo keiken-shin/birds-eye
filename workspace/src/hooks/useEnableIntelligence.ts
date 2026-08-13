@@ -6,7 +6,9 @@ import { useScanController } from "../state/scanController";
 import { useWorkspace } from "../state/workspaceStore";
 
 /**
- * Enable cleanup intelligence for the active index, then hand enrichment to the scan job:
+ * Turn the analysis on or off for the active index.
+ *
+ * On: flip the flag, then hand enrichment to the scan job:
  * an incremental rescan re-walks only what changed and its phase 2 runs the (cheap-budget)
  * enrichment on a background thread with live progress in the scan queue overlay.
  * The old path — awaiting `run_ontology_enrichment` inline — read file metadata for the
@@ -43,5 +45,24 @@ export function useEnableIntelligence() {
     }
   }, [indexPath, busy, activeEntry, refreshData, enqueue, setView]);
 
-  return { enable, busy, error, enabled: ontologyEnabled };
+  /**
+   * The opt-out: "just show me sizes". No rescan — the index keeps everything it
+   * already learned, the views simply stop claiming anything about safety. Turning
+   * it back on re-uses `enable` above, which does trigger the incremental rescan.
+   */
+  const disable = useCallback(async () => {
+    if (!indexPath || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await setOntologyEnabledNative(indexPath, false);
+      await refreshData();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [indexPath, busy, refreshData]);
+
+  return { enable, disable, busy, error, enabled: ontologyEnabled };
 }

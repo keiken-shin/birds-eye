@@ -10,8 +10,10 @@ import type {
   Overlay,
   PinnedCard,
   ResultsQuery,
+  ReviewMode,
   SelectedRef,
   StagedItem,
+  StagedMove,
   StageView,
   UndoState,
 } from "./types";
@@ -28,10 +30,11 @@ type WorkspaceState = {
   scopePath: string[]; // folder paths from root → current scope
   selected: SelectedRef | null;
   staged: StagedItem[];
+  stagedMoves: StagedMove[];
   pinned: PinnedCard[];
   resultsQuery: ResultsQuery | null;
   overlay: Overlay;
-  review: boolean;
+  review: ReviewMode;
   undo: UndoState;
 };
 
@@ -46,6 +49,9 @@ type WorkspaceActions = {
   toggleStaged: (item: StagedItem) => void;
   isStaged: (path: string) => boolean;
   clearStaged: () => void;
+  toggleStagedMove: (move: StagedMove) => void;
+  isMoveStaged: (path: string) => boolean;
+  clearStagedMoves: () => void;
   pinToBoard: (card: PinnedCard) => void;
   unpinCard: (path: string) => void;
   isPinned: (path: string) => boolean;
@@ -55,6 +61,7 @@ type WorkspaceActions = {
   clearQuery: () => void;
   setOverlay: (overlay: Overlay) => void;
   openReview: () => void;
+  openRelocateReview: () => void;
   closeReview: () => void;
   setUndo: (undo: UndoState) => void;
 };
@@ -70,13 +77,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [scopePath, setScopePath] = useState<string[]>([]);
   const [selected, setSelected] = useState<SelectedRef | null>(null);
   const [staged, setStaged] = useState<StagedItem[]>([]);
+  const [stagedMoves, setStagedMoves] = useState<StagedMove[]>([]);
   const [pinned, setPinned] = useState<PinnedCard[]>([]);
   const [resultsQuery, setResultsQuery] = useState<ResultsQuery | null>(null);
   const [overlay, setOverlay] = useState<Overlay>(null);
-  const [review, setReview] = useState(false);
+  const [review, setReview] = useState<ReviewMode>(null);
   const [undo, setUndo] = useState<UndoState>(null);
 
-  const closeReview = useCallback(() => setReview(false), []);
+  const closeReview = useCallback(() => setReview(null), []);
 
   const drillInto = useCallback((folderPath: string) => {
     setScopePath((prev) => (prev[prev.length - 1] === folderPath ? prev : [...prev, folderPath]));
@@ -96,6 +104,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const isStaged = useCallback((path: string) => staged.some((s) => s.path === path), [staged]);
   const clearStaged = useCallback(() => setStaged([]), []);
 
+  const toggleStagedMove = useCallback((move: StagedMove) => {
+    setStagedMoves((prev) => {
+      const i = prev.findIndex((s) => s.path === move.path);
+      if (i >= 0) return prev.filter((_, k) => k !== i);
+      return [...prev, move];
+    });
+  }, []);
+  const isMoveStaged = useCallback(
+    (path: string) => stagedMoves.some((s) => s.path === path),
+    [stagedMoves]
+  );
+  const clearStagedMoves = useCallback(() => setStagedMoves([]), []);
+
   // Pinning collects quietly — it never yanks you out of the view you're in.
   // The Board shows the card next time you flip to it (rail badge signals it).
   const pinToBoard = useCallback((card: PinnedCard) => {
@@ -111,8 +132,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
   const clearQuery = useCallback(() => setResultsQuery(null), []);
   const openReview = useCallback(() => {
-    if (staged.length) setReview(true);
-  }, [staged.length]);
+    if (staged.length) setReview("clean");
+    else if (stagedMoves.length) setReview("relocate");
+  }, [staged.length, stagedMoves.length]);
+  const openRelocateReview = useCallback(() => {
+    if (stagedMoves.length) setReview("relocate");
+  }, [stagedMoves.length]);
 
   const value = useMemo<WorkspaceContextValue>(
     () => ({
@@ -122,6 +147,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       scopePath,
       selected,
       staged,
+      stagedMoves,
       pinned,
       resultsQuery,
       overlay,
@@ -137,6 +163,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       toggleStaged,
       isStaged,
       clearStaged,
+      toggleStagedMove,
+      isMoveStaged,
+      clearStagedMoves,
       pinToBoard,
       unpinCard,
       isPinned,
@@ -144,6 +173,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       clearQuery,
       setOverlay,
       openReview,
+      openRelocateReview,
       closeReview,
       setUndo,
     }),
@@ -154,6 +184,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       scopePath,
       selected,
       staged,
+      stagedMoves,
       pinned,
       resultsQuery,
       overlay,
@@ -165,12 +196,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       toggleStaged,
       isStaged,
       clearStaged,
+      toggleStagedMove,
+      isMoveStaged,
+      clearStagedMoves,
       pinToBoard,
       unpinCard,
       isPinned,
       runQuery,
       clearQuery,
       openReview,
+      openRelocateReview,
       closeReview,
     ]
   );

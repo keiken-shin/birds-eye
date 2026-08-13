@@ -533,7 +533,8 @@ impl ScanJobManager {
                                     job_id,
                                     job_start,
                                     "enrichment",
-                                    "phase 2 skipped (ontology disabled for this index)".to_owned(),
+                                    // Shown verbatim in the scan overlay's live log.
+                                    "Analysis skipped — it's turned off for this index.".to_owned(),
                                 ),
                                 Err(e) => emit_log(
                                     &jobs,
@@ -1319,7 +1320,9 @@ mod tests {
                 root: data_root,
                 index_path: index_path.clone(),
                 scan_strategy: None,
-                enable_intelligence: None,
+                // Explicit off: the analysis is on by default now, so this
+                // test must opt out to exercise the disabled path.
+                enable_intelligence: Some(false),
             })
             .expect("failed to start job");
         wait_for_terminal(&manager, response.job_id);
@@ -1341,8 +1344,8 @@ mod tests {
             events
                 .iter()
                 .filter_map(|event| event.log_line.as_ref())
-                .any(|line| line.message.contains("phase 2 skipped")),
-            "expected phase 2 skipped log line"
+                .any(|line| line.message.contains("Analysis skipped")),
+            "expected the analysis-skipped log line"
         );
 
         drop(conn);

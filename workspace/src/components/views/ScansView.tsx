@@ -267,7 +267,7 @@ export function ScansView() {
               <div className="mb-2 flex items-baseline gap-2">
                 <SectionLabel>Indexes</SectionLabel>
                 <span className="text-105 text-dim">
-                  open switches the workspace — deleting removes only the local catalog, never your
+                  open switches the workspace — deleting removes only the local index, never your
                   files
                 </span>
               </div>
@@ -305,9 +305,9 @@ export function ScansView() {
                             {entry.intelligence ? (
                               <span
                                 className="inline-flex"
-                                title="Intelligence is on — folders are classified during scans"
+                                title="Bird's Eye works out what's safe to delete while it scans this one"
                               >
-                                <Tag tone="green">Intelligence</Tag>
+                                <Tag tone="green">Analysed</Tag>
                               </span>
                             ) : null}
                             {active ? <Tag tone="green">Active</Tag> : null}
@@ -346,7 +346,7 @@ export function ScansView() {
                               size="sm"
                               icon={Sparkles}
                               disabled={enablingId === entry.index_path}
-                              title="Enable Intelligence: Classifies every folder on-device (reads file contents; nothing leaves this machine) to unlock safety verdicts and cleanup recommendations. Runs an incremental rescan so verdicts reflect current data."
+                              title="Run the analysis: Bird's Eye reads your folders on this machine (including some file contents; nothing is uploaded) and works out what's safe to delete and why. It rescans what changed, so the answers match what's on disk now."
                               onClick={() => void handleEnableIntelligence(entry)}
                             >
                               {enablingId === entry.index_path ? "Enabling…" : ""}

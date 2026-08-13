@@ -1,6 +1,11 @@
 use crate::index::writer::ScanMode;
 use crate::index::IndexWriter;
 use crate::ontology::attrs::{assert_attr, get_attrs, NewAssertion};
+use crate::ontology::catalog::executor::SystemMover;
+use crate::ontology::catalog::payload::RELOCATION_KIND;
+use crate::ontology::catalog::relocation_log::{
+    log_move, recently_moved, restore_move_with, RelocationLogEntry,
+};
 use crate::ontology::cleanup::executor::{execute_plan_with, CleanupResult, SystemTrasher, DEFAULT_RETENTION_DAYS};
 use crate::ontology::cleanup::plans::{candidates_for_plan, create_plan, CleanupScope};
 use crate::ontology::cleanup::predicate::list_all_candidates;
@@ -195,6 +200,20 @@ pub struct RestoreCleanupRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct RecentlyMovedRequest {
+    pub index_path: PathBuf,
+    pub limit: u32,
+    #[serde(default)]
+    pub offset: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RestoreMoveRequest {
+    pub index_path: PathBuf,
+    pub entry_id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct PinFileRequest {
     pub index_path: PathBuf,
     pub file_id: i64,
@@ -221,6 +240,11 @@ pub struct TreemapLensFolderDto {
     pub lifecycle: Option<String>,
     pub cleanup_reason: Option<String>,
     pub reclaimable_bytes: i64,
+    /// The newest `modified_at` (unix seconds) among every file anywhere in
+    /// this folder's subtree -- "how long since you touched it" for the
+    /// recommendation row. `None` when nothing under the folder carries a
+    /// timestamp; never invented, never defaulted to 0.
+    pub modified_at: Option<i64>,
 }
 
 pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
@@ -260,6 +284,54 @@ fn mark_deleted_in_index(index_path: &Path, paths: &[String]) {
     }
 }
 
+/// Records a batch of successful `move_files` moves, in `(source, destination)`
+/// lockstep order.
+///
+/// Three writes per pair. First the durable move log — the row that makes an
+/// undo survive closing the app, written while the source row is still live so
+/// its id can be captured. Then the source gets `deleted_at` set, same as any
+/// other delete-from-index call (`mark_deleted_in_index` above), and the
+/// destination gets `deleted_at` CLEARED wherever a row already sits at that
+/// exact path.
+///
+/// That last half is what makes a relocate's undo — reversed pairs run back
+/// through this same function — leave the index consistent immediately,
+/// rather than only after the next rescan. Undo's destination is the file's
+/// original path, and that row was soft-deleted when the forward move ran;
+/// moving the file back there un-deletes it as the exact inverse of that
+/// step. Scoped to `deleted_at IS NOT NULL` so a live row already occupying
+/// that path (an unrelated, current file) is never touched.
+///
+/// Every write is best-effort, as index reconciliation here always has been: a
+/// move that already happened on disk must not be reported as failed because a
+/// bookkeeping statement did not land. A lost log row costs the undo button,
+/// not the file — the next scan still finds it at its new path.
+fn reconcile_index_after_move(index_path: &Path, sources: &[String], destinations: &[String]) {
+    let Ok(conn) = crate::index::open_index_connection(index_path) else {
+        return;
+    };
+    for (from, to) in sources.iter().zip(destinations) {
+        let file_id: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM files WHERE path = ?1",
+                rusqlite::params![from],
+                |row| row.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten();
+        let _ = log_move(&conn, from, to, file_id);
+        let _ = conn.execute(
+            "UPDATE files SET deleted_at = strftime('%s','now') WHERE path = ?1",
+            rusqlite::params![from],
+        );
+        let _ = conn.execute(
+            "UPDATE files SET deleted_at = NULL WHERE path = ?1 AND deleted_at IS NOT NULL",
+            rusqlite::params![to],
+        );
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct MoveSpec {
     pub from: String,
@@ -291,6 +363,7 @@ pub struct MoveFilesResponse {
 pub fn move_files(request: MoveFilesRequest) -> MoveFilesResponse {
     let mut failed = Vec::new();
     let mut moved_sources = Vec::new();
+    let mut moved_destinations = Vec::new();
 
     for spec in &request.moves {
         let to = Path::new(&spec.to);
@@ -310,13 +383,13 @@ pub fn move_files(request: MoveFilesRequest) -> MoveFilesResponse {
                 continue;
             }
         }
-        let result = std::fs::rename(&spec.from, to).or_else(|_| {
-            // Cross-volume move: copy then remove the source.
-            std::fs::copy(&spec.from, to)
-                .and_then(|_| std::fs::remove_file(&spec.from))
-        });
+        let from = Path::new(&spec.from);
+        let result = std::fs::rename(from, to).or_else(|_| copy_then_remove(from, to));
         match result {
-            Ok(()) => moved_sources.push(spec.from.clone()),
+            Ok(()) => {
+                moved_sources.push(spec.from.clone());
+                moved_destinations.push(spec.to.clone());
+            }
             Err(error) => failed.push(MoveFailure {
                 path: spec.from.clone(),
                 reason: error.to_string(),
@@ -325,12 +398,25 @@ pub fn move_files(request: MoveFilesRequest) -> MoveFilesResponse {
     }
 
     if let Some(index_path) = &request.index_path {
-        mark_deleted_in_index(index_path, &moved_sources);
+        reconcile_index_after_move(index_path, &moved_sources, &moved_destinations);
     }
     MoveFilesResponse {
         moved: moved_sources.len() as i64,
         failed,
     }
+}
+
+/// Cross-volume fallback: copy then remove the source, rolling back whatever
+/// landed at `to` if EITHER step fails. Rolling back only the remove-failed
+/// case (the original shape here) misses the copy itself failing partway —
+/// e.g. a full destination disk — which leaves a truncated file at `to`, and
+/// every retry then fails forever on the `to.exists()` guard above. Wrapping
+/// `inspect_err` around the whole chain (rather than nesting it inside the
+/// `remove_file` call alone) catches both arms with the same cleanup.
+fn copy_then_remove(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::copy(from, to).and_then(|_| std::fs::remove_file(from)).inspect_err(|_| {
+        let _ = std::fs::remove_file(to);
+    })
 }
 
 /// Build a draft cleanup plan from a scope and return its live candidate preview.
@@ -377,6 +463,23 @@ pub fn recently_cleaned_log(
 pub fn restore_from_cleanup_log(request: RestoreCleanupRequest) -> Result<(), String> {
     let mut conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     restore_with(&mut conn, request.entry_id, &SystemRestorer).map_err(|e| e.to_string())
+}
+
+/// List the persistent "Recently moved" log, newest first.
+pub fn recently_moved_log(
+    request: RecentlyMovedRequest,
+) -> Result<Vec<RelocationLogEntry>, String> {
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    recently_moved(&conn, request.limit, request.offset).map_err(|e| e.to_string())
+}
+
+/// Put a moved file back where it came from. `index_path: None` on the mover so
+/// the put-back does not append a second log row — the entry being restored
+/// already tells that story, and its status records the outcome.
+pub fn restore_from_relocation_log(request: RestoreMoveRequest) -> Result<(), String> {
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    restore_move_with(&conn, request.entry_id, &SystemMover { index_path: None })
+        .map_err(|e| e.to_string())
 }
 
 /// Pin a file so it is permanently excluded from cleanup queues.
@@ -431,7 +534,13 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
     let mut lifecycle = DominantByFolder::default();
     let mut cleanup_reason = DominantByFolder::default();
     let mut reclaimable: HashMap<String, i64> = HashMap::new();
+    let mut newest_modified: HashMap<String, i64> = HashMap::new();
 
+    // f.modified_at rides along on the same per-file pass already fetching
+    // role/replaceability/lifecycle -- no new scan, join, or sort, so
+    // idx_files_modified (which only helps a WHERE/ORDER BY on that column)
+    // is irrelevant here and the cost of this addition is one more integer
+    // read per row already being visited.
     let mut stmt = conn.prepare_cached(
         "SELECT f.path,
                 COALESCE(f.size, 0) AS size,
@@ -445,7 +554,8 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
                  JOIN ontology_entities pe ON pe.id = r.object_id AND pe.kind = 'Project'
                  JOIN ontology_attrs pa ON pa.entity_id = pe.id AND pa.key = 'lifecycle' AND pa.display_in_global_views = 1
                  WHERE r.subject_id = e.id AND r.predicate = 'partOf'
-                 ORDER BY pa.confidence DESC, pa.asserted_at DESC LIMIT 1) AS lifecycle
+                 ORDER BY pa.confidence DESC, pa.asserted_at DESC LIMIT 1) AS lifecycle,
+                f.modified_at AS modified_at
          FROM files f
          JOIN ontology_entities e ON e.kind = 'File' AND e.linked_file_id = f.id
          WHERE f.deleted_at IS NULL",
@@ -457,11 +567,12 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
             row.get::<_, Option<String>>(2)?,
             row.get::<_, Option<String>>(3)?,
             row.get::<_, Option<String>>(4)?,
+            row.get::<_, Option<i64>>(5)?,
         ))
     })?;
 
     for row in rows {
-        let (file_path, size, row_role, row_replaceability, row_lifecycle) = row?;
+        let (file_path, size, row_role, row_replaceability, row_lifecycle, row_modified_at) = row?;
         for ancestor in path_ancestors(&file_path) {
             if !folder_set.contains(ancestor) {
                 continue;
@@ -469,6 +580,20 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
             role.add(ancestor, row_role.as_deref(), size);
             replaceability.add(ancestor, row_replaceability.as_deref(), size);
             lifecycle.add(ancestor, row_lifecycle.as_deref(), size);
+            // "How long since you touched it" is the newest touch anywhere in
+            // the subtree (MAX, not MIN): a folder reads as stale only when
+            // NOTHING under it -- at any depth -- has been touched recently,
+            // so one live file far below it should keep the whole folder off
+            // the stale list. The folder row's own filesystem mtime is not a
+            // substitute: on Windows it changes whenever a direct child is
+            // added or removed, which says nothing about the contents, and it
+            // wouldn't see past direct children anyway.
+            if let Some(modified_at) = row_modified_at {
+                newest_modified
+                    .entry(ancestor.to_owned())
+                    .and_modify(|newest| *newest = (*newest).max(modified_at))
+                    .or_insert(modified_at);
+            }
         }
     }
 
@@ -500,6 +625,7 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
             lifecycle: lifecycle.get(&folder_path),
             cleanup_reason: cleanup_reason.get(&folder_path),
             reclaimable_bytes: reclaimable.get(&folder_path).copied().unwrap_or(0),
+            modified_at: newest_modified.get(&folder_path).copied(),
             folder_path,
         })
         .collect())
@@ -1206,7 +1332,14 @@ pub struct OntologyStatusRequest {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct OntologyStatusDto {
     pub enabled: bool,
-    pub pending_discoveries: u64,
+    /// Sum of only the discovery kinds the Board actually renders. This must
+    /// stay in step with `FINDING_KINDS` in
+    /// `workspace/src/lib/discoveries.ts` — any kind not listed there (e.g.
+    /// `near-duplicate-cluster`, emitted by `PerceptualHashPopulator`) must
+    /// stay out of this sum, or the badge overcounts what the Board draws.
+    pub pending_findings: u64,
+    /// Pending relocation cards — what the Catalog view renders.
+    pub pending_relocations: u64,
     /// Live files in the index — the denominator for populator progress.
     pub total_files: u64,
     /// Per-populator progress so the UI can say "enrichment incomplete" honestly
@@ -1226,8 +1359,20 @@ pub struct PopulatorStateDto {
 pub fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusDto, String> {
     let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     let enabled = enabled::is_enabled(&conn).map_err(|e| e.to_string())?;
-    let pending_discoveries =
-        crate::ontology::discoveries::count_pending(&conn).map_err(|e| e.to_string())?;
+    // Explicit sum over the Board-rendered kinds — see the doc comment on
+    // `pending_findings` above. Do not swap this for `count_pending` minus
+    // relocations: any third kind (e.g. `near-duplicate-cluster`) would
+    // silently re-inflate the Board's badge again.
+    let pending_findings = crate::ontology::discoveries::count_pending_by_kind(
+        &conn,
+        "derivedFrom-pattern",
+    )
+    .map_err(|e| e.to_string())?
+        + crate::ontology::discoveries::count_pending_by_kind(&conn, "backupOf-pair")
+            .map_err(|e| e.to_string())?;
+    let pending_relocations =
+        crate::ontology::discoveries::count_pending_by_kind(&conn, RELOCATION_KIND)
+            .map_err(|e| e.to_string())?;
     let total_files: i64 = conn
         .query_row("SELECT COUNT(*) FROM files WHERE deleted_at IS NULL", [], |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -1252,7 +1397,8 @@ pub fn ontology_status(request: OntologyStatusRequest) -> Result<OntologyStatusD
         .map_err(|e| e.to_string())?;
     Ok(OntologyStatusDto {
         enabled,
-        pending_discoveries,
+        pending_findings,
+        pending_relocations,
         total_files: total_files.max(0) as u64,
         populators,
     })
@@ -1271,6 +1417,276 @@ pub fn set_ontology_enabled(request: SetOntologyEnabledRequest) -> Result<(), St
     } else {
         enabled::disable(&conn).map_err(|e| e.to_string())
     }
+}
+
+// ---- Cataloging: relocation plans, execution, members, rules ----
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RelocationMoveInput {
+    pub file_id: i64,
+    pub from: String,
+    pub to: String,
+    #[serde(default)]
+    pub discovery_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RelocationPlanRequest {
+    pub index_path: PathBuf,
+    pub moves: Vec<RelocationMoveInput>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DroppedMove {
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct RelocationPlanResponse {
+    pub plan_id: i64,
+    pub total_files: u64,
+    pub total_bytes: u64,
+    pub items: Vec<crate::ontology::catalog::plans::PlannedItem>,
+    /// Files re-verification removed, with the reason to show inline.
+    pub dropped: Vec<DroppedMove>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExecuteRelocationPlanRequest {
+    pub index_path: PathBuf,
+    pub plan_id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RelocationMembersRequest {
+    pub index_path: PathBuf,
+    pub discovery_id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CatalogRulesRequest {
+    pub index_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SaveCatalogRuleRequest {
+    pub index_path: PathBuf,
+    pub name: String,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub name_contains: Option<String>,
+    #[serde(default)]
+    pub zone: Option<String>,
+    pub destination: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeleteCatalogRuleRequest {
+    pub index_path: PathBuf,
+    pub id: i64,
+}
+
+/// Re-verify a set of proposed moves and persist them as a draft plan.
+pub fn relocation_plan(request: RelocationPlanRequest) -> Result<RelocationPlanResponse, String> {
+    use crate::ontology::catalog::plans::{create_plan, plan_items, PlanItem};
+
+    let conn =
+        crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+
+    let mut items = Vec::new();
+    let mut dropped = Vec::new();
+    let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for input in request.moves {
+        let row: Option<(i64, Option<i64>)> = conn
+            .query_row(
+                "SELECT size, deleted_at FROM files WHERE id = ?1",
+                rusqlite::params![input.file_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+
+        let Some((size, deleted_at)) = row else {
+            dropped.push(DroppedMove {
+                path: input.from,
+                reason: "no longer in the index".to_owned(),
+            });
+            continue;
+        };
+        if deleted_at.is_some() {
+            dropped.push(DroppedMove {
+                path: input.from,
+                reason: "no longer in the index".to_owned(),
+            });
+            continue;
+        }
+        if !Path::new(&input.from).exists() {
+            dropped.push(DroppedMove {
+                path: input.from,
+                reason: "no longer on disk".to_owned(),
+            });
+            continue;
+        }
+        if Path::new(&input.to).exists() || !claimed.insert(input.to.clone()) {
+            dropped.push(DroppedMove {
+                path: input.from,
+                reason: "a file already claims that name at the destination".to_owned(),
+            });
+            continue;
+        }
+
+        items.push(PlanItem {
+            file_id: input.file_id,
+            from_path: input.from,
+            to_path: input.to,
+            size,
+            discovery_id: input.discovery_id,
+        });
+    }
+
+    let plan_id = create_plan(&conn, &items).map_err(|e| e.to_string())?;
+    let persisted = plan_items(&conn, plan_id).map_err(|e| e.to_string())?;
+    let total_files = persisted.len() as u64;
+    let total_bytes = persisted.iter().map(|i| i.size.max(0) as u64).sum();
+
+    Ok(RelocationPlanResponse {
+        plan_id,
+        total_files,
+        total_bytes,
+        items: persisted,
+        dropped,
+    })
+}
+
+/// Execute a draft relocation plan and mark its source discoveries confirmed
+/// — but only discoveries whose moves actually landed. Confirming
+/// unconditionally is wrong: the populator's suppression treats `Confirmed`
+/// as "no need to ask again" specifically because a successful move
+/// soft-deletes the sources, dropping the cluster out of `candidates()`. If
+/// every item for a discovery fails, no source is soft-deleted, the cluster's
+/// membership is unchanged, and confirming it anyway would suppress that card
+/// forever even though nothing happened. A discovery with at least one moved
+/// item is still confirmed, matching the populator's existing
+/// "confirmed-but-not-yet-fully-moved" tolerance for the rest.
+pub fn execute_relocation_plan(
+    request: ExecuteRelocationPlanRequest,
+) -> Result<crate::ontology::catalog::executor::RelocationResult, String> {
+    use crate::ontology::catalog::executor::execute_plan_with;
+
+    let mut conn =
+        crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+
+    let mover = SystemMover {
+        index_path: Some(request.index_path.clone()),
+    };
+    let result =
+        execute_plan_with(&mut conn, request.plan_id, &mover).map_err(|e| e.to_string())?;
+
+    let confirmable_ids: Vec<i64> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT discovery_id
+                 FROM ontology_relocation_plan_items
+                 WHERE plan_id = ?1 AND discovery_id IS NOT NULL AND status = 'moved'",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![request.plan_id], |row| row.get::<_, i64>(0))
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(Result::ok).collect()
+    };
+
+    for id in confirmable_ids {
+        let _ = crate::ontology::discoveries_resolve::confirm_discovery(&conn, id);
+    }
+
+    Ok(result)
+}
+
+/// The full member list for one card. The payload embeds only the first 50.
+pub fn relocation_members(
+    request: RelocationMembersRequest,
+) -> Result<Vec<crate::ontology::catalog::payload::RelocationMember>, String> {
+    use crate::ontology::catalog::cluster::{candidates, refine_kind};
+    use crate::ontology::catalog::payload::{RelocationMember, RelocationPayload};
+    use crate::ontology::catalog::zones::inbox_zones;
+    use crate::ontology::discoveries::get_discovery;
+
+    let conn =
+        crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    let discovery = get_discovery(&conn, request.discovery_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("discovery {} not found", request.discovery_id))?;
+    let payload: RelocationPayload =
+        serde_json::from_str(&discovery.payload).map_err(|e| e.to_string())?;
+
+    let zones = inbox_zones(&conn).map_err(|e| e.to_string())?;
+    let all = candidates(&conn, &zones).map_err(|e| e.to_string())?;
+
+    Ok(all
+        .into_iter()
+        .filter(|c| c.zone == payload.zone && refine_kind(&c.media_kind, &c.name) == payload.kind)
+        .map(|c| RelocationMember {
+            file_id: c.file_id,
+            path: c.path,
+            name: c.name,
+            size: c.size,
+        })
+        .collect())
+}
+
+/// List the user's saved catalog rules.
+pub fn catalog_rules(
+    request: CatalogRulesRequest,
+) -> Result<Vec<crate::ontology::catalog::rules::CatalogRule>, String> {
+    let conn =
+        crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    crate::ontology::catalog::rules::list_rules(&conn).map_err(|e| e.to_string())
+}
+
+/// Save a rule taught by a completed move or an edited suggestion.
+pub fn save_catalog_rule(request: SaveCatalogRuleRequest) -> Result<i64, String> {
+    use crate::ontology::catalog::rules::{create_rule, NewCatalogRule, RuleCriteria};
+
+    let source = parse_catalog_rule_source(&request.source)?;
+    let conn =
+        crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    let criteria = RuleCriteria {
+        kind: request.kind,
+        name_contains: request.name_contains,
+        zone: request.zone,
+    };
+    create_rule(
+        &conn,
+        &NewCatalogRule {
+            name: &request.name,
+            criteria: &criteria,
+            destination: &request.destination,
+            source,
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// The schema's `catalog_rules.source` CHECK only accepts these two values;
+/// validate here so a bad value surfaces as a clean message instead of raw
+/// SQLite constraint text.
+fn parse_catalog_rule_source(value: &str) -> Result<&str, String> {
+    match value {
+        "saved-after-move" | "saved-after-edit" => Ok(value),
+        other => Err(format!("unknown catalog rule source: {other}")),
+    }
+}
+
+/// Forget a saved rule.
+pub fn delete_catalog_rule(request: DeleteCatalogRuleRequest) -> Result<(), String> {
+    let conn =
+        crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    crate::ontology::catalog::rules::delete_rule(&conn, request.id).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -1639,6 +2055,117 @@ mod tests {
         );
     }
 
+    #[test]
+    fn move_reports_failure_without_leaving_a_destination_copy() {
+        let root = test_root("move-orphan");
+        let source_dir = root.join("src");
+        let dest_dir = root.join("dst");
+        fs::create_dir_all(&source_dir).expect("create source dir");
+        fs::create_dir_all(&dest_dir).expect("create dest dir");
+
+        let from = source_dir.join("a.bin");
+        write_file(&from, b"payload");
+
+        // A destination whose parent is a FILE, not a directory: create_dir_all
+        // fails, so nothing may be written and nothing may be reported as moved.
+        let blocker = dest_dir.join("blocker");
+        write_file(&blocker, b"x");
+        let to = blocker.join("a.bin");
+
+        let response = move_files(MoveFilesRequest {
+            moves: vec![MoveSpec {
+                from: from.to_string_lossy().to_string(),
+                to: to.to_string_lossy().to_string(),
+            }],
+            index_path: None,
+        });
+
+        assert_eq!(response.moved, 0);
+        assert_eq!(response.failed.len(), 1);
+        assert!(from.exists(), "the source must survive a failed move");
+        assert!(!to.exists(), "no orphan copy may remain at the destination");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn copy_then_remove_rolls_back_whatever_is_at_the_destination_when_copy_fails() {
+        let root = test_root("copy-rollback-on-copy-failure");
+        fs::create_dir_all(&root).expect("create root");
+
+        let from = root.join("missing-source.bin"); // never created: copy fails immediately.
+        let to = root.join("dest.bin");
+        // Simulate a truncated file left behind by an earlier failed attempt —
+        // exactly what a mid-copy failure (e.g. a full destination disk) can
+        // leave. Before this fix, a copy error never ran the rollback (it was
+        // nested inside the remove_file call, which a copy error short-circuits
+        // past), so this garbage would still be sitting at `to` afterward.
+        write_file(&to, b"partial-garbage");
+
+        let result = copy_then_remove(&from, &to);
+
+        assert!(result.is_err(), "copying a missing source must fail");
+        assert!(!to.exists(), "a stale/partial destination must be rolled back when copy fails");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn a_relocate_undo_clears_deleted_at_on_the_restored_row() {
+        let root = test_root("undo-heals-index");
+        fs::create_dir_all(&root).expect("create root");
+        let index_path = root.join("index.sqlite");
+        let conn = rusqlite::Connection::open(&index_path).expect("open index");
+        for (_, sql) in crate::index::schema::ALL_MIGRATIONS {
+            conn.execute_batch(sql).expect("migrate");
+        }
+
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (1, NULL, ?1, 'root', 0, 0)",
+            rusqlite::params![root.to_string_lossy()],
+        )
+        .expect("seed folder");
+
+        let original = root.join("setup.exe");
+        // The row is left exactly as the catalog executor's `record_move`
+        // leaves it after a forward relocation: `path` still the original
+        // location, `deleted_at` set.
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at, deleted_at)
+             VALUES (1, 1, ?1, 'setup.exe', 8, 'installer', 0, 1)",
+            rusqlite::params![original.to_string_lossy()],
+        )
+        .expect("seed soft-deleted row");
+        drop(conn);
+
+        // Undo physically moving the file back to `original`, through the same
+        // generic `move_files` the frontend's undo toast calls.
+        let elsewhere = root.join("elsewhere.exe");
+        write_file(&elsewhere, b"payload");
+        let response = move_files(MoveFilesRequest {
+            moves: vec![MoveSpec {
+                from: elsewhere.to_string_lossy().to_string(),
+                to: original.to_string_lossy().to_string(),
+            }],
+            index_path: Some(index_path.clone()),
+        });
+        assert_eq!(response.moved, 1);
+
+        let conn = rusqlite::Connection::open(&index_path).expect("reopen index");
+        let deleted_at: Option<i64> = conn
+            .query_row(
+                "SELECT deleted_at FROM files WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("row still present");
+        assert!(deleted_at.is_none(), "moving a file back to its original path must heal deleted_at");
+        drop(conn);
+
+        cleanup(&root);
+    }
+
     fn test_root(name: &str) -> PathBuf {
         let root = std::env::current_dir()
             .expect("failed to get current dir")
@@ -1871,6 +2398,107 @@ mod tests {
     }
 
     #[test]
+    fn treemap_lens_modified_at_is_the_newest_file_seen() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use crate::ontology::entities::upsert_entity;
+        use crate::ontology::vocabulary::EntityKind;
+        use rusqlite::Connection;
+
+        let conn = Connection::open_in_memory().unwrap();
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (1, NULL, '/root', 'root', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, modified_at, indexed_at)
+             VALUES (1, 1, '/root/old.txt', 'old.txt', 10, 1000, 0)",
+            [],
+        )
+        .unwrap();
+        upsert_entity(&conn, EntityKind::File, "/root/old.txt", Some(1), None, None).unwrap();
+
+        let data = treemap_lens_data_for_conn(&conn).unwrap();
+        let root = data.iter().find(|entry| entry.folder_path == "/root").unwrap();
+        assert_eq!(root.modified_at, Some(1000), "a folder whose only file is old must report that old age");
+    }
+
+    #[test]
+    fn treemap_lens_modified_at_reaches_into_nested_subfolders() {
+        // Regression guard for the MIN/direct-children mistake: the newest
+        // touch can be several levels deep, and a folder is stale only if
+        // NOTHING under it -- at any depth -- has been touched recently.
+        use crate::index::schema::ALL_MIGRATIONS;
+        use crate::ontology::entities::upsert_entity;
+        use crate::ontology::vocabulary::EntityKind;
+        use rusqlite::Connection;
+
+        let conn = Connection::open_in_memory().unwrap();
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (1, NULL, '/root', 'root', 0, 0),
+                    (2, 1, '/root/proj', 'proj', 1, 0),
+                    (3, 2, '/root/proj/sub', 'sub', 2, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, modified_at, indexed_at)
+             VALUES (1, 2, '/root/proj/old.txt', 'old.txt', 10, 1000, 0),
+                    (2, 3, '/root/proj/sub/new.txt', 'new.txt', 10, 9000, 0)",
+            [],
+        )
+        .unwrap();
+        upsert_entity(&conn, EntityKind::File, "/root/proj/old.txt", Some(1), None, None).unwrap();
+        upsert_entity(&conn, EntityKind::File, "/root/proj/sub/new.txt", Some(2), None, None).unwrap();
+
+        let data = treemap_lens_data_for_conn(&conn).unwrap();
+        let proj = data.iter().find(|entry| entry.folder_path == "/root/proj").unwrap();
+        assert_eq!(
+            proj.modified_at,
+            Some(9000),
+            "the deeply nested recent file must win over both the direct child and a MIN"
+        );
+    }
+
+    #[test]
+    fn treemap_lens_modified_at_is_none_without_timestamps() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use crate::ontology::entities::upsert_entity;
+        use crate::ontology::vocabulary::EntityKind;
+        use rusqlite::Connection;
+
+        let conn = Connection::open_in_memory().unwrap();
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (1, NULL, '/root', 'root', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, indexed_at)
+             VALUES (1, 1, '/root/mystery.bin', 'mystery.bin', 10, 0)",
+            [],
+        )
+        .unwrap();
+        upsert_entity(&conn, EntityKind::File, "/root/mystery.bin", Some(1), None, None).unwrap();
+
+        let data = treemap_lens_data_for_conn(&conn).unwrap();
+        let root = data.iter().find(|entry| entry.folder_path == "/root").unwrap();
+        assert_eq!(root.modified_at, None, "no file has a timestamp, so the folder must not invent one");
+    }
+
+    #[test]
     fn run_ontology_enrichment_respects_budget_tiers() {
         use crate::index::schema::ALL_MIGRATIONS;
         use crate::ontology::enabled::enable;
@@ -1929,6 +2557,503 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn ontology_status_pending_findings_excludes_non_board_kinds() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use crate::ontology::discoveries::{insert_discovery, NewDiscovery};
+        use rusqlite::Connection;
+
+        let root = test_root("ontology-status-findings");
+        fs::create_dir_all(&root).expect("create root");
+        let index_path = root.join("index.sqlite");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            // One pending discovery of every live kind: the two the Board
+            // renders, plus a `near-duplicate-cluster` (emitted by
+            // PerceptualHashPopulator) and a relocation — neither of which
+            // the Board draws.
+            for kind in [
+                "derivedFrom-pattern",
+                "backupOf-pair",
+                "near-duplicate-cluster",
+                RELOCATION_KIND,
+            ] {
+                insert_discovery(
+                    &conn,
+                    &NewDiscovery {
+                        kind,
+                        payload_json: "{}",
+                        confidence: 0.8,
+                        potential_bytes_unlocked: 0,
+                    },
+                )
+                .expect("insert discovery");
+            }
+        }
+
+        let status = ontology_status(OntologyStatusRequest {
+            index_path: index_path.clone(),
+        })
+        .expect("ontology_status command failed");
+
+        assert_eq!(
+            status.pending_findings, 2,
+            "pending_findings must count only derivedFrom-pattern + backupOf-pair, \
+             not near-duplicate-cluster or relocation"
+        );
+        assert_eq!(status.pending_relocations, 1);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn relocation_plan_then_execute_round_trips() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("relocation-api");
+        let inbox = root.join("inbox");
+        let dest = root.join("dest");
+        fs::create_dir_all(&inbox).expect("create inbox");
+        fs::create_dir_all(&dest).expect("create dest");
+
+        let from = inbox.join("a.exe");
+        write_file(&from, b"payload!!");
+        let to = dest.join("a.exe");
+        let index_path = root.join("index.sqlite");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, ?1, 'inbox', 0, 0)",
+                rusqlite::params![inbox.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (1, 1, ?1, 'a.exe', 9, 'installer', 0)",
+                rusqlite::params![from.to_string_lossy()],
+            )
+            .unwrap();
+        }
+
+        let plan = relocation_plan(RelocationPlanRequest {
+            index_path: index_path.clone(),
+            moves: vec![RelocationMoveInput {
+                file_id: 1,
+                from: from.to_string_lossy().to_string(),
+                to: to.to_string_lossy().to_string(),
+                discovery_id: None,
+            }],
+        })
+        .expect("relocation_plan");
+
+        assert_eq!(plan.total_files, 1);
+        assert_eq!(plan.items.len(), 1);
+        assert_eq!(plan.items[0].to_path, to.to_string_lossy());
+
+        let result = execute_relocation_plan(ExecuteRelocationPlanRequest {
+            index_path: index_path.clone(),
+            plan_id: plan.plan_id,
+        })
+        .expect("execute_relocation_plan");
+
+        assert_eq!(result.moved, 1);
+        assert_eq!(result.pairs.len(), 1);
+        assert!(to.exists(), "the file landed at the destination");
+        assert!(!from.exists(), "the source is gone");
+
+        // The plan executor is one of the two ways a file moves, and it must
+        // leave the same durable trail as a manual move: undo has to survive
+        // closing the app, not just the toast.
+        let logged = recently_moved_log(RecentlyMovedRequest {
+            index_path: index_path.clone(),
+            limit: 10,
+            offset: 0,
+        })
+        .expect("recently_moved_log");
+        assert_eq!(logged.len(), 1);
+        assert_eq!(logged[0].from_path, from.to_string_lossy());
+        assert_eq!(logged[0].to_path, to.to_string_lossy());
+        assert_eq!(logged[0].file_id, Some(1));
+        assert_eq!(logged[0].size, 9);
+        assert_eq!(logged[0].restore_status, "moved");
+
+        cleanup(&root);
+    }
+
+    /// The whole seam end to end through the public API: a move writes a row
+    /// that outlives the process, and that row alone is enough to put the file
+    /// back — no React state involved.
+    #[test]
+    fn a_move_is_logged_and_restorable_from_the_log_alone() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("move-log-round-trip");
+        let inbox = root.join("inbox");
+        let dest = root.join("dest");
+        fs::create_dir_all(&inbox).expect("create inbox");
+        fs::create_dir_all(&dest).expect("create dest");
+        let from = inbox.join("a.exe");
+        write_file(&from, b"payload!!");
+        let to = dest.join("a.exe");
+        let index_path = root.join("index.sqlite");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, ?1, 'inbox', 0, 0)",
+                rusqlite::params![inbox.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (1, 1, ?1, 'a.exe', 9, 'installer', 0)",
+                rusqlite::params![from.to_string_lossy()],
+            )
+            .unwrap();
+        }
+
+        let response = move_files(MoveFilesRequest {
+            moves: vec![MoveSpec {
+                from: from.to_string_lossy().to_string(),
+                to: to.to_string_lossy().to_string(),
+            }],
+            index_path: Some(index_path.clone()),
+        });
+        assert_eq!(response.moved, 1);
+
+        let logged = recently_moved_log(RecentlyMovedRequest {
+            index_path: index_path.clone(),
+            limit: 10,
+            offset: 0,
+        })
+        .expect("recently_moved_log");
+        assert_eq!(logged.len(), 1, "a manual move is logged too");
+
+        restore_from_relocation_log(RestoreMoveRequest {
+            index_path: index_path.clone(),
+            entry_id: logged[0].id,
+        })
+        .expect("restore");
+
+        assert!(from.exists(), "the file is back where it started");
+        assert!(!to.exists());
+
+        let after = recently_moved_log(RecentlyMovedRequest {
+            index_path: index_path.clone(),
+            limit: 10,
+            offset: 0,
+        })
+        .expect("recently_moved_log");
+        assert_eq!(
+            after.len(),
+            1,
+            "putting a file back must not append a second row and double the list"
+        );
+        assert_eq!(after[0].restore_status, "restored");
+
+        let conn = Connection::open(&index_path).unwrap();
+        let deleted_at: Option<i64> = conn
+            .query_row("SELECT deleted_at FROM files WHERE id = 1", [], |r| r.get(0))
+            .expect("row still present");
+        assert!(deleted_at.is_none(), "the index row is live again");
+        drop(conn);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn relocation_plan_drops_a_vanished_source() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("relocation-vanished");
+        fs::create_dir_all(&root).expect("create root");
+        let index_path = root.join("index.sqlite");
+        let ghost = root.join("ghost.exe");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, ?1, 'root', 0, 0)",
+                rusqlite::params![root.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (1, 1, ?1, 'ghost.exe', 9, 'installer', 0)",
+                rusqlite::params![ghost.to_string_lossy()],
+            )
+            .unwrap();
+        }
+
+        let plan = relocation_plan(RelocationPlanRequest {
+            index_path,
+            moves: vec![RelocationMoveInput {
+                file_id: 1,
+                from: ghost.to_string_lossy().to_string(),
+                to: root.join("moved.exe").to_string_lossy().to_string(),
+                discovery_id: None,
+            }],
+        })
+        .expect("relocation_plan");
+
+        assert_eq!(plan.total_files, 0, "a file that is not on disk is dropped at plan time");
+        assert_eq!(plan.dropped.len(), 1);
+        assert!(plan.dropped[0].reason.contains("no longer"));
+
+        cleanup(&root);
+    }
+
+    /// The highest-risk behaviour in `relocation_plan`: two staged moves in ONE
+    /// request that target the same destination path. Exactly one must survive —
+    /// not both dropped, not both persisted.
+    #[test]
+    fn relocation_plan_keeps_exactly_one_of_two_moves_aimed_at_the_same_destination() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("relocation-dup-destination");
+        let inbox = root.join("inbox");
+        let dest = root.join("dest");
+        fs::create_dir_all(&inbox).expect("create inbox");
+        fs::create_dir_all(&dest).expect("create dest");
+
+        let from_a = inbox.join("a.exe");
+        let from_b = inbox.join("b.exe");
+        write_file(&from_a, b"payload-a");
+        write_file(&from_b, b"payload-b");
+        let to = dest.join("shared.exe");
+        let index_path = root.join("index.sqlite");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, ?1, 'inbox', 0, 0)",
+                rusqlite::params![inbox.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (1, 1, ?1, 'a.exe', 9, 'installer', 0)",
+                rusqlite::params![from_a.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (2, 1, ?1, 'b.exe', 9, 'installer', 0)",
+                rusqlite::params![from_b.to_string_lossy()],
+            )
+            .unwrap();
+        }
+
+        let plan = relocation_plan(RelocationPlanRequest {
+            index_path,
+            moves: vec![
+                RelocationMoveInput {
+                    file_id: 1,
+                    from: from_a.to_string_lossy().to_string(),
+                    to: to.to_string_lossy().to_string(),
+                    discovery_id: None,
+                },
+                RelocationMoveInput {
+                    file_id: 2,
+                    from: from_b.to_string_lossy().to_string(),
+                    to: to.to_string_lossy().to_string(),
+                    discovery_id: None,
+                },
+            ],
+        })
+        .expect("relocation_plan");
+
+        assert_eq!(plan.total_files, 1, "exactly one of the two moves is persisted");
+        assert_eq!(plan.items.len(), 1);
+        assert_eq!(plan.items[0].from_path, from_a.to_string_lossy());
+        assert_eq!(plan.dropped.len(), 1, "exactly one of the two moves is dropped");
+        assert_eq!(plan.dropped[0].path, from_b.to_string_lossy());
+        assert!(plan.dropped[0].reason.contains("already claims"));
+
+        cleanup(&root);
+    }
+
+    /// A move dropped for an unrelated reason (a vanished source) must not
+    /// consume the destination claim — a later, legitimate move to that same
+    /// destination path must still go through. This is the ordering property
+    /// that makes the duplicate-destination guard correct: the vanished-source
+    /// check must run, and `continue`, before `claimed.insert()` is ever reached.
+    #[test]
+    fn relocation_plan_drop_for_a_vanished_source_does_not_block_a_later_move_to_the_same_destination(
+    ) {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("relocation-dup-destination-unblocked");
+        let inbox = root.join("inbox");
+        let dest = root.join("dest");
+        fs::create_dir_all(&inbox).expect("create inbox");
+        fs::create_dir_all(&dest).expect("create dest");
+
+        let ghost_from = inbox.join("ghost.exe"); // indexed, but never written to disk
+        let live_from = inbox.join("live.exe");
+        write_file(&live_from, b"payload");
+        let to = dest.join("shared.exe");
+        let index_path = root.join("index.sqlite");
+
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, ?1, 'inbox', 0, 0)",
+                rusqlite::params![inbox.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (1, 1, ?1, 'ghost.exe', 9, 'installer', 0)",
+                rusqlite::params![ghost_from.to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
+                 VALUES (2, 1, ?1, 'live.exe', 9, 'installer', 0)",
+                rusqlite::params![live_from.to_string_lossy()],
+            )
+            .unwrap();
+        }
+
+        let plan = relocation_plan(RelocationPlanRequest {
+            index_path,
+            moves: vec![
+                RelocationMoveInput {
+                    file_id: 1,
+                    from: ghost_from.to_string_lossy().to_string(),
+                    to: to.to_string_lossy().to_string(),
+                    discovery_id: None,
+                },
+                RelocationMoveInput {
+                    file_id: 2,
+                    from: live_from.to_string_lossy().to_string(),
+                    to: to.to_string_lossy().to_string(),
+                    discovery_id: None,
+                },
+            ],
+        })
+        .expect("relocation_plan");
+
+        assert_eq!(
+            plan.total_files, 1,
+            "the legitimate move still lands despite an earlier drop targeting the same destination"
+        );
+        assert_eq!(plan.items[0].from_path, live_from.to_string_lossy());
+        assert_eq!(plan.items[0].to_path, to.to_string_lossy());
+        assert_eq!(plan.dropped.len(), 1);
+        assert_eq!(plan.dropped[0].path, ghost_from.to_string_lossy());
+        assert!(plan.dropped[0].reason.contains("no longer on disk"));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn catalog_rules_crud_round_trips() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("catalog-rules-api");
+        fs::create_dir_all(&root).expect("create root");
+        let index_path = root.join("index.sqlite");
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+        }
+
+        let id = save_catalog_rule(SaveCatalogRuleRequest {
+            index_path: index_path.clone(),
+            name: "Invoices".to_string(),
+            kind: Some("invoice".to_string()),
+            name_contains: None,
+            zone: None,
+            destination: "D:\\Finance".to_string(),
+            source: "saved-after-move".to_string(),
+        })
+        .expect("save_catalog_rule");
+
+        let listed = catalog_rules(CatalogRulesRequest { index_path: index_path.clone() })
+            .expect("catalog_rules");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].destination, "D:\\Finance");
+
+        delete_catalog_rule(DeleteCatalogRuleRequest { index_path: index_path.clone(), id })
+            .expect("delete_catalog_rule");
+        assert!(catalog_rules(CatalogRulesRequest { index_path }).unwrap().is_empty());
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn save_catalog_rule_rejects_an_unknown_source_and_inserts_nothing() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use rusqlite::Connection;
+
+        let root = test_root("catalog-rules-bad-source");
+        fs::create_dir_all(&root).expect("create root");
+        let index_path = root.join("index.sqlite");
+        {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+        }
+
+        let err = save_catalog_rule(SaveCatalogRuleRequest {
+            index_path: index_path.clone(),
+            name: "Invoices".to_string(),
+            kind: Some("invoice".to_string()),
+            name_contains: None,
+            zone: None,
+            destination: "D:\\Finance".to_string(),
+            source: "made-up-source".to_string(),
+        })
+        .expect_err("an unrecognized source must be rejected before it reaches sqlite");
+
+        assert!(
+            err.contains("made-up-source"),
+            "the error must name the bad value, got: {err}"
+        );
+        assert!(
+            catalog_rules(CatalogRulesRequest { index_path }).unwrap().is_empty(),
+            "the rejected rule must not be inserted"
+        );
+
+        cleanup(&root);
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1958,4 +3083,15 @@ fn parse_budget_tier(value: &str) -> Result<BudgetTier, String> {
         "all-opt-in" => Ok(BudgetTier::AllOptIn),
         other => Err(format!("unknown enrichment budget: {other}")),
     }
+}
+
+// ---- Drives (first-run drive picker) ----
+
+/// Fixed drives only, each with capacity for a used-space bar. See
+/// `native::drives` for the Win32 enumeration and its per-drive fault
+/// tolerance — an unreadable drive (BitLocker-locked, unformatted, an empty
+/// card reader) stays in the list with capacity left `None` rather than
+/// failing the whole call.
+pub fn list_fixed_drives() -> Result<Vec<crate::native::drives::DriveInfoDto>, String> {
+    crate::native::drives::enumerate_fixed_drives()
 }

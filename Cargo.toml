@@ -16,7 +16,8 @@ trash = "3"
 
 [target.'cfg(windows)'.dependencies]
 # Restart Manager: name the processes holding a locked file.
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_RestartManager"] }
+# Storage.FileSystem: enumerate fixed drives and their capacity.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_RestartManager", "Win32_Storage_FileSystem"] }
 
 [lib]
 name = "birds_eye"

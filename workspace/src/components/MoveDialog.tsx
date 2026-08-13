@@ -16,13 +16,17 @@ import { OverlayShell } from "./ui/OverlayShell";
 import { Button } from "./ui/Button";
 import { SectionLabel } from "./ui/Card";
 
-const SHOWN_LIMIT = 5;
-
 export type MoveDialogProps = {
   paths: string[];
   onClose: () => void;
-  /** Fired once every file landed in the destination (just before the dialog closes). */
-  onMoved: () => void;
+  /**
+   * Fired whenever files land in the destination, with the subset that moved
+   * this round and whether the whole request finished clean. On a partial
+   * failure this fires with just the moved subset and `allMoved: false`
+   * while the dialog stays open showing the rest; `allMoved: true` always
+   * fires right before the dialog closes.
+   */
+  onMoved: (destination: string, movedPaths: string[], allMoved: boolean) => void;
 };
 
 /** Join destination + basename using the separator style the destination uses (default \). */
@@ -44,6 +48,7 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
 
   const [native, setNative] = useState(false);
   const [dest, setDest] = useState("");
+  const [subfolder, setSubfolder] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Paths still to move — shrinks to the failed set after a partial failure. */
@@ -79,9 +84,11 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
 
   const failureByPath = useMemo(() => new Map(failures.map((f) => [f.path, f.reason])), [failures]);
 
-  const shown = remaining.slice(0, SHOWN_LIMIT);
-  const extra = remaining.length - shown.length;
   const trimmedDest = dest.trim();
+  // The destination field is readOnly in native mode (picked via the OS dialog),
+  // so an optional subfolder name is the only way to type a new folder there.
+  // `move_files` already creates the destination's parent, so this is frontend-only.
+  const target = subfolder.trim() ? joinDest(trimmedDest, subfolder.trim()) : trimmedDest;
   const noun = remaining.length === 1 ? "file" : "files";
 
   const browse = async () => {
@@ -99,22 +106,23 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
     setBusy(true);
     setError(null);
     try {
-      const moves = remaining.map((from) => ({ from, to: joinDest(trimmedDest, baseName(from)) }));
+      const moves = remaining.map((from) => ({ from, to: joinDest(target, baseName(from)) }));
       const result = await moveFiles(moves, indexPath);
-      if (result.failed.length < remaining.length) {
+      const failedPaths = new Set(result.failed.map((f) => f.path));
+      const movedPaths = remaining.filter((p) => !failedPaths.has(p));
+      if (movedPaths.length > 0) {
         // Something moved on disk — repaint every lens, and (when nothing is
         // scanning) queue an incremental metadata rescan so rollup sizes self-heal.
         void refreshData();
         if (scanView.status === "idle" && activeEntry?.root_path) {
           enqueue(activeEntry.root_path, "metadata");
         }
+        onMoved(target, movedPaths, result.failed.length === 0);
       }
       if (result.failed.length === 0) {
-        onMoved();
         onClose();
         return;
       }
-      const failedPaths = new Set(result.failed.map((f) => f.path));
       setRemaining((prev) => prev.filter((p) => failedPaths.has(p)));
       setFailures(result.failed);
     } catch (e) {
@@ -166,8 +174,13 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
       <div className="flex flex-col gap-4 px-4.5 py-4">
         <section>
           <SectionLabel className="mb-2">Files to move</SectionLabel>
-          <div className="overflow-hidden rounded-[9px] border border-line">
-            {shown.map((p) => {
+          {/* A large "Select all N loaded" selection (up to SEARCH_LIMIT in
+              FilesView) must tell the same story as the relocate gate: every
+              name reachable, not just a handful plus a "+N more" count. A
+              max-height scroll container over the full list is enough — no
+              virtualization, no dialog restructuring. */}
+          <div className="max-h-[280px] overflow-y-auto rounded-[9px] border border-line">
+            {remaining.map((p) => {
               const reason = failureByPath.get(p);
               const size = sizeByPath.get(p);
               return (
@@ -189,9 +202,6 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
                 </div>
               );
             })}
-            {extra > 0 ? (
-              <div className="px-3 py-1.5 text-105 text-faint">+{extra} more</div>
-            ) : null}
           </div>
         </section>
 
@@ -216,6 +226,19 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
               </Button>
             ) : null}
           </div>
+          <label className="mt-2 flex flex-col gap-1">
+            <span className="text-105 text-faint">New subfolder (optional)</span>
+            <input
+              value={subfolder}
+              onChange={(e) => setSubfolder(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void confirm();
+              }}
+              placeholder="e.g. Invoices"
+              spellCheck={false}
+              className="rounded-[7px] border border-line-input bg-field px-2.5 py-1.5 text-115 text-ink outline-none"
+            />
+          </label>
           <div className="mt-1.5 text-105 text-faint">
             Moves the file on disk — the index updates and a rescan keeps folder sizes accurate.
           </div>

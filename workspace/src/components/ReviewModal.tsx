@@ -10,6 +10,7 @@ import {
   type NativeCleanupCandidate,
   type NativeTrashFailure,
 } from "@bridge/nativeClient";
+import { ALL_CLEANUP_REASONS, untouchedSince } from "../lib/recommendations";
 import { useIndexData } from "../state/indexData";
 import { useWorkspace } from "../state/workspaceStore";
 import { OverlayShell } from "./ui/OverlayShell";
@@ -17,7 +18,6 @@ import { Button } from "./ui/Button";
 import { Card, SectionLabel } from "./ui/Card";
 import { Tag, VerdictTag } from "./ui/Chip";
 
-const ALL_REASONS = ["safe-derivative", "redundant-backup", "scratch", "finished-project-cruft"];
 const RETENTION_DAYS = 30;
 const CANDIDATE_CAP = 200;
 
@@ -51,7 +51,7 @@ export function ReviewModal() {
   const reqId = useRef(0);
 
   useEffect(() => {
-    if (!review || !indexPath) return;
+    if (review !== "clean" || !indexPath) return;
     const id = ++reqId.current;
     setLoading(true);
     setError(null);
@@ -64,7 +64,7 @@ export function ReviewModal() {
         const targets = nonOverlapping(staged.map((s) => s.path));
         const responses = await Promise.all(
           targets.map((pathPrefix) =>
-            buildCleanupPlan(indexPath, { reasons: ALL_REASONS, maxSize: null, pathPrefix })
+            buildCleanupPlan(indexPath, { reasons: ALL_CLEANUP_REASONS, maxSize: null, pathPrefix })
           )
         );
         if (id !== reqId.current) return;
@@ -90,7 +90,7 @@ export function ReviewModal() {
     })();
   }, [review, indexPath, staged]);
 
-  if (!review) return null;
+  if (review !== "clean") return null;
 
   const count = plan?.candidates.length ?? 0;
   const totalBytes = plan?.totalBytes ?? 0;
@@ -153,7 +153,7 @@ export function ReviewModal() {
         // retry doesn't re-recycle what already went through.
         const failedSet = new Set(trashFailed.map((f) => f.path));
         setOverrides(new Set(overriddenItems.filter((s) => failedSet.has(s.path)).map((s) => s.path)));
-        if (entryIds.length > 0) setUndo({ entryIds, freed });
+        if (entryIds.length > 0) setUndo({ kind: "clean", entryIds, freed });
         setError(
           `${formatCount(trashFailed.length)} of ${formatCount(overrideCount)} overrides could not be recycled — ` +
             trashFailed
@@ -170,7 +170,7 @@ export function ReviewModal() {
       closeReview();
       // Undo covers only the audited cleanup-log entries — recycled overrides
       // are restored from the Windows Recycle Bin, not from here.
-      if (entryIds.length > 0 || freed > 0) setUndo({ entryIds, freed });
+      if (entryIds.length > 0 || freed > 0) setUndo({ kind: "clean", entryIds, freed });
       await refreshData();
     } catch (e) {
       setError(String(e));
@@ -241,8 +241,8 @@ export function ReviewModal() {
       <div className="flex items-center gap-2 border-b border-line bg-primary-wash px-4.5 py-2.5 text-115 text-primary-ink">
         <RefreshCw size={13} className="flex-none" aria-hidden />
         {loading
-          ? "Re-verifying staged items — protected items are held back automatically."
-          : "Re-verified just now — protected items are held back automatically."}
+          ? "Bird's Eye is checking every staged item again — anything it won't touch is held back."
+          : "Bird's Eye checked every staged item just now — anything it won't touch is held back."}
       </div>
 
       <div className="px-4.5 py-3.5">
@@ -265,7 +265,7 @@ export function ReviewModal() {
                 </Card>
               ))}
             </div>
-            <div className="mt-2.5 text-105 text-dim">Re-checking staged items against the safety rules…</div>
+            <div className="mt-2.5 text-105 text-dim">Checking each one against the safety rules…</div>
           </>
         )}
 
@@ -282,7 +282,7 @@ export function ReviewModal() {
             <SectionLabel className="mb-2.5">Will be removed</SectionLabel>
             {count === 0 ? (
               <div className="mb-4 text-12 text-faint">
-                Nothing here passes the automatic safety checks.
+                Nothing here passed the safety checks.
               </div>
             ) : (
               <div className="mb-4.5 flex flex-col gap-2">
@@ -294,7 +294,8 @@ export function ReviewModal() {
                         {lastSegment(c.path)}
                       </div>
                       <div className="mt-px text-105 text-dim">
-                        {REASON_LABELS[c.reason] ?? c.reason}
+                        {REASON_LABELS[c.reason] ?? c.reason} ·{" "}
+                        {untouchedSince(c.modified_at) ?? "date unknown"}
                       </div>
                     </div>
                     <VerdictTag verdict={c.reason === "finished-project-cruft" ? "review" : "safe"} />
@@ -314,7 +315,7 @@ export function ReviewModal() {
             {heldBack.length > 0 ? (
               <>
                 <SectionLabel className="mb-2.5">
-                  <span className="text-protected-tx">Held back by safety</span>
+                  <span className="text-protected-tx">Held back — Bird's Eye won't touch these</span>
                 </SectionLabel>
                 <div className="mb-2.5 flex flex-col gap-2">
                   {heldBack.map((s) => (
@@ -335,10 +336,13 @@ export function ReviewModal() {
                           {formatBytes(Math.max(0, s.bytes))}
                         </span>
                       </div>
+                      {/* "Don't touch" is never shown without the reason. */}
                       <div className="mt-1 pl-[23px] text-105 opacity-80">
                         {s.verdict === "protected"
-                          ? `protected — ${s.reason ? (REASON_LABELS[s.reason] ?? s.reason) : "safety verdict"}`
-                          : "nothing under this path passes the safety predicate"}
+                          ? s.reason
+                            ? `Bird's Eye won't remove this — ${REASON_LABELS[s.reason] ?? s.reason}`
+                            : "Bird's Eye won't remove this — it's in use, a system folder, or you pinned it"
+                          : "Nothing inside this folder is safe to delete"}
                       </div>
                     </div>
                   ))}
@@ -353,7 +357,7 @@ export function ReviewModal() {
                 ) : (
                   <div className="mb-4.5 flex flex-col gap-2">
                     <div className="text-105 leading-relaxed text-dim">
-                      Overrides skip the safety predicate. Files go to the Windows Recycle Bin;
+                      This skips Bird's Eye's safety checks. Files go to the Windows Recycle Bin;
                       restore them from there, not from Recently cleaned.
                     </div>
                     {heldBack.map((s) => {

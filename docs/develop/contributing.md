@@ -14,6 +14,11 @@ of view intact.
 3. **The design system.** Use the tokens in `workspace/src/index.css` and the shared
    primitives in `workspace/src/components/ui/`. No hardcoded colors; lucide icons only.
    The [Brand](../brand.md) page has the details.
+4. **The words.** Any string a user reads — a label, a tooltip, a heading, an empty state, a
+   toast, an `aria-label` — goes through the voice rules and the say-this-not-that table in
+   [Brand](../brand.md). Rust modules, TypeScript types and DB columns keep their engineering
+   names; `ontology/`, `Verdict` and `reclaimable_bytes` are correct in code and never reach a
+   screen. The test is: *would you say this sentence out loud to a friend?*
 
 ## Before you open a PR
 

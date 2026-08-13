@@ -34,6 +34,10 @@ pub struct CleanupCandidate {
     pub entity_id: i64,
     pub path: String,
     pub size: i64,
+    /// Unix seconds, straight from `files.modified_at`. `None` when the
+    /// scanner never recorded a timestamp for this file -- never defaulted
+    /// to 0, which would misread as "modified at the epoch".
+    pub modified_at: Option<i64>,
     pub reason: String,
 }
 

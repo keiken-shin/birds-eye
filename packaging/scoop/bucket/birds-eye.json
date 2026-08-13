@@ -1,0 +1,29 @@
+{
+    "$schema": "https://raw.githubusercontent.com/ScoopInstaller/Scoop/master/schema.json",
+    "##": "PLACEHOLDER hash below is not real. Run packaging/update-manifests.ps1 -Version <version> to fill it in.",
+    "version": "0.2.1",
+    "description": "Free, offline disk cleanup for Windows that tells you what's safe to delete and why — not just what's big. Build caches, old installers, duplicates and stale projects, each with a size, an age and a reason. Recycle Bin first, restorable 30 days. No account, no telemetry. Rust + Tauri.",
+    "homepage": "https://birds-eye.keiken.dev/",
+    "license": {
+        "identifier": "MIT",
+        "url": "https://github.com/keiken-shin/birds-eye/blob/main/LICENSE"
+    },
+    "url": "https://github.com/keiken-shin/birds-eye/releases/download/v0.2.1/birds-eye-windows-portable-x64.exe",
+    "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "bin": [
+        "birds-eye-windows-portable-x64.exe",
+        "birds-eye"
+    ],
+    "shortcuts": [
+        [
+            "birds-eye-windows-portable-x64.exe",
+            "Bird's Eye"
+        ]
+    ],
+    "checkver": {
+        "github": "https://github.com/keiken-shin/birds-eye"
+    },
+    "autoupdate": {
+        "url": "https://github.com/keiken-shin/birds-eye/releases/download/v$version/birds-eye-windows-portable-x64.exe"
+    }
+}

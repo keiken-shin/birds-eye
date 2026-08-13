@@ -4,6 +4,7 @@ import type { ScanStrategy } from "@bridge/domain";
 import { useIndexData } from "../state/indexData";
 import { useScanController } from "../state/scanController";
 import { useWorkspace } from "../state/workspaceStore";
+import { useEnableIntelligence } from "../hooks/useEnableIntelligence";
 import { getDefaultStrategy, setDefaultStrategy } from "../lib/prefs";
 import { OverlayShell } from "./ui/OverlayShell";
 import { SectionLabel } from "./ui/Card";
@@ -22,9 +23,15 @@ const METHODS: Array<{ id: ScanStrategy; title: string; icon: LucideIcon; note: 
  * knobs — they'd only half-apply over the half-tokenized styles, which would be theater.
  */
 export function SettingsOverlay() {
-  const { overlay, setOverlay, setView, ontologyEnabled } = useWorkspace();
+  const { overlay, setOverlay, setView, ontologyEnabled, indexPath } = useWorkspace();
   const { activeEntry } = useIndexData();
   const { enqueue } = useScanController();
+  const {
+    enable,
+    disable,
+    busy: toggleBusy,
+    error: toggleError,
+  } = useEnableIntelligence();
   const [strategy, setStrategy] = useState<ScanStrategy>(getDefaultStrategy);
   const [rerunBusy, setRerunBusy] = useState(false);
 
@@ -92,29 +99,50 @@ export function SettingsOverlay() {
           <div className="mt-1.5 text-10 text-dim">New scans start on this — you can still switch per scan.</div>
         </section>
 
+        {/* The analysis runs by default. This is the way out for people who want
+            a plain size scanner — and the way back in. */}
         <section>
-          <SectionLabel className="mb-2">Intelligence</SectionLabel>
-          <div className="flex items-center gap-3 rounded-lg border border-line bg-inset px-3 py-2.5">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="text-115 text-muted">On-device classification</span>
-                <Tag tone={ontologyEnabled ? "green" : "neutral"}>{ontologyEnabled ? "ENABLED" : "OFF"}</Tag>
+          <SectionLabel className="mb-2">The analysis</SectionLabel>
+          <div className="rounded-lg border border-line bg-inset px-3 py-2.5">
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={!ontologyEnabled}
+                disabled={!indexPath || toggleBusy}
+                onChange={(e) => void (e.target.checked ? disable() : enable())}
+                className="mt-0.5 h-3.5 w-3.5 flex-none accent-[var(--color-primary)]"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block text-115 text-muted">
+                  Just show me sizes — skip the analysis
+                </span>
+                <span className="mt-0.5 block text-105 leading-relaxed text-dim">
+                  {ontologyEnabled
+                    ? "Bird's Eye is working out what's safe to delete and why. Turn this on and it will only measure sizes."
+                    : "Bird's Eye is only measuring sizes. Turn this off and it will tell you what's safe to delete, and why."}
+                </span>
+              </span>
+            </label>
+            {toggleError ? (
+              <div className="mt-2 rounded-lg border border-danger/40 bg-danger/10 px-2.5 py-1.5 text-105 text-danger">
+                {toggleError}
               </div>
-              {ontologyEnabled && root ? (
-                <div className="mono mt-0.5 truncate text-10 text-dim">{root}</div>
-              ) : null}
-            </div>
+            ) : null}
             {ontologyEnabled && root ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={RefreshCw}
-                disabled={rerunBusy}
-                onClick={rerunEnrichment}
-                className="flex-none"
-              >
-                {rerunBusy ? "Starting…" : "Re-run enrichment"}
-              </Button>
+              <div className="mt-2 flex items-center gap-2 border-t border-line-soft pt-2">
+                <span className="mono min-w-0 flex-1 truncate text-10 text-dim">{root}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={RefreshCw}
+                  disabled={rerunBusy}
+                  onClick={rerunEnrichment}
+                  className="flex-none"
+                >
+                  {rerunBusy ? "Starting…" : "Run it again"}
+                </Button>
+              </div>
             ) : null}
           </div>
         </section>
@@ -123,7 +151,7 @@ export function SettingsOverlay() {
           <SectionLabel className="mb-2">Privacy</SectionLabel>
           <div className="flex items-center gap-2.5 rounded-lg border border-line bg-inset px-3 py-2.5">
             <ShieldCheck size={15} strokeWidth={2} className="flex-none text-primary-ink" aria-hidden />
-            <span className="text-115 text-muted">Everything runs on this machine. Nothing ever leaves it.</span>
+            <span className="text-115 text-muted">It works offline. Nothing is uploaded.</span>
           </div>
         </section>
 
