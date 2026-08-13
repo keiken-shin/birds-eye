@@ -1,7 +1,8 @@
 //! Birds Eye ontology layer (Wave 1 foundation).
 //!
-//! See `docs/superpowers/specs/2026-05-26-birds-eye-ontology-wave-1-design.md`
-//! for the full design rationale.
+//! Entities, attributes and the rules that assert them: what a file *is*, so
+//! cleanup and cataloging can act on meaning rather than on size alone.
+//! `docs/develop/architecture.md` carries the design rationale.
 
 pub mod attrs;
 pub mod catalog;

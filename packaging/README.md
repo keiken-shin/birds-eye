@@ -1,9 +1,8 @@
 # Packaging
 
-Manifests so `winget install`, `scoop install` and `choco install` can find Bird's Eye. See
-`birds-eye-positioning-2026-07-31.html` section 10, Week 3-4 ("Become findable") for why this
-exists: package managers are how this category actually gets installed (WizTree alone has 2.58M
-Chocolatey downloads).
+Manifests so `winget install`, `scoop install` and `choco install` can find Bird's Eye. Package
+managers are how this category actually gets installed — WizTree alone has 2.58M Chocolatey
+downloads — so being absent from them is being invisible to the people most likely to want this.
 
 ```
 packaging/
