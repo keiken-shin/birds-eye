@@ -29,6 +29,14 @@ describe("age on a recommendation row", () => {
     expect(untouchedFor(401)).toBe("untouched 1.1 years");
   });
 
+  it("reads out loud at every boundary", () => {
+    // The landing row is the ad, and "untouched 1.0 years" is a machine talking.
+    expect(untouchedFor(365)).toBe("untouched 1 year");
+    expect(untouchedFor(370)).toBe("untouched 1 year");
+    expect(untouchedFor(730)).toBe("untouched 2 years");
+    expect(untouchedFor(3650)).toBe("untouched 10 years");
+  });
+
   it("says nothing rather than inventing an age when there is no timestamp", () => {
     expect(untouchedSince(null)).toBeNull();
   });

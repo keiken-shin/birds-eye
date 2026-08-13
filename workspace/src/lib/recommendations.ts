@@ -37,7 +37,10 @@ export const ALL_CLEANUP_REASONS = [
 export function untouchedFor(days: number): string {
   if (days >= 365) {
     const years = days / 365;
-    return `untouched ${years >= 10 ? Math.round(years) : years.toFixed(1)} years`;
+    // "1.0 years" is a machine talking, twice over: nobody says the trailing .0, and
+    // nobody pluralises one. Say "untouched 1 year".
+    const n = years >= 10 ? String(Math.round(years)) : years.toFixed(1).replace(/\.0$/, "");
+    return `untouched ${n} ${n === "1" ? "year" : "years"}`;
   }
   const months = Math.max(1, Math.round(days / 30));
   return `untouched ${months} ${months === 1 ? "month" : "months"}`;
