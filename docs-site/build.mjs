@@ -88,7 +88,19 @@ const warn = (m) => warnings.push(m);
 const esc = (s) =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-const stripTags = (s) => String(s).replace(/<[^>]*>/g, "");
+/**
+ * A single pass is not enough: `<scr<script>ipt>` has its inner tag removed and the halves
+ * close back up into a live `<script`. Strip until the string stops changing — each pass
+ * removes at least one bracketed run, so it always terminates.
+ */
+const stripTags = (s) => {
+  let out = String(s);
+  for (let prev = null; out !== prev; ) {
+    prev = out;
+    out = out.replace(/<[^>]*>/g, "");
+  }
+  return out;
+};
 
 /** Rendered HTML → plain text. Entities must be decoded or `esc()` double-escapes them. */
 const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", "#39": "'", "#x27": "'" };
@@ -850,8 +862,15 @@ echo "hi"   # !!! not an admonition, === not a tab
     if (!ok) failed++;
     console.log(`  ${ok ? "ok  " : "FAIL"}  ${name}`);
   }
+
+  // Asserted directly rather than through a fixture: no markdown input can express a
+  // tag whose removal reassembles another one, and one pass of the old strip did.
+  const strippedOk = !/<script/i.test(stripTags("<scr<script>ipt>alert(1)</script>"));
+  if (!strippedOk) failed++;
+  console.log(`  ${strippedOk ? "ok  " : "FAIL"}  stripTags leaves no reassembled tag`);
   if (warnings.length) for (const w of [...new Set(warnings)]) console.log("   ! " + w);
-  console.log(`\n  ${checks.length - failed}/${checks.length} construct checks passed\n`);
+  const total = checks.length + 1; // the construct checks, plus the stripTags assertion
+  console.log(`\n  ${total - failed}/${total} construct checks passed\n`);
   if (failed) {
     console.log(html);
     process.exit(1);
