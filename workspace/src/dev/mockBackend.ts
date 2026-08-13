@@ -629,6 +629,32 @@ type CleanupLogFix = {
   expires_at: number | null;
 };
 
+/** Mirrors `ontology_relocation_log`: the durable half of undo for moves. */
+type MoveLogRow = {
+  id: number;
+  file_id: number | null;
+  from_path: string;
+  to_path: string;
+  size: number;
+  moved_at: number;
+  modified_at: number | null;
+  restore_status: "moved" | "restored";
+};
+
+let MOVE_LOG: MoveLogRow[] = [
+  {
+    id: 1,
+    file_id: 9101,
+    from_path: j("Downloads", "vacation-2019.zip"),
+    to_path: j("Archives", "vacation-2019.zip"),
+    size: Math.round(1.4 * GB),
+    moved_at: NOW - 3 * DAY,
+    modified_at: NOW - 400 * DAY,
+    restore_status: "moved",
+  },
+];
+let nextMoveLogId = 2;
+
 let CLEANUP_LOG: CleanupLogFix[] = [
   {
     id: 1,
@@ -1080,6 +1106,22 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
         to: `${payload.destination}\\${m.name}`,
       }));
       RELOCATION_CARDS = RELOCATION_CARDS.filter((c) => c.id !== card.id);
+      // A reviewed plan is still a move, so it leaves the same durable receipt.
+      for (const pair of pairs as Array<{ from: string; to: string }>) {
+        const f = FILES.find((x) => x.path === pair.from);
+        MOVE_LOG.push({
+          id: nextMoveLogId++,
+          file_id: null, // the fixtures carry paths, not row ids
+
+          from_path: pair.from,
+          to_path: pair.to,
+          size: f?.size ?? 100_000_000,
+          moved_at: Math.floor(Date.now() / 1000),
+          modified_at: f?.modified_at ?? null,
+          restore_status: "moved",
+        });
+        if (f) f.path = pair.to;
+      }
       return done({
         plan_id: planId,
         moved: pairs.length,
@@ -1195,6 +1237,25 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
     }
     case "recently_cleaned":
       return done(CLEANUP_LOG.slice(0, (request.limit as number) ?? 50));
+    case "recently_moved":
+      return done(
+        [...MOVE_LOG]
+          .sort((a, b) => b.moved_at - a.moved_at || b.id - a.id)
+          .slice(0, (request.limit as number) ?? 50)
+      );
+    case "restore_from_relocation_log": {
+      const id = request.entry_id as number;
+      const entry = MOVE_LOG.find((m) => m.id === id);
+      // The real backend refuses rather than guesses, and says so in a finished
+      // sentence. Mirror the shape so the error path is reachable in the browser.
+      if (!entry || entry.restore_status !== "moved") {
+        throw new Error("That move was already put back.");
+      }
+      const f = FILES.find((x) => x.path === entry.to_path);
+      if (f) f.path = entry.from_path;
+      entry.restore_status = "restored";
+      return done(null);
+    }
     case "restore_from_cleanup_log": {
       const id = request.entry_id as number;
       CLEANUP_LOG = CLEANUP_LOG.map((e) => (e.id === id ? { ...e, restore_status: "restored" } : e));
@@ -1219,6 +1280,20 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       let moved = 0;
       for (const m of moves) {
         const f = FILES.find((x) => x.path === m.from);
+        // Every relocation routes through here in the real backend, and that is
+        // where the durable receipt is written. Same here, so Recently cleaned
+        // can offer to put it back.
+        MOVE_LOG.push({
+          id: nextMoveLogId++,
+          file_id: null, // the fixtures carry paths, not row ids
+
+          from_path: m.from,
+          to_path: m.to,
+          size: f?.size ?? 0,
+          moved_at: Math.floor(Date.now() / 1000),
+          modified_at: f?.modified_at ?? null,
+          restore_status: "moved",
+        });
         if (f) f.path = m.to;
         // The real backend flags the source row deleted; the destination only
         // reappears after a rescan — so it leaves its duplicate group for now.

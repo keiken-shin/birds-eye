@@ -621,6 +621,39 @@ export async function executeRelocationPlan(indexPath: string, planId: number) {
   });
 }
 
+/** One row of the durable move log. `restore_status` is "moved" until it is put back. */
+export type NativeRelocationLogEntry = {
+  id: number;
+  file_id: number | null;
+  from_path: string;
+  to_path: string;
+  size: number;
+  moved_at: number;
+  modified_at: number | null;
+  restore_status: string;
+};
+
+/**
+ * Moves that can still be put back, newest first. This is the durable half of undo:
+ * the toast lives in React state and dies with the window, this survives a restart.
+ */
+export async function recentlyMoved(indexPath: string, limit = 50, offset = 0) {
+  return invoke<NativeRelocationLogEntry[]>("recently_moved", {
+    request: { index_path: indexPath, limit, offset },
+  });
+}
+
+/**
+ * Put one logged move back at its original path. The backend refuses rather than
+ * guesses — gone, changed, already restored, or something sitting at the original
+ * path all come back as an error message written for the person reading it.
+ */
+export async function restoreMove(indexPath: string, entryId: number) {
+  return invoke<void>("restore_from_relocation_log", {
+    request: { index_path: indexPath, entry_id: entryId },
+  });
+}
+
 export async function catalogRules(indexPath: string) {
   return invoke<NativeCatalogRule[]>("catalog_rules", {
     request: { index_path: indexPath },
