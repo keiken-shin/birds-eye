@@ -168,7 +168,7 @@ export function Inspector() {
           <EmptyState
             icon={MousePointerClick}
             title="Select anything to inspect it"
-            hint="Click a folder on the Map or a file in Files — its size, what it is, and whether it's safe to delete land here."
+            hint="Click a folder on the Map or a file in Files to see its size, what it is, and whether it's safe to delete."
           />
         </div>
       ) : (
