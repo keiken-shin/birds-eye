@@ -143,6 +143,40 @@ mod tests {
         assert!(zone_for_folder("C:\\Users\\a\\Downloads\\tax-2024", &downloads).is_some());
     }
 
+    /// The blast radius of the folder rule, pinned. For every zone that is not a drive root,
+    /// `zone_for_folder` must answer exactly what `is_in_zone` answers, so moving a call site
+    /// from one to the other can only ever change behaviour on an index where a drive root is a
+    /// scan root. Destination selection in `infer.rs` leans on this: an ordinary
+    /// Downloads/Desktop setup is unaffected, bit for bit.
+    #[test]
+    fn the_two_predicates_only_diverge_on_a_drive_root_zone() {
+        let zones = vec![
+            "C:\\Users\\a\\Downloads".to_string(),
+            "C:\\Users\\a\\Desktop".to_string(),
+        ];
+        for path in [
+            "C:\\Users\\a\\Downloads",
+            "C:\\Users\\a\\Downloads\\tax-2024",
+            "C:\\Users\\a\\Downloads\\tax-2024\\receipts",
+            "C:\\Users\\a\\Desktop",
+            "C:\\Users\\a\\DownloadsOld",
+            "C:\\Users\\a",
+            "C:\\",
+            "D:\\Projects",
+        ] {
+            assert_eq!(
+                zone_for_folder(path, &zones).is_some(),
+                is_in_zone(path, &zones),
+                "{path}: a non-drive-root zone must answer the same either way"
+            );
+        }
+
+        // The drive root is the one place they part company — the whole point of the split.
+        let drive = vec!["D:\\".to_string()];
+        assert!(is_in_zone("D:\\Projects", &drive));
+        assert!(zone_for_folder("D:\\Projects", &drive).is_none());
+    }
+
     #[test]
     fn recognises_drive_roots_only() {
         assert!(is_drive_root("C:\\"));
