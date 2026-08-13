@@ -46,6 +46,29 @@ pub fn log_move(
     to: &str,
     file_id: Option<i64>,
 ) -> Result<(), OntologyError> {
+    // A move that exactly reverses an open entry is a put-back, not a new move:
+    // close that entry rather than opening a second one. `SystemMover` already
+    // avoids double-logging by passing no index path, but the session undo toast
+    // reverses through `move_files` like any other move, and without this the log
+    // would claim both directions happened and offer to undo each of them.
+    let reversed: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM ontology_relocation_log
+             WHERE restore_status = 'moved' AND from_path = ?1 AND to_path = ?2
+             ORDER BY moved_at DESC, id DESC
+             LIMIT 1",
+            params![to, from],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(id) = reversed {
+        conn.execute(
+            "UPDATE ontology_relocation_log SET restore_status = 'restored' WHERE id = ?1",
+            params![id],
+        )?;
+        return Ok(());
+    }
+
     let (size, modified_at) = identity_of(Path::new(to));
     conn.execute(
         "INSERT INTO ontology_relocation_log
@@ -113,10 +136,18 @@ pub fn restore_move_with(
     // Last-modified is only compared when we managed to read one at move time,
     // so an entry with no recorded timestamp still checks its size rather than
     // becoming permanently unrestorable.
-    let changed = found.len() as i64 != entry.size
-        || entry
-            .modified_at
-            .is_some_and(|logged| modified_secs(&found) != Some(logged));
+    //
+    // `size` has no NULL to mean "unknown" (the column is NOT NULL), so a failed
+    // metadata read at move time lands as 0 with no timestamp beside it. Comparing
+    // that literally would refuse every later restore of a non-empty file and say
+    // the file changed, which is a lie. Treat the pair as the unknown it is — a
+    // genuinely empty file with a readable timestamp still gets both checks.
+    let identity_unknown = entry.size == 0 && entry.modified_at.is_none();
+    let changed = !identity_unknown
+        && (found.len() as i64 != entry.size
+            || entry
+                .modified_at
+                .is_some_and(|logged| modified_secs(&found) != Some(logged)));
     if changed {
         return Err(OntologyError::Refused(
             "Bird's Eye couldn't put this file back — it has changed since it was moved."
@@ -243,6 +274,67 @@ mod tests {
         fn move_one(&self, from: &str, to: &str) -> Result<(), String> {
             std::fs::rename(from, to).map_err(|e| e.to_string())
         }
+    }
+
+    /// The session undo toast reverses a relocation through `move_files` like any
+    /// other move, so the log sees the exact inverse of a row it already holds.
+    /// It must close that row, not open a second one — otherwise the list offers
+    /// to undo both directions of a move that is already back where it started.
+    #[test]
+    fn reversing_a_move_closes_the_entry_instead_of_logging_another() {
+        let root = test_root("reverse-closes");
+        let from = root.join("a.exe");
+        let to = root.join("dest").join("a.exe");
+        let conn = migrated_conn();
+        let entry_id = seed_moved_file(&conn, &from, &to);
+
+        // Exactly what the undo toast does: the same pair, swapped.
+        log_move(&conn, &to.to_string_lossy(), &from.to_string_lossy(), Some(1)).unwrap();
+
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_relocation_log", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "the reverse must not add a second row");
+        let status: String = conn
+            .query_row(
+                "SELECT restore_status FROM ontology_relocation_log WHERE id = ?1",
+                params![entry_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "restored", "the original entry is the one that closed");
+
+        // An unrelated move still logs normally.
+        log_move(&conn, "C:\\x\\other.bin", "D:\\y\\other.bin", None).unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_relocation_log", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 2);
+    }
+
+    /// A failed metadata read at move time records size 0 with no timestamp. That
+    /// is "unknown", not "empty", and comparing it literally would refuse every
+    /// later restore while claiming the file had changed.
+    #[test]
+    fn an_entry_with_no_recorded_identity_can_still_be_put_back() {
+        let root = test_root("unknown-identity");
+        let from = root.join("a.exe");
+        let to = root.join("dest").join("a.exe");
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::write(&to, b"bytes that were never measured").unwrap();
+
+        let conn = migrated_conn();
+        conn.execute(
+            "INSERT INTO ontology_relocation_log
+                (file_id, from_path, to_path, size, moved_at, modified_at, restore_status)
+             VALUES (NULL, ?1, ?2, 0, 0, NULL, 'moved')",
+            params![from.to_string_lossy(), to.to_string_lossy()],
+        )
+        .unwrap();
+        let entry_id = conn.last_insert_rowid();
+
+        restore_move_with(&conn, entry_id, &FsMover).expect("unknown identity must not block undo");
+        assert!(from.exists(), "the file is back where it came from");
     }
 
     #[test]
