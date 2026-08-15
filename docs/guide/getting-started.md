@@ -1,3 +1,8 @@
+---
+title: Getting started
+description: Install Bird's Eye, scan a Windows drive or folder, read the first recommendation, and stage it for review.
+---
+
 # Getting started
 
 Bird's Eye is a free disk cleanup tool for Windows. You point it at a drive or a folder, it
@@ -73,15 +78,20 @@ If you'd rather just see sizes, you can turn the analysis off in **Settings**.
 
 Nothing leaves your disk without passing a **Review gate**, and nothing is destroyed outright:
 
-- Collect what you want to remove into the **Cleanup Tray** from any view.
-- Review the batch. Bird's Eye checks every item again before it moves anything, and shows you
-  exactly what will happen.
+- In **Clean up**, select a recommendation and choose **Stage selected**. You can also choose
+  **Stage** in the Inspector, Files, Duplicates, or Map.
+- Open **Staged** with the top switcher or the **3** key. The item stays there even if you close
+  Bird's Eye; group it with related decisions or leave it loose.
+- Choose **Review & clean**. Bird's Eye checks the chosen items again and shows you exactly what
+  will happen.
 - Confirm, and it goes to the **Recycle Bin** — restorable for 30 days, or undone instantly.
+
+<figure markdown="span">
+  ![The Staged workspace holding files and folders until review](../assets/screenshots/staged.png){ .be-shot }
+  <figcaption>Staged is a durable decision desk. Setting something aside does not change the file.</figcaption>
+</figure>
 
 Prefer to keep a file but put it somewhere sensible? Bird's Eye can **move** it instead of
 deleting it, then bring its records up to date with a background rescan. The **Organise** view
 finds these for you — files sitting in Downloads, on the Desktop, or loose at the top of a
 drive that look like they belong wherever you already keep similar ones.
-
-The full picture — the three labels, overrides, and exactly what "reversible" guarantees — is
-in [Working safely](working-safely.md).

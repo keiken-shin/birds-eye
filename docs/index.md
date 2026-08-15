@@ -1,5 +1,6 @@
 ---
 title: Bird's Eye — disk cleanup for Windows
+description: Free, offline disk cleanup for Windows that explains what is safe to remove, lets you stage a decision, and reviews every change before it reaches your drive.
 hide:
   - navigation
   - toc
@@ -7,136 +8,226 @@ hide:
 
 <div class="be-hero" markdown>
 
+<div class="be-hero__copy" markdown>
+
 <img class="be-hero__logo" src="assets/icon.png" alt="Bird's Eye" />
 
-<h1 class="be-hero__title">Know what's <span class="be-accent">safe to delete</span>.</h1>
+<h1 class="be-hero__title">See what you can delete. <span class="be-accent">Know why it's safe.</span></h1>
 
-<p class="be-hero__tagline">Bird's Eye scans your Windows drive, works out what each folder is actually for, and tells you what you can safely remove — with the size, the age, and the reason.</p>
+<p class="be-hero__tagline">Bird's Eye is a free, offline disk cleanup tool for Windows. It turns a drive scan into specific decisions: the size, when you last touched it, and the reason it can—or cannot—go.</p>
 
-<div class="be-trust">
+<div class="be-trust" aria-label="Safety and privacy">
   <span>Recycle Bin first</span>
-  <span>Restorable for 30 days</span>
-  <span>Nothing leaves your PC</span>
+  <span>Review every change</span>
+  <span>0 bytes uploaded</span>
 </div>
 
 <div class="be-cta">
   <a class="md-button be-store" href="https://apps.microsoft.com/detail/9NZH5J31GHSL"><svg class="be-store__logo" width="19" height="19" viewBox="0 0 23 23" aria-hidden="true"><path fill="#f25022" d="M1 1h10v10H1z"/><path fill="#7fba00" d="M12 1h10v10H12z"/><path fill="#00a4ef" d="M1 12h10v10H1z"/><path fill="#ffb900" d="M12 12h10v10H12z"/></svg><span class="be-store__text"><span class="be-store__sub">Get it from the</span><span class="be-store__name">Microsoft Store</span></span></a>
-  <a class="md-button be-key" href="https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe"><svg class="be-btn__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download portable .exe</a>
-  <a class="md-button be-cta__tertiary" href="https://github.com/keiken-shin/birds-eye"><svg class="be-btn__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>View source on GitHub</a>
+  <a class="md-button be-key" href="https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe">Download portable .exe</a>
 </div>
 
-<p class="be-platform">Free · MIT · Windows 10 &amp; 11 · ~14 MB · works offline</p>
+<p class="be-platform">Windows 10 &amp; 11 · free · MIT licensed · no account</p>
 
-<p class="be-hero__sub"><strong>0 bytes ever uploaded.</strong> No account, no sign-in, no telemetry — not a filename, not a hash.</p>
+</div>
+
+<div class="be-hero__visual" markdown>
+
+<div class="be-product-frame">
+  <img src="assets/screenshots/staged.png" alt="Bird's Eye Staged workspace with grouped files ready for review" />
+</div>
+
+<p class="be-hero__caption"><strong>Staged</strong> keeps the files you set aside until you are ready to review them. Closing the app does not clear the decision.</p>
+
+</div>
+
+</div>
+
+<div class="be-recommendation" aria-label="Example Bird's Eye recommendation">
+  <span class="be-recommendation__name">node_modules</span>
+  <span><b>12.3 GB</b> on disk</span>
+  <span>untouched <b>8 months</b></span>
+  <span>a build cache that fills itself back in when needed</span>
+</div>
+
+## The answer a disk map stops short of
+
+A treemap can show you that a folder is large. It cannot tell you whether removing that folder
+breaks a project, deletes the only copy, or simply clears a cache.
+
+Bird's Eye reads the folder structure on your machine, classifies what it can explain, and puts
+the evidence beside the recommendation. If it cannot tell, it says so. You make the decision.
+
+<div class="be-contrast" markdown>
+
+<div markdown>
+
+### A map answers
+
+> Where did my space go?
+
+Size, hierarchy, and file type help you investigate.
+
+</div>
+
+<div markdown>
+
+### Bird's Eye continues
+
+> Which of this can I remove, and how do you know?
+
+Size, last touched, reason, safety label, and a reviewed action help you decide.
+
+</div>
+
+</div>
+
+## From recommendation to reviewed action
+
+<div class="be-workflow" markdown>
+
+<div class="be-workflow__step" markdown>
+
+### Read the reason
+
+Start with a real row, not a score. Every recommendation carries a size, an age, and plain-English
+reasoning.
+
+</div>
+
+<div class="be-workflow__step" markdown>
+
+### Stage the decision
+
+Set aside files and folders from any view. Staging changes nothing on disk and survives an app
+restart.
+
+</div>
+
+<div class="be-workflow__step" markdown>
+
+### Group what belongs together
+
+Use **Staged** as a decision desk: keep related items together, then choose whether to clean or move.
+
+</div>
+
+<div class="be-workflow__step" markdown>
+
+### Review before anything moves
+
+Bird's Eye checks the chosen items again and shows the exact plan. You confirm; it uses the
+Recycle Bin or the destination you chose.
+
+</div>
+
+</div>
 
 <div class="be-demo">
-  <img src="assets/demo.gif" alt="Bird's Eye walking through a scanned drive — what's on it, what's safe to delete, and the reviewed clean-up" />
+  <img src="assets/demo.gif" alt="Bird's Eye workflow from a recommendation to Staged and the Review gate" />
 </div>
 
+<p class="be-demo__caption">Recorded against the built-in mock drive: recommendation → stage → Staged → review.</p>
+
+[Follow the staged workflow](guide/stage-and-review.md){ .md-button .md-button--primary }
+
+## Safety you can inspect
+
+<div class="be-assurance" markdown>
+
+### It explains the call
+
+**Safe to delete**, **Check first**, and **Don't touch** are the only three labels. Each comes
+with the reason Bird's Eye chose it. Held-back items remain visible.
+
+### It makes actions reversible
+
+Cleanup goes to the Windows **Recycle Bin**. Undo and **Recently cleaned** keep a record of what
+happened. Reviewed moves can be put back.
+
+### It stays on your machine
+
+No account, sign-in, telemetry, model, or cloud service. Not a filename, path, hash, or byte is
+uploaded. The [MIT-licensed source](https://github.com/keiken-shin/birds-eye) is available to inspect.
+
 </div>
 
-<p class="be-eyebrow">Why Bird's Eye</p>
-
-<p class="be-manifesto">Other tools show you what's big. Bird's Eye tells you what's <span class="be-accent">safe</span>.</p>
-
-A disk map answers *"where did my space go?"* Bird's Eye answers the question that actually
-unblocks you: **"which of this can I delete, and how do you know?"**
-
-12.4 GB of build cache, untouched 8 months, rebuildable in one command. That's a sentence you
-can act on. A coloured rectangle isn't.
-
-<p class="be-eyebrow">What you get</p>
-
-## It explains itself
-
-Every recommendation carries three things: **how much space**, **how long since you touched
-it**, and **a reason in plain English**. Not a score, not a grade — a sentence.
-
-```text
-node_modules · 12.3 GB · untouched 8 months · rebuildable from package.json
-```
-
-## It can't hurt you
-
-Nothing is deleted until you review a list of exactly what will happen. Everything goes to the
-**Recycle Bin**, restorable for 30 days — or undone instantly right after the action. Things
-Bird's Eye won't touch are shown to you with the reason, never silently hidden, and you can
-still remove them yourself if you disagree.
-
-Everything is labelled one of three ways, and never a fourth:
-
-| Label | Means |
-|---|---|
-| **Safe to delete** | Rebuildable, temporary, or a duplicate. |
-| **Check first** | Might matter — here's what it is, you decide. |
-| **Don't touch** | In use, system, or you pinned it — shown with the reason. |
-
-## It never phones home
-
-No account. No sign-in. No telemetry. Nothing uploaded — not a filename, not a hash. It works
-with the network switched off, on a machine that has never seen the internet. The source is
-public and [MIT-licensed](https://github.com/keiken-shin/birds-eye), so you can check rather
-than believe.
-
-There is no AI and no cloud in here. Bird's Eye reads your own folder structure and tells you
-what it found.
-
-<p class="be-eyebrow">The specifics</p>
+[Read the safety and recovery model](guide/working-safely.md){ .md-button }
 
 ## What it finds
 
-- Build outputs and package caches — `node_modules`, `target`, `.gradle`, pip
-- Installers you already ran, sitting in Downloads
-- Duplicate files, ranked by how much space they waste
-- Projects you finished and haven't opened in a year
-- Old backups, VM disks and model files you forgot about
+- Build output and package caches such as `node_modules`, `target`, `.gradle`, and pip caches
+- Installers and large downloads you have not opened in months
+- Duplicate files, ranked by the space their extra copies use
+- Projects, virtual disks, backups, models, and media that have been sitting untouched
+- Files that look like they belong somewhere you already use
 
-## What it will never do
+The first scan takes a few minutes because Bird's Eye reads more than sizes. Later scans only look
+at what changed, so they finish much sooner.
 
-- No "health score." No "247 issues found."
-- No registry cleaning. No startup "optimisation."
-- No nagging, no countdowns, no upsell.
-- No account, and no data leaving your machine.
+## What it refuses to become
 
-## How long a scan takes
+- No “health score” or alarming issue counter
+- No registry cleaning or startup “optimisation”
+- No automatic deletion, countdown, nag, or upsell
+- No claim that it is the fastest scanner
+- No AI tagline hiding an upload
 
-The first scan takes a few minutes, because it's reading more than sizes. After that it only
-looks at what changed — so the second scan is seconds.
+## One scan, eight useful views
 
-<p class="be-eyebrow">The workspace</p>
+<div class="be-viewlist" markdown>
 
-## Eight ways to look at one scan
+- **Overview** — the amount you can likely free and the reasons behind it
+- **Map** — size as area, coloured by safety or file kind
+- **Staged** — the files and folders you set aside while deciding
+- **Files** — ranked search, filters, and saved views
+- **Duplicates** — side-by-side groups ranked by wasted space
+- **Clean up** — recommendations and findings waiting for your confirmation
+- **By age** — activity over time and large files left untouched
+- **Organise** — reviewed suggestions for files that belong elsewhere
 
-There are no "pages." One scan sits underneath, and the top-bar switcher flips between views of
-it — the Inspector, the Cleanup Tray and the Review gate stay with you the whole time.
+</div>
 
-| View | What it gives you |
-|---|---|
-| **Overview** | Where you stand: capacity bar, what's taking the space, an age snapshot, and a headline — *"X GB can likely be freed."* |
-| **Map** | A space map where area is size, coloured by safety or by kind of file, drillable to any depth. |
-| **Findings** | An open canvas of what the scan turned up — findings cluster around shared sources with labelled links. |
-| **Files** | Ranked search with filters, size and date sorting, and saved views for the questions you ask every time. |
-| **Duplicates** | Groups ranked by how much space they waste, with side-by-side previews. |
-| **Clean up** | The recommendations, each labelled and each with a size, an age and a reason. |
-| **By age** | Monthly activity, how old your files are, and the large-and-untouched items that are usually the easiest wins. |
-| **Organise** | Grouped "these files belong somewhere else" suggestions, reviewed before anything moves. |
+The Inspector, the persistent tray, and the Review gate follow you between views.
 
 [Tour the workspace](guide/the-workspace.md){ .md-button }
 
-<p class="be-eyebrow">Get it</p>
+## Start where you are
 
-## Get Bird's Eye
+<div class="be-paths" markdown>
 
-<div class="be-cta">
-  <a class="md-button be-store" href="https://apps.microsoft.com/detail/9NZH5J31GHSL"><svg class="be-store__logo" width="19" height="19" viewBox="0 0 23 23" aria-hidden="true"><path fill="#f25022" d="M1 1h10v10H1z"/><path fill="#7fba00" d="M12 1h10v10H12z"/><path fill="#00a4ef" d="M1 12h10v10H1z"/><path fill="#ffb900" d="M12 12h10v10H12z"/></svg><span class="be-store__text"><span class="be-store__sub">Get it from the</span><span class="be-store__name">Microsoft Store</span></span></a>
-  <a class="md-button be-key" href="https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe"><svg class="be-btn__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download portable .exe</a>
-  <a class="md-button be-cta__tertiary" href="develop/building/"><svg class="be-btn__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Build from source</a>
+<div markdown>
+
+### I want to free space
+
+Install the app, scan one folder or drive, and stage a single recommendation.
+
+[Start your first scan](guide/getting-started.md)
+
 </div>
 
-### On the Microsoft Store { #windows-store }
+<div markdown>
 
-Bird's Eye is [**live on the Microsoft Store**](https://apps.microsoft.com/detail/9NZH5J31GHSL) —
-one-click install, automatic updates, and a Store-signed package. Prefer no install? The
-[portable `.exe`](https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe)
-is on [GitHub Releases](https://github.com/keiken-shin/birds-eye/releases/latest). Maintainers
-can read how the Store package is built and submitted in [Releasing](develop/releasing.md).
+### I want to understand or change the code
+
+Bird's Eye is a Rust scanner and SQLite index behind a React 19 + Tauri 2 desktop shell.
+
+[Read the architecture](develop/architecture.md) · [Build from source](develop/building.md)
+
+</div>
+
+</div>
+
+<div class="be-close" markdown>
+
+## Make the next deletion a decision, not a guess
+
+Free for Windows 10 and 11. Works with the network switched off.
+
+<div class="be-cta">
+  <a class="md-button be-store" href="https://apps.microsoft.com/detail/9NZH5J31GHSL"><span class="be-store__text"><span class="be-store__sub">Get it from the</span><span class="be-store__name">Microsoft Store</span></span></a>
+  <a class="md-button be-key" href="https://github.com/keiken-shin/birds-eye/releases/latest/download/birds-eye-windows-portable-x64.exe">Download portable .exe</a>
+  <a class="md-button be-cta__tertiary" href="https://github.com/keiken-shin/birds-eye">View source</a>
+</div>
+
+</div>
