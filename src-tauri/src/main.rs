@@ -10,13 +10,19 @@ use birds_eye::native::api::{
     file_lock_holders as query_file_lock_holders, FileLockHoldersRequest,
     search_files as search_index_files,
     reveal_in_explorer as do_reveal_in_explorer,
-    trash_files as do_trash_files, move_files as do_move_files,
-    TrashFilesRequest, TrashFilesResponse, MoveFilesRequest, MoveFilesResponse,
+    trash_files as do_trash_files,
+    TrashFilesRequest, TrashFilesResponse,
     // Plan 3 cleanup
     cleanup_plan as do_cleanup_plan, execute_cleanup_plan as do_execute_cleanup_plan,
     recently_cleaned_log as do_recently_cleaned_log,
     restore_from_cleanup_log as do_restore_from_cleanup_log,
     pin_file as do_pin_file, unpin_file as do_unpin_file,
+    // Staging desk (durable)
+    stage_item as do_stage_item, unstage_item as do_unstage_item,
+    staged_items as do_staged_items, set_staged_group as do_set_staged_group,
+    clear_staged as do_clear_staged,
+    StageItemRequest, UnstageItemRequest, StagedItemsRequest, SetStagedGroupRequest,
+    ClearStagedRequest,
     list_cleanup_candidates as do_list_cleanup_candidates,
     treemap_lens_data as do_treemap_lens_data,
     CleanupPlanRequest, CleanupPlanResponse, ExecuteCleanupPlanRequest,
@@ -244,11 +250,6 @@ fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
     do_trash_files(request)
 }
 
-#[tauri::command(async)]
-fn move_files(request: MoveFilesRequest) -> MoveFilesResponse {
-    do_move_files(request)
-}
-
 /// Allow the asset protocol to serve files under this index's scan root, so the
 /// Inspector can preview media. The root is read from the index itself (which must
 /// live in the app index dir) — the webview never gets to name an arbitrary path.
@@ -340,6 +341,33 @@ fn recently_moved(request: RecentlyMovedRequest) -> Result<Vec<RelocationLogEntr
 #[tauri::command(async)]
 fn restore_from_relocation_log(request: RestoreMoveRequest) -> Result<(), String> {
     do_restore_from_relocation_log(request)
+}
+
+#[tauri::command(async)]
+fn stage_item(request: StageItemRequest) -> Result<(), String> {
+    do_stage_item(request)
+}
+
+#[tauri::command(async)]
+fn unstage_item(request: UnstageItemRequest) -> Result<(), String> {
+    do_unstage_item(request)
+}
+
+#[tauri::command(async)]
+fn staged_items(
+    request: StagedItemsRequest,
+) -> Result<Vec<birds_eye::ontology::staging::StagedItem>, String> {
+    do_staged_items(request)
+}
+
+#[tauri::command(async)]
+fn set_staged_group(request: SetStagedGroupRequest) -> Result<(), String> {
+    do_set_staged_group(request)
+}
+
+#[tauri::command(async)]
+fn clear_staged(request: ClearStagedRequest) -> Result<(), String> {
+    do_clear_staged(request)
 }
 
 #[tauri::command(async)]
@@ -453,12 +481,24 @@ fn main() {
             scan_job_status,
             allow_preview_root,
             reveal_in_explorer,
+            // ---- user-file mutation: these five, and only these five ----
+            // The list continues past them with reads and app-DB writes, so this
+            // is a label on five names rather than on everything below.
+            //
+            // The four plan commands are structurally gated: nothing is removed
+            // or moved except through a persisted plan the backend re-verifies
+            // at execute time, and each leaves a restore-log row. `trash_files`
+            // takes paths directly — its gate is the review UI, and its undo is
+            // the Recycle Bin. Adding a sixth is a review topic.
+            //
+            // `delete_index` is deliberately not counted: it removes an
+            // app-owned index file, never the person's own files.
             trash_files,
-            move_files,
             cleanup_plan,
             execute_cleanup_plan,
             relocation_plan,
             execute_relocation_plan,
+            // ---- end user-file mutation ----
             relocation_members,
             catalog_rules,
             save_catalog_rule,
@@ -469,6 +509,11 @@ fn main() {
             restore_from_relocation_log,
             pin_file,
             unpin_file,
+            stage_item,
+            unstage_item,
+            staged_items,
+            set_staged_group,
+            clear_staged,
             list_cleanup_candidates,
             treemap_lens_data,
             discoveries,

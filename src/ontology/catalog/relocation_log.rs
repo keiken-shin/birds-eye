@@ -29,52 +29,52 @@ pub struct RelocationLogEntry {
     pub restore_status: String,
 }
 
-/// Append one row for a file that has just been moved.
+/// Open a log row *before* the bytes move, returning its id.
 ///
-/// Called from `native::api::move_files`, the single point every relocation
-/// routes through — a reviewed plan, a manual move from the Files view and the
-/// session undo toast all end up there, so one write covers all of them.
+/// The relocation executor is the single owner of this write. It used to live in
+/// `native::api::move_files`, which meant the row could only be written after
+/// the move — the identity we store is read from the destination, which does not
+/// exist yet — and a crash in that gap lost the undo trail entirely. Now the row
+/// exists first and says `move_pending`; `complete_move` fills the identity in
+/// and promotes it.
 ///
-/// Logged after the bytes land rather than before, unlike the cleanup log: the
-/// identity we store (size and last-modified) can only be read once the file is
-/// at the destination, and the failure mode is mild either way. A crash in the
-/// gap leaves the file at a real, visible path that the next scan picks up —
-/// not sitting invisibly in a recycle bin, which is why cleanup logs first.
-pub fn log_move(
+/// `size` is NOT NULL with no way to spell "unknown", so a pending row carries
+/// `0` with a NULL `modified_at`. `restore_move_with` already reads that exact
+/// pair as unknown rather than as an empty file.
+pub fn log_move_pending(
     conn: &Connection,
     from: &str,
     to: &str,
     file_id: Option<i64>,
-) -> Result<(), OntologyError> {
-    // A move that exactly reverses an open entry is a put-back, not a new move:
-    // close that entry rather than opening a second one. `SystemMover` already
-    // avoids double-logging by passing no index path, but the session undo toast
-    // reverses through `move_files` like any other move, and without this the log
-    // would claim both directions happened and offer to undo each of them.
-    let reversed: Option<i64> = conn
-        .query_row(
-            "SELECT id FROM ontology_relocation_log
-             WHERE restore_status = 'moved' AND from_path = ?1 AND to_path = ?2
-             ORDER BY moved_at DESC, id DESC
-             LIMIT 1",
-            params![to, from],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if let Some(id) = reversed {
-        conn.execute(
-            "UPDATE ontology_relocation_log SET restore_status = 'restored' WHERE id = ?1",
-            params![id],
-        )?;
-        return Ok(());
-    }
-
-    let (size, modified_at) = identity_of(Path::new(to));
+) -> Result<i64, OntologyError> {
     conn.execute(
         "INSERT INTO ontology_relocation_log
             (file_id, from_path, to_path, size, moved_at, modified_at, restore_status)
-         VALUES (?1, ?2, ?3, ?4, strftime('%s','now'), ?5, 'moved')",
-        params![file_id, from, to, size, modified_at],
+         VALUES (?1, ?2, ?3, 0, strftime('%s','now'), NULL, 'move_pending')",
+        params![file_id, from, to],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Promote a pending row once the bytes are at the destination: record the
+/// identity a later restore checks against, and mark the move done.
+pub fn complete_move(conn: &Connection, entry_id: i64, to: &str) -> Result<(), OntologyError> {
+    let (size, modified_at) = identity_of(Path::new(to));
+    conn.execute(
+        "UPDATE ontology_relocation_log
+         SET size = ?2, modified_at = ?3, restore_status = 'moved'
+         WHERE id = ?1",
+        params![entry_id, size, modified_at],
+    )?;
+    Ok(())
+}
+
+/// Drop a pending row for a move that failed outright — nothing happened on
+/// disk, so there is nothing to undo and nothing to show.
+pub fn abandon_move(conn: &Connection, entry_id: i64) -> Result<(), OntologyError> {
+    conn.execute(
+        "DELETE FROM ontology_relocation_log WHERE id = ?1 AND restore_status = 'move_pending'",
+        params![entry_id],
     )?;
     Ok(())
 }
@@ -121,10 +121,38 @@ pub fn restore_move_with(
     let entry = get_log_entry(conn, entry_id)?.ok_or_else(|| {
         OntologyError::Refused("Bird's Eye has no record of that move.".to_string())
     })?;
-    if entry.restore_status != "moved" {
+    if entry.restore_status == "restored" {
         return Err(OntologyError::Refused(
             "Bird's Eye already put this file back.".to_string(),
         ));
+    }
+
+    // A row left in flight by a crash is reconciled against what is actually on
+    // disk before anything else happens. Without this, a pending row is stuck
+    // forever: the checks below read the world as "the file isn't where the log
+    // says", refuse, and refuse identically on every retry. Safe, but never
+    // convergent — which is the whole defect this state exists to close.
+    let at_destination = Path::new(&entry.to_path).exists();
+    let at_origin = Path::new(&entry.from_path).exists();
+    match entry.restore_status.as_str() {
+        // Crashed before the bytes moved: the file never left, so there is
+        // nothing to put back. Close the row rather than offering an undo for a
+        // move that did not happen.
+        "move_pending" if !at_destination && at_origin => {
+            return close_as_restored(conn, entry_id, entry.file_id);
+        }
+        // Crashed after the bytes moved but before the identity landed. The move
+        // is real; carry on with an unknown identity, which the checks below
+        // already handle rather than treating as an empty file.
+        "move_pending" => {}
+        // Crashed after the put-back but before the bookkeeping. The file is
+        // already home — record that instead of refusing forever.
+        "restore_pending" if !at_destination && at_origin => {
+            return close_as_restored(conn, entry_id, entry.file_id);
+        }
+        // Crashed before the put-back ran. Fall through and do it.
+        "restore_pending" => {}
+        _ => {}
     }
 
     let Ok(found) = std::fs::metadata(&entry.to_path) else {
@@ -161,18 +189,49 @@ pub fn restore_move_with(
         ));
     }
 
-    mover.move_one(&entry.to_path, &entry.from_path).map_err(|reason| {
-        OntologyError::Refused(format!("Bird's Eye couldn't put this file back: {reason}"))
-    })?;
+    // Claim the restore before doing it, so a crash between the move and the
+    // bookkeeping leaves a row that says "a put-back was in flight" rather than
+    // one that still claims the file is at the destination.
+    conn.execute(
+        "UPDATE ontology_relocation_log SET restore_status = 'restore_pending' WHERE id = ?1",
+        params![entry_id],
+    )?;
 
+    if let Err(reason) = mover.move_one(&entry.to_path, &entry.from_path) {
+        // The put-back did not happen, so the row goes back to describing the
+        // world as it is: the file is still at the destination.
+        let back = if entry.restore_status == "move_pending" { "move_pending" } else { "moved" };
+        // Scoped to `restore_pending` so a losing racer cannot overwrite a
+        // restore that a winner has already completed — that would resurrect a
+        // Put back for a file already home, and the retry would then fail
+        // forever on the occupied-origin guard.
+        conn.execute(
+            "UPDATE ontology_relocation_log SET restore_status = ?2
+             WHERE id = ?1 AND restore_status = 'restore_pending'",
+            params![entry_id, back],
+        )?;
+        return Err(OntologyError::Refused(format!(
+            "Bird's Eye couldn't put this file back: {reason}"
+        )));
+    }
+
+    close_as_restored(conn, entry_id, entry.file_id)
+}
+
+/// Mark an entry restored and re-link its index row.
+///
+/// Re-linking matches the cleanup log's restore: the forward move soft-deleted
+/// the source row, and putting the file back is the exact inverse of that step.
+fn close_as_restored(
+    conn: &Connection,
+    entry_id: i64,
+    file_id: Option<i64>,
+) -> Result<(), OntologyError> {
     conn.execute(
         "UPDATE ontology_relocation_log SET restore_status = 'restored' WHERE id = ?1",
         params![entry_id],
     )?;
-    // Re-link to the scan index if the file row still exists, same as the
-    // cleanup log's restore. The forward move soft-deleted this row; putting the
-    // file back is the exact inverse of that step.
-    if let Some(file_id) = entry.file_id {
+    if let Some(file_id) = file_id {
         conn.execute(
             "UPDATE files SET deleted_at = NULL WHERE id = ?1",
             params![file_id],
@@ -264,8 +323,11 @@ mod tests {
         .unwrap();
         std::fs::create_dir_all(to.parent().unwrap()).expect("create destination folder");
         std::fs::rename(from, to).expect("move fixture");
-        log_move(conn, &from.to_string_lossy(), &to.to_string_lossy(), Some(1)).unwrap();
-        conn.last_insert_rowid()
+        let entry_id =
+            log_move_pending(conn, &from.to_string_lossy(), &to.to_string_lossy(), Some(1))
+                .unwrap();
+        complete_move(conn, entry_id, &to.to_string_lossy()).unwrap();
+        entry_id
     }
 
     /// Actually moves the file, so the tests can assert where it ended up.
@@ -280,21 +342,31 @@ mod tests {
     /// other move, so the log sees the exact inverse of a row it already holds.
     /// It must close that row, not open a second one — otherwise the list offers
     /// to undo both directions of a move that is already back where it started.
+    /// Insert a row in an arbitrary state, as a crash would have left it.
+    fn seed_row(conn: &Connection, from: &Path, to: &Path, status: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO ontology_relocation_log
+                (file_id, from_path, to_path, size, moved_at, modified_at, restore_status)
+             VALUES (NULL, ?1, ?2, 0, 0, NULL, ?3)",
+            params![from.to_string_lossy(), to.to_string_lossy(), status],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    /// Crashed between opening the row and moving the bytes. The file never
+    /// left, so there is nothing to put back — and offering an undo that cannot
+    /// work, forever, is the failure this state exists to prevent.
     #[test]
-    fn reversing_a_move_closes_the_entry_instead_of_logging_another() {
-        let root = test_root("reverse-closes");
+    fn a_move_that_never_happened_closes_instead_of_refusing_forever() {
+        let root = test_root("move-pending-phantom");
         let from = root.join("a.exe");
-        let to = root.join("dest").join("a.exe");
+        std::fs::write(&from, b"never moved").unwrap();
         let conn = migrated_conn();
-        let entry_id = seed_moved_file(&conn, &from, &to);
+        let entry_id = seed_row(&conn, &from, &root.join("dest").join("a.exe"), "move_pending");
 
-        // Exactly what the undo toast does: the same pair, swapped.
-        log_move(&conn, &to.to_string_lossy(), &from.to_string_lossy(), Some(1)).unwrap();
+        restore_move_with(&conn, entry_id, &FsMover).expect("a phantom move must resolve, not refuse");
 
-        let rows: i64 = conn
-            .query_row("SELECT COUNT(*) FROM ontology_relocation_log", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(rows, 1, "the reverse must not add a second row");
         let status: String = conn
             .query_row(
                 "SELECT restore_status FROM ontology_relocation_log WHERE id = ?1",
@@ -302,14 +374,91 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(status, "restored", "the original entry is the one that closed");
+        assert_eq!(status, "restored");
+        assert!(from.exists(), "the file was never touched");
+    }
 
-        // An unrelated move still logs normally.
-        log_move(&conn, "C:\\x\\other.bin", "D:\\y\\other.bin", None).unwrap();
+    /// Crashed after the put-back but before the bookkeeping — the exact
+    /// stranding this state was added for. The retry must converge, not repeat
+    /// the same refusal forever.
+    #[test]
+    fn a_put_back_that_already_happened_converges_on_retry() {
+        let root = test_root("restore-pending-converge");
+        let from = root.join("a.exe");
+        std::fs::write(&from, b"already home").unwrap();
+        let conn = migrated_conn();
+        let entry_id = seed_row(&conn, &from, &root.join("dest").join("a.exe"), "restore_pending");
+
+        restore_move_with(&conn, entry_id, &FsMover).expect("a completed put-back must converge");
+
+        let status: String = conn
+            .query_row(
+                "SELECT restore_status FROM ontology_relocation_log WHERE id = ?1",
+                params![entry_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "restored");
+    }
+
+    /// The claim is written before the move, so a move that fails has to put the
+    /// row back — otherwise a locked file would strand its own entry at
+    /// `restore_pending` and the Library would stop offering the undo.
+    #[test]
+    fn a_failed_put_back_leaves_the_entry_offering_undo_again() {
+        struct Nope;
+        impl Mover for Nope {
+            fn move_one(&self, _from: &str, _to: &str) -> Result<(), String> {
+                Err("locked by another process".to_string())
+            }
+        }
+
+        let root = test_root("restore-fails");
+        let from = root.join("a.exe");
+        let to = root.join("dest").join("a.exe");
+        let conn = migrated_conn();
+        let entry_id = seed_moved_file(&conn, &from, &to);
+
+        let err = restore_move_with(&conn, entry_id, &Nope).expect_err("the mover refused");
+        assert!(format!("{err:?}").contains("locked"));
+
+        let status: String = conn
+            .query_row(
+                "SELECT restore_status FROM ontology_relocation_log WHERE id = ?1",
+                params![entry_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "moved", "a failed put-back must not strand the row");
+    }
+
+    /// Undo closes the entry that recorded the move. It used to be done by
+    /// running the same pair backwards through the mover, which logged a second
+    /// row and left the list offering to undo a move that had just been undone.
+    /// The reversal path is gone; the log has one owner and one row per move.
+    #[test]
+    fn putting_a_file_back_closes_its_entry_without_adding_a_row() {
+        let root = test_root("restore-closes");
+        let from = root.join("a.exe");
+        let to = root.join("dest").join("a.exe");
+        let conn = migrated_conn();
+        let entry_id = seed_moved_file(&conn, &from, &to);
+
+        restore_move_with(&conn, entry_id, &FsMover).expect("put back");
+
         let rows: i64 = conn
             .query_row("SELECT COUNT(*) FROM ontology_relocation_log", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(rows, 2);
+        assert_eq!(rows, 1, "the put-back must not add a second row");
+        let status: String = conn
+            .query_row(
+                "SELECT restore_status FROM ontology_relocation_log WHERE id = ?1",
+                params![entry_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "restored");
+        assert!(from.exists());
     }
 
     /// A failed metadata read at move time records size 0 with no timestamp. That
@@ -444,14 +593,10 @@ mod tests {
         let to = root.join("dest").join("a.exe");
         let conn = migrated_conn();
         seed_moved_file(&conn, &from, &to);
-        std::fs::write(root.join("b.exe"), b"second").unwrap();
-        log_move(
-            &conn,
-            &root.join("b.exe").to_string_lossy(),
-            &root.join("b.exe").to_string_lossy(),
-            None,
-        )
-        .unwrap();
+        let b = root.join("b.exe");
+        std::fs::write(&b, b"second").unwrap();
+        let second = log_move_pending(&conn, &b.to_string_lossy(), &b.to_string_lossy(), None).unwrap();
+        complete_move(&conn, second, &b.to_string_lossy()).unwrap();
 
         let rows = recently_moved(&conn, 10, 0).unwrap();
 

@@ -3,9 +3,10 @@ import { createPortal } from "react-dom";
 import { FolderOpen } from "lucide-react";
 import { formatBytes } from "@bridge/domain";
 import {
+  buildRelocationPlan,
   chooseNativeFolder,
+  executeRelocationPlan,
   isNativeRuntime,
-  moveFiles,
   type NativeMoveFailure,
 } from "@bridge/nativeClient";
 import { useIndexData } from "../state/indexData";
@@ -16,8 +17,12 @@ import { OverlayShell } from "./ui/OverlayShell";
 import { Button } from "./ui/Button";
 import { SectionLabel } from "./ui/Card";
 
+/** A file this dialog can move. The id is required: every move is persisted as
+ *  a reviewed plan, and a plan re-verifies each item against the index by id. */
+export type MoveTarget = { path: string; fileId: number };
+
 export type MoveDialogProps = {
-  paths: string[];
+  files: MoveTarget[];
   onClose: () => void;
   /**
    * Fired whenever files land in the destination, with the subset that moved
@@ -41,8 +46,8 @@ function joinDest(dest: string, name: string) {
  * rollups self-heal. Hosts only own the open/closed state; everything else
  * (destination, per-file failures, refresh) lives here.
  */
-export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
-  const { indexPath } = useWorkspace();
+export function MoveDialog({ files, onClose, onMoved }: MoveDialogProps) {
+  const { indexPath, setUndo } = useWorkspace();
   const { overview, activeEntry, refreshData } = useIndexData();
   const { view: scanView, enqueue } = useScanController();
 
@@ -51,8 +56,8 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
   const [subfolder, setSubfolder] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** Paths still to move — shrinks to the failed set after a partial failure. */
-  const [remaining, setRemaining] = useState(paths);
+  /** Files still to move — shrinks to the failed set after a partial failure. */
+  const [remaining, setRemaining] = useState(files);
   const [failures, setFailures] = useState<NativeMoveFailure[]>([]);
 
   useEffect(() => {
@@ -87,7 +92,7 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
   const trimmedDest = dest.trim();
   // The destination field is readOnly in native mode (picked via the OS dialog),
   // so an optional subfolder name is the only way to type a new folder there.
-  // `move_files` already creates the destination's parent, so this is frontend-only.
+  // The backend already creates the destination's parent, so this is frontend-only.
   const target = subfolder.trim() ? joinDest(trimmedDest, subfolder.trim()) : trimmedDest;
   const noun = remaining.length === 1 ? "file" : "files";
 
@@ -106,10 +111,35 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
     setBusy(true);
     setError(null);
     try {
-      const moves = remaining.map((from) => ({ from, to: joinDest(target, baseName(from)) }));
-      const result = await moveFiles(moves, indexPath);
-      const failedPaths = new Set(result.failed.map((f) => f.path));
-      const movedPaths = remaining.filter((p) => !failedPaths.has(p));
+      if (!indexPath) throw new Error("No index is open.");
+      // Every move goes through the same gate the reviewed plans use: persist an
+      // explicit per-file plan, let the backend re-verify each item against the
+      // index, then execute it. There is deliberately no raw "move these paths"
+      // call any more — that was a door from the webview straight to the disk.
+      const plan = await buildRelocationPlan(
+        indexPath,
+        remaining.map((f) => ({
+          file_id: f.fileId,
+          from: f.path,
+          to: joinDest(target, baseName(f.path)),
+          discovery_id: null,
+        }))
+      );
+      const result = await executeRelocationPlan(indexPath, plan.plan_id);
+      // A dropped item never reached the plan (the index no longer has it, or
+      // something already sits at the destination); a failed one was tried and
+      // refused. Both are reasons this file did not move, and both are shown.
+      const refused: NativeMoveFailure[] = [
+        ...plan.dropped.map((d) => ({ path: d.path, reason: d.reason })),
+        ...result.failed.map((f) => ({ path: f.path, reason: f.reason })),
+      ];
+      const failedPaths = new Set(refused.map((f) => f.path));
+      const movedPaths = remaining.map((f) => f.path).filter((p) => !failedPaths.has(p));
+      if (result.entry_ids.length) {
+        // The executor hands back the log ids; offering the toast costs one
+        // line and the same put-back is still in Recently moved tomorrow.
+        setUndo({ kind: "relocate", entryIds: result.entry_ids });
+      }
       if (movedPaths.length > 0) {
         // Something moved on disk — repaint every lens, and (when nothing is
         // scanning) queue an incremental metadata rescan so rollup sizes self-heal.
@@ -117,14 +147,14 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
         if (scanView.status === "idle" && activeEntry?.root_path) {
           enqueue(activeEntry.root_path, "metadata");
         }
-        onMoved(target, movedPaths, result.failed.length === 0);
+        onMoved(target, movedPaths, refused.length === 0);
       }
-      if (result.failed.length === 0) {
+      if (refused.length === 0) {
         onClose();
         return;
       }
-      setRemaining((prev) => prev.filter((p) => failedPaths.has(p)));
-      setFailures(result.failed);
+      setRemaining((prev) => prev.filter((f) => failedPaths.has(f.path)));
+      setFailures(refused);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -139,7 +169,7 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
           <span className="text-danger">{error}</span>
         ) : failures.length ? (
           <span className="text-danger">
-            {failures.length} of {paths.length} couldn't be moved — the rest were.
+            {failures.length} of {files.length} couldn't be moved — the rest were.
           </span>
         ) : busy ? (
           "Moving files…"
@@ -180,7 +210,7 @@ export function MoveDialog({ paths, onClose, onMoved }: MoveDialogProps) {
               max-height scroll container over the full list is enough — no
               virtualization, no dialog restructuring. */}
           <div className="max-h-[280px] overflow-y-auto rounded-[9px] border border-line">
-            {remaining.map((p) => {
+            {remaining.map(({ path: p }) => {
               const reason = failureByPath.get(p);
               const size = sizeByPath.get(p);
               return (

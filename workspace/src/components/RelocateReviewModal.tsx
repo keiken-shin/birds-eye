@@ -91,8 +91,8 @@ export function RelocateReviewModal() {
         return;
       }
       setFailures(result.failed);
-      if (result.pairs.length) {
-        setUndo({ kind: "relocate", pairs: result.pairs });
+      if (result.entry_ids.length) {
+        setUndo({ kind: "relocate", entryIds: result.entry_ids });
       }
       if (result.failed.length) {
         // Partial failure: only drop the moves that actually landed on disk,

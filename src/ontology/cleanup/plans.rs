@@ -22,6 +22,15 @@ pub struct CleanupScope {
     /// Only files whose path starts with this prefix. None = any path.
     #[serde(default)]
     pub path_prefix: Option<String>,
+    /// The exact rows a person reviewed, when they picked them one at a time.
+    /// None = a folder-scoped plan (or one written before this field existed),
+    /// which is scope-only by design.
+    ///
+    /// `#[serde(default)]` on a JSON column is what makes this migration-free:
+    /// every plan already on disk deserializes to None and behaves exactly as
+    /// it did.
+    #[serde(default)]
+    pub file_ids: Option<Vec<i64>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -75,7 +84,8 @@ pub fn get_plan(conn: &Connection, plan_id: i64) -> Result<Option<CleanupPlanRow
     }
 }
 
-/// Re-evaluate the live predicate through this plan's scope.
+/// Re-evaluate the live predicate through this plan's scope, then narrow to the
+/// rows the plan was reviewed with.
 pub fn candidates_for_plan(
     conn: &Connection,
     plan_id: i64,
@@ -88,6 +98,7 @@ pub fn candidates_for_plan(
         &plan.scope.reasons,
         plan.scope.max_size,
         plan.scope.path_prefix.as_deref(),
+        plan.scope.file_ids.as_deref(),
     ))
 }
 
@@ -158,6 +169,7 @@ mod tests {
             reasons: vec!["scratch".to_string()],
             max_size: Some(1024),
             path_prefix: Some("/root/".to_string()),
+            file_ids: Some(vec![7, 9]),
         };
         let id = create_plan(&conn, &scope).unwrap();
         let plan = get_plan(&conn, id).unwrap().unwrap();
@@ -176,11 +188,84 @@ mod tests {
             reasons: vec!["scratch".to_string()],
             max_size: Some(500),
             path_prefix: None,
+            file_ids: None,
         };
         let id = create_plan(&conn, &scope).unwrap();
         let cands = candidates_for_plan(&conn, id).unwrap();
         assert_eq!(cands.len(), 1, "size cap should drop the 9000-byte file");
         assert_eq!(cands[0].file_id, 1);
+    }
+
+    /// Both halves of the promise in one plan: the reviewed list is a ceiling
+    /// (file 3 is a live candidate but was never picked, so it stays out) and
+    /// the live predicate is still the floor (file 2 was picked but has since
+    /// been protected, so it drops out).
+    ///
+    /// Asserting only the second half would pass with the intersection deleted —
+    /// pinning removes a row from `v_cleanup_candidates` outright — which is why
+    /// the unpicked candidate is in this fixture.
+    #[test]
+    fn a_reviewed_plan_is_bounded_by_the_selection_and_by_the_predicate() {
+        let conn = migrated_conn();
+        add_scratch_file(&conn, 1, "/root/a/x.js", 100);
+        add_scratch_file(&conn, 2, "/root/b/y.js", 100);
+        add_scratch_file(&conn, 3, "/root/c/z.js", 100);
+
+        let id = create_plan(
+            &conn,
+            &CleanupScope { file_ids: Some(vec![1, 2]), ..Default::default() },
+        )
+        .unwrap();
+        assert_eq!(candidates_for_plan(&conn, id).unwrap().len(), 2, "3 was never picked");
+
+        // The person protected one of the two they had picked.
+        crate::ontology::pinning::pin_file(&conn, 2, None).unwrap();
+
+        let cands = candidates_for_plan(&conn, id).unwrap();
+        assert_eq!(cands.len(), 1, "a pinned file must drop out of its own plan");
+        assert_eq!(cands[0].file_id, 1);
+    }
+
+    /// The other half of the same promise: a file that became safe after the
+    /// review is never silently added to what the person agreed to.
+    #[test]
+    fn a_file_that_newly_qualifies_is_not_added_to_a_reviewed_plan() {
+        let conn = migrated_conn();
+        add_scratch_file(&conn, 1, "/root/a/x.js", 100);
+
+        let id = create_plan(
+            &conn,
+            &CleanupScope { file_ids: Some(vec![1]), ..Default::default() },
+        )
+        .unwrap();
+
+        add_scratch_file(&conn, 2, "/root/a/new.js", 100);
+
+        let cands = candidates_for_plan(&conn, id).unwrap();
+        assert_eq!(cands.len(), 1, "a new candidate must not join a reviewed plan");
+        assert_eq!(cands[0].file_id, 1);
+    }
+
+    /// The migration-free claim, pinned: a plan row written before `file_ids`
+    /// existed has no such key in its JSON and must still behave exactly as it
+    /// always did — scope-only, everything the predicate matches.
+    #[test]
+    fn a_plan_written_before_file_ids_existed_still_reads() {
+        let conn = migrated_conn();
+        add_scratch_file(&conn, 1, "/root/a/x.js", 100);
+        add_scratch_file(&conn, 2, "/root/b/y.js", 100);
+
+        conn.execute(
+            "INSERT INTO ontology_cleanup_plans (created_at, executed_at, scope, status)
+             VALUES (0, NULL, '{\"reasons\":[\"scratch\"],\"max_size\":null,\"path_prefix\":null}', 'draft')",
+            [],
+        )
+        .unwrap();
+        let id = conn.last_insert_rowid();
+
+        let plan = get_plan(&conn, id).unwrap().unwrap();
+        assert_eq!(plan.scope.file_ids, None, "a missing key must read as None");
+        assert_eq!(candidates_for_plan(&conn, id).unwrap().len(), 2);
     }
 
     #[test]

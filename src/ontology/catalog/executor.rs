@@ -1,6 +1,7 @@
 //! Relocation execution, behind an injectable mover so failure paths are testable.
 
 use crate::ontology::catalog::plans::{plan_items, set_item_status, set_plan_status};
+use crate::ontology::catalog::relocation_log::{abandon_move, complete_move, log_move_pending};
 use crate::ontology::OntologyError;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
@@ -52,8 +53,14 @@ pub struct RelocationResult {
     pub plan_id: i64,
     pub moved: u64,
     pub bytes_moved: u64,
-    /// Reversible (from, to) pairs — the frontend undoes by swapping them.
+    /// Reversible (from, to) pairs — kept for display; the undo itself goes
+    /// through `entry_ids`, not by swapping these back through a raw move.
     pub pairs: Vec<MovedPair>,
+    /// Move-log rows for the files that actually moved, in `pairs` order.
+    /// Undo needs these: `restore_from_relocation_log` takes an entry id, and
+    /// without them the only reachable undo was a session-scoped pair reversal
+    /// that died with the window.
+    pub entry_ids: Vec<i64>,
     pub failed: Vec<RelocationFailure>,
 }
 
@@ -76,6 +83,7 @@ pub fn execute_plan_with(
     let mut moved = 0_u64;
     let mut bytes_moved = 0_u64;
     let mut pairs = Vec::new();
+    let mut entry_ids = Vec::new();
     let mut failed = Vec::new();
 
     for item in items {
@@ -104,8 +112,23 @@ pub fn execute_plan_with(
             continue;
         }
 
+        // Opened before the bytes move, so a crash in between leaves a row
+        // saying a move was in flight instead of leaving no trace at all.
+        // Best-effort, like `complete_move` and `abandon_move` beside it. `?`
+        // here would abort a plan mid-flight on a transient DB error: earlier
+        // files already moved, the plan never reaches "executed", and the
+        // caller loses the entry ids for the moves that did happen. A missing
+        // log row costs the undo button; an aborted plan costs the record of
+        // everything before it.
+        let entry_id = log_move_pending(conn, &item.from_path, &item.to_path, Some(item.file_id))
+            .unwrap_or(-1);
+
         match mover.move_one(&item.from_path, &item.to_path) {
             Ok(()) => {
+                if entry_id >= 0 {
+                    let _ = complete_move(conn, entry_id, &item.to_path);
+                    entry_ids.push(entry_id);
+                }
                 // The move has already happened on disk by this point, so it
                 // is unconditionally reported as moved below regardless of
                 // whether the index write succeeds — aborting here would
@@ -120,6 +143,11 @@ pub fn execute_plan_with(
                 });
             }
             Err(reason) => {
+                // Nothing happened on disk, so the pending row describes a move
+                // that never was. Drop it rather than offering an undo for it.
+                if entry_id >= 0 {
+                    let _ = abandon_move(conn, entry_id);
+                }
                 set_item_status(conn, item.id, "failed", Some(&reason))?;
                 failed.push(RelocationFailure {
                     path: item.from_path,
@@ -135,6 +163,7 @@ pub fn execute_plan_with(
         moved,
         bytes_moved,
         pairs,
+        entry_ids,
         failed,
     })
 }

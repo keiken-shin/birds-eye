@@ -364,7 +364,7 @@ export function ScanOverlay() {
                     className="inline-flex text-dim"
                     title={
                       "Bird's Eye reads your folder structure and works out what each folder is, " +
-                      "what depends on it and what you can free — so the Map, Findings and Clean up " +
+                      "what depends on it and what you can free — so the Map and Clean up " +
                       "can tell you what's safe to delete and why. " +
                       "It reads some file contents (media metadata, image fingerprints) as well as " +
                       "names and sizes. Nothing is uploaded. It runs at the end of this same scan."

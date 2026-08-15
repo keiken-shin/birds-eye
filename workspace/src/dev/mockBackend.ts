@@ -110,6 +110,20 @@ type FileFix = {
   modified_at: number | null;
 };
 
+/**
+ * Stable per-path id, so a mock row carries the `file_id` the real backend
+ * returns. Paths are unique in the fixtures, so FNV-1a over the path is enough
+ * — this only has to be deterministic across a reload, not collision-proof.
+ */
+export const mockFileId = (path: string) => {
+  let h = 2166136261;
+  for (let i = 0; i < path.length; i += 1) {
+    h ^= path.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 1_000_000) + 1;
+};
+
 const file = (
   path: string,
   sizeGb: number,
@@ -625,7 +639,7 @@ type CleanupLogFix = {
   size: number;
   cleaned_at: number;
   reason: string;
-  restore_status: "pending" | "in_recycle_bin" | "restored" | "expired";
+  restore_status: "pending" | "in_recycle_bin" | "restore_pending" | "restored" | "expired";
   expires_at: number | null;
 };
 
@@ -638,7 +652,7 @@ type MoveLogRow = {
   size: number;
   moved_at: number;
   modified_at: number | null;
-  restore_status: "moved" | "restored";
+  restore_status: "move_pending" | "moved" | "restore_pending" | "restored";
 };
 
 let MOVE_LOG: MoveLogRow[] = [
@@ -654,6 +668,46 @@ let MOVE_LOG: MoveLogRow[] = [
   },
 ];
 let nextMoveLogId = 2;
+
+/**
+ * Draft relocation plans, by id. Every move goes through a plan now — including
+ * the Move-to-folder dialog, which used to call a raw move command — so execute
+ * has to act on what was actually planned rather than on a fixed fixture.
+ */
+const RELOCATION_PLANS = new Map<number, Array<{ from: string; to: string }>>();
+let nextRelocationPlanId = 4242;
+
+const STAGED_KEY = "be.mock.staged";
+let nextStagedId = 1;
+type MockStagedItem = {
+  id: number;
+  kind: "file" | "folder";
+  path: string;
+  file_id: number | null;
+  name: string;
+  bytes: number;
+  verdict: string | null;
+  reason: string | null;
+  group_name: string | null;
+  note: string | null;
+  added_at: number;
+};
+function readStaged(): MockStagedItem[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STAGED_KEY) ?? "[]") as MockStagedItem[];
+    nextStagedId = Math.max(nextStagedId, ...raw.map((i) => i.id + 1), 1);
+    return raw;
+  } catch {
+    return [];
+  }
+}
+function writeStaged(items: MockStagedItem[]) {
+  try {
+    localStorage.setItem(STAGED_KEY, JSON.stringify(items));
+  } catch {
+    /* private mode — staging just stops persisting */
+  }
+}
 
 let CLEANUP_LOG: CleanupLogFix[] = [
   {
@@ -895,6 +949,7 @@ function searchFiles(args: {
   })
     .slice(0, args.limit ?? 200)
     .map((f) => ({
+      file_id: mockFileId(f.path),
       path: f.path,
       name: f.path.split("\\").pop()!,
       size: f.size,
@@ -917,8 +972,8 @@ const SAVED_VIEWS = [
 
 function runSavedView(viewId: string): Array<{ file_id: number; path: string; size: number }> {
   const pick = (paths: string[]) =>
-    FILES.filter((f) => paths.some((p) => f.path.startsWith(p))).map((f, i) => ({
-      file_id: 100 + i,
+    FILES.filter((f) => paths.some((p) => f.path.startsWith(p))).map((f) => ({
+      file_id: mockFileId(f.path),
       path: f.path,
       size: f.size,
     }));
@@ -959,7 +1014,7 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
     case "query_index":
       return done({
         folders: FOLDERS,
-        files: FILES,
+        files: FILES.map((f) => ({ ...f, file_id: mockFileId(f.path) })),
         extensions: EXTENSIONS,
         duplicate_groups: DUP_GROUPS.map(({ files, ...group }) => ({
           ...group,
@@ -1014,7 +1069,7 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       return done(searchFiles(request as Parameters<typeof searchFiles>[0]));
     case "duplicate_group_files": {
       const group = DUP_GROUPS.find((g) => g.id === (request.group_id as number));
-      return done(group?.files ?? []);
+      return done((group?.files ?? []).map((f) => ({ ...f, file_id: mockFileId(f.path) })));
     }
     case "treemap_lens_data":
       return done(ontologyEnabled ? LENS : []);
@@ -1072,8 +1127,16 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       // branch of the review gate is reachable in the browser.
       const dropped = moves.length > 3 ? [{ path: moves[0].from, reason: "no longer on disk" }] : [];
       const kept = moves.slice(dropped.length);
+      const planId = nextRelocationPlanId++;
+      // Stored, because every move now routes through a plan — including the
+      // Move-to-folder dialog, which used to call a raw move command. Execute
+      // has to act on what was actually planned, not on a fixed fixture.
+      RELOCATION_PLANS.set(
+        planId,
+        kept.map((m) => ({ from: m.from, to: m.to }))
+      );
       return done({
-        plan_id: 4242,
+        plan_id: planId,
         total_files: kept.length,
         total_bytes: kept.length * 100_000_000,
         items: kept.map((m, i) => ({
@@ -1096,23 +1159,36 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
           moved: 0,
           bytes_moved: 0,
           pairs: [],
+          entry_ids: [],
           failed: [{ path: `${j("Downloads")}\\setup-0.exe`, reason: "locked by another process" }],
         });
       }
-      const card = RELOCATION_CARDS[0];
-      const payload = JSON.parse(card.payload);
-      const pairs = payload.members.slice(0, 3).map((m: { path: string; name: string }) => ({
-        from: m.path,
-        to: `${payload.destination}\\${m.name}`,
-      }));
-      RELOCATION_CARDS = RELOCATION_CARDS.filter((c) => c.id !== card.id);
-      // A reviewed plan is still a move, so it leaves the same durable receipt.
-      for (const pair of pairs as Array<{ from: string; to: string }>) {
+      const stored = RELOCATION_PLANS.get(planId);
+      let pairs: Array<{ from: string; to: string }>;
+      if (stored) {
+        pairs = stored;
+      } else {
+        // A reviewed relocation card, which builds its plan from the card itself.
+        const card = RELOCATION_CARDS[0];
+        const payload = JSON.parse(card.payload);
+        pairs = payload.members
+          .slice(0, 3)
+          .map((m: { path: string; name: string }) => ({
+            from: m.path,
+            to: `${payload.destination}\\${m.name}`,
+          }));
+        RELOCATION_CARDS = RELOCATION_CARDS.filter((c) => c.id !== card.id);
+      }
+      RELOCATION_PLANS.delete(planId);
+      // The executor owns the move log: one row per move, opened before the
+      // bytes move and promoted after. Its id is what undo uses.
+      const entryIds: number[] = [];
+      for (const pair of pairs) {
         const f = FILES.find((x) => x.path === pair.from);
+        const entryId = nextMoveLogId++;
         MOVE_LOG.push({
-          id: nextMoveLogId++,
-          file_id: null, // the fixtures carry paths, not row ids
-
+          id: entryId,
+          file_id: f ? mockFileId(pair.from) : null,
           from_path: pair.from,
           to_path: pair.to,
           size: f?.size ?? 100_000_000,
@@ -1120,13 +1196,16 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
           modified_at: f?.modified_at ?? null,
           restore_status: "moved",
         });
+        entryIds.push(entryId);
         if (f) f.path = pair.to;
+        dropFromDupGroups(pair.from);
       }
       return done({
         plan_id: planId,
         moved: pairs.length,
         bytes_moved: pairs.length * 100_000_000,
         pairs,
+        entry_ids: entryIds,
         failed: [],
       });
     }
@@ -1173,6 +1252,7 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
     case "cleanup_plan": {
       const reasons = (request.reasons as string[]) ?? [];
       const prefix = (request.path_prefix as string | null) ?? null;
+      const fileIds = (request.file_ids as number[] | null) ?? null;
       const reasonByPrefix: Array<[string, string]> = [
         [j("Projects", "forge", "target"), "safe-derivative"],
         [j("Projects", "webshop", "node_modules"), "scratch"],
@@ -1183,6 +1263,35 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
         [j("Downloads", "Installers"), "scratch"],
         [j("Projects", "webshop"), "finished-project-cruft"],
       ];
+      // An explicit selection is answered from the file universe, not the
+      // folder one, and only ever returns rows that are actually in it — the
+      // backend intersects live candidates with the reviewed ids, so an id it
+      // no longer recognises yields nothing rather than a guess.
+      if (fileIds) {
+        const wanted = new Set(fileIds);
+        const picked = FILES.filter((f) => wanted.has(mockFileId(f.path)))
+          .map((f, i) => ({
+            file_id: mockFileId(f.path),
+            entity_id: 900 + i,
+            path: f.path,
+            size: f.size,
+            modified_at: f.modified_at,
+            reason: reasonByPrefix.find(([p]) => f.path.startsWith(p))?.[1] ?? "scratch",
+          }))
+          // Honour `reasons` here too. Without it every picked file always came
+          // back a candidate, so the held-back branch — the thing recording the
+          // reviewed ids exists to make visible — could never be reached in the
+          // browser.
+          .filter((c) => !reasons.length || reasons.includes(c.reason));
+        const selection = {
+          plan_id: nextPlanId++,
+          total_files: picked.length,
+          total_bytes: picked.reduce((s, c) => s + c.size, 0),
+          candidates: picked,
+        };
+        PLANS.set(selection.plan_id, selection);
+        return done(selection);
+      }
       const candidates = reasonByPrefix
         .filter(([p, r]) => (!prefix || p.startsWith(prefix) || prefix.startsWith(p)) && (!reasons.length || reasons.includes(r)))
         .map(([p, r], i) => {
@@ -1248,7 +1357,7 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       const entry = MOVE_LOG.find((m) => m.id === id);
       // The real backend refuses rather than guesses, and says so in a finished
       // sentence. Mirror the shape so the error path is reachable in the browser.
-      if (!entry || entry.restore_status !== "moved") {
+      if (!entry || entry.restore_status === "restored") {
         throw new Error("That move was already put back.");
       }
       const f = FILES.find((x) => x.path === entry.to_path);
@@ -1259,6 +1368,47 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
     case "restore_from_cleanup_log": {
       const id = request.entry_id as number;
       CLEANUP_LOG = CLEANUP_LOG.map((e) => (e.id === id ? { ...e, restore_status: "restored" } : e));
+      return done(null);
+    }
+    // The staging desk. Backed by localStorage in the mock precisely because
+    // the point of the feature is that it survives a restart — an in-memory
+    // fixture would make the browser pass demonstrate the opposite.
+    case "stage_item": {
+      const items = readStaged().filter((i) => i.path !== request.path);
+      const prev = readStaged().find((i) => i.path === request.path);
+      items.push({
+        id: prev?.id ?? nextStagedId++,
+        kind: request.kind as "file" | "folder",
+        path: request.path as string,
+        file_id: (request.file_id as number | null) ?? null,
+        name: request.name as string,
+        bytes: (request.bytes as number) ?? 0,
+        verdict: (request.verdict as string | null) ?? null,
+        reason: (request.reason as string | null) ?? null,
+        group_name: (request.group_name as string | null) ?? prev?.group_name ?? null,
+        note: (request.note as string | null) ?? prev?.note ?? null,
+        added_at: prev?.added_at ?? Math.floor(Date.now() / 1000),
+      });
+      writeStaged(items);
+      return done(null);
+    }
+    case "unstage_item":
+      writeStaged(readStaged().filter((i) => i.path !== request.path));
+      return done(null);
+    case "staged_items":
+      return done(readStaged());
+    case "set_staged_group": {
+      const paths = new Set(request.paths as string[]);
+      writeStaged(
+        readStaged().map((i) =>
+          paths.has(i.path) ? { ...i, group_name: (request.group_name as string | null) ?? null } : i
+        )
+      );
+      return done(null);
+    }
+    case "clear_staged": {
+      const g = (request.group_name as string | null) ?? null;
+      writeStaged(g === null ? [] : readStaged().filter((i) => i.group_name !== g));
       return done(null);
     }
     case "pin_file":
@@ -1274,33 +1424,6 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
         dropFromDupGroups(p);
       }
       return done({ failed: [] });
-    }
-    case "move_files": {
-      const moves = (request.moves as Array<{ from: string; to: string }>) ?? [];
-      let moved = 0;
-      for (const m of moves) {
-        const f = FILES.find((x) => x.path === m.from);
-        // Every relocation routes through here in the real backend, and that is
-        // where the durable receipt is written. Same here, so Recently cleaned
-        // can offer to put it back.
-        MOVE_LOG.push({
-          id: nextMoveLogId++,
-          file_id: null, // the fixtures carry paths, not row ids
-
-          from_path: m.from,
-          to_path: m.to,
-          size: f?.size ?? 0,
-          moved_at: Math.floor(Date.now() / 1000),
-          modified_at: f?.modified_at ?? null,
-          restore_status: "moved",
-        });
-        if (f) f.path = m.to;
-        // The real backend flags the source row deleted; the destination only
-        // reappears after a rescan — so it leaves its duplicate group for now.
-        dropFromDupGroups(m.from);
-        moved++;
-      }
-      return done({ moved, failed: [] });
     }
     case "file_provenance":
       return done({

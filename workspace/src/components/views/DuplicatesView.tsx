@@ -10,7 +10,7 @@ import { useIndexData } from "../../state/indexData";
 import { useWorkspace } from "../../state/workspaceStore";
 import { baseName } from "../../lib/discoveries";
 import { FilePreview } from "../FilePreview";
-import { MoveDialog } from "../MoveDialog";
+import { MoveDialog, type MoveTarget } from "../MoveDialog";
 import { Card, EmptyState, Meter, SectionLabel } from "../ui/Card";
 import { Button, IconButton } from "../ui/Button";
 import { Tag } from "../ui/Chip";
@@ -70,7 +70,7 @@ export function DuplicatesView() {
       </button>
     ) : null;
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [movePaths, setMovePaths] = useState<string[] | null>(null);
+  const [moveTargets, setMoveTargets] = useState<MoveTarget[] | null>(null);
   const [files, setFiles] = useState<NativeDuplicateFile[] | null>(null);
   const [filesError, setFilesError] = useState<string | null>(null);
   const [stagingAll, setStagingAll] = useState(false);
@@ -126,6 +126,7 @@ export function DuplicatesView() {
       reason: "duplicate copy",
       verdict: "review",
       kind: "file",
+      fileId: f.file_id,
     });
 
   /** Keep this copy: stage every other listed copy (and release this one if staged). */
@@ -298,7 +299,7 @@ export function DuplicatesView() {
                     return (
                       <Card
                         key={f.path}
-                        onClick={() => select({ kind: "file", path: f.path, name, bytes: f.size })}
+                        onClick={() => select({ kind: "file", path: f.path, name, bytes: f.size, fileId: f.file_id })}
                         className={`flex cursor-pointer flex-col p-3 transition-colors ${
                           staged ? "border-primary-edge" : "hover:border-line-strong"
                         }`}
@@ -348,7 +349,7 @@ export function DuplicatesView() {
                             className="flex-none self-center"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setMovePaths([f.path]);
+                              setMoveTargets([{ path: f.path, fileId: f.file_id }]);
                             }}
                           />
                         </div>
@@ -362,10 +363,10 @@ export function DuplicatesView() {
         </div>
       </div>
 
-      {movePaths ? (
+      {moveTargets ? (
         <MoveDialog
-          paths={movePaths}
-          onClose={() => setMovePaths(null)}
+          files={moveTargets}
+          onClose={() => setMoveTargets(null)}
           // The dialog's refresh bumps dataVersion, which refetches this group's copies.
           onMoved={() => {}}
         />

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { CircleCheck, TriangleAlert, X } from "lucide-react";
 import { formatBytes } from "@bridge/domain";
-import { moveFiles, restoreCleanupEntry } from "@bridge/nativeClient";
-import { reversePairs } from "../lib/undo";
+import { restoreCleanupEntry, restoreMove } from "@bridge/nativeClient";
 import { useIndexData } from "../state/indexData";
 import { useScanController } from "../state/scanController";
 import { useWorkspace } from "../state/workspaceStore";
@@ -25,12 +24,22 @@ export function UndoToast() {
     setBusy(true);
     try {
       if (undo.kind === "relocate") {
-        // No dedicated undo command — move_files takes (from, to) pairs, so
-        // undo is just the executed pairs reversed.
-        const result = await moveFiles(reversePairs(undo.pairs), indexPath);
-        if (result.failed.length) {
+        // Undo goes through the durable move log, one entry at a time. It used
+        // to reverse the executed pairs through a raw move, which meant the undo
+        // died with the window and the log gained a second row claiming both
+        // directions happened. The log rows outlive the process, so the same
+        // put-back is still available from Recently moved tomorrow.
+        let moveFailures = 0;
+        for (const id of undo.entryIds) {
+          try {
+            await restoreMove(indexPath, id);
+          } catch {
+            moveFailures++;
+          }
+        }
+        if (moveFailures) {
           setError(
-            `${result.failed.length} of ${undo.pairs.length} files could not be moved back — see their original folders`
+            `${moveFailures} of ${undo.entryIds.length} files could not be moved back — see Recently moved`
           );
         } else {
           setUndo(null);
@@ -89,7 +98,7 @@ export function UndoToast() {
 
   if (!undo) return null;
 
-  const nothingToUndo = undo.kind === "relocate" ? !undo.pairs.length : !undo.entryIds.length;
+  const nothingToUndo = !undo.entryIds.length;
   const scanBlocked = undo.kind === "relocate" && scanView.status === "scanning";
 
   return (
@@ -105,8 +114,8 @@ export function UndoToast() {
             "A scan is running — undo will be available once it finishes."
           ) : undo.kind === "relocate" ? (
             <>
-              Moved <b className="mono text-ink">{undo.pairs.length}</b> file
-              {undo.pairs.length === 1 ? "" : "s"}
+              Moved <b className="mono text-ink">{undo.entryIds.length}</b> file
+              {undo.entryIds.length === 1 ? "" : "s"}
             </>
           ) : (
             <>

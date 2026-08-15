@@ -1,7 +1,7 @@
 import { useWorkspace } from "../state/workspaceStore";
 import { OverviewView } from "./views/OverviewView";
 import { TreemapView } from "./views/TreemapView";
-import { BoardView } from "./views/BoardView";
+import { StagedView } from "./views/StagedView";
 import { FilesView } from "./views/FilesView";
 import { DuplicatesView } from "./views/DuplicatesView";
 import { CleanupView } from "./views/CleanupView";
@@ -16,7 +16,7 @@ export function CenterStage() {
     <div className="relative flex min-w-0 flex-1 flex-col bg-window">
       {view === "overview" && <OverviewView />}
       {view === "treemap" && <TreemapView />}
-      {view === "board" && <BoardView />}
+      {view === "board" && <StagedView />}
       {view === "files" && <FilesView />}
       {view === "duplicates" && <DuplicatesView />}
       {view === "cleanup" && <CleanupView />}

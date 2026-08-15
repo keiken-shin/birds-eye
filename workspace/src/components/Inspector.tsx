@@ -31,7 +31,7 @@ import { Kbd, Tag } from "./ui/Chip";
 import { CategoryBar, type Segment } from "./ui/charts";
 import { EnableIntelligenceCard } from "./EnableIntelligenceCard";
 import { FilePreview } from "./FilePreview";
-import { MoveDialog } from "./MoveDialog";
+import { MoveDialog, type MoveTarget } from "./MoveDialog";
 import type { Verdict } from "../state/types";
 
 /**
@@ -65,11 +65,11 @@ function fmtDate(sec: number): string {
 
 export function Inspector() {
   const { tree, overview, lensByPath } = useIndexData();
-  const { selected, ontologyEnabled, isStaged, toggleStaged, pinToBoard, isPinned, select } =
+  const { selected, ontologyEnabled, isStaged, toggleStaged, select } =
     useWorkspace();
 
   const panel = useSidePanel();
-  const [movePaths, setMovePaths] = useState<string[] | null>(null);
+  const [moveTargets, setMoveTargets] = useState<MoveTarget[] | null>(null);
   const [native, setNative] = useState(false);
   useEffect(() => {
     let alive = true;
@@ -82,7 +82,6 @@ export function Inspector() {
   }, []);
 
   const node = selected ? tree?.byPath.get(selected.path) : undefined;
-  const pinned = selected ? isPinned(selected.path) : false;
   const lensRow: NativeTreemapLensFolder | null = selected
     ? lensByPath.get(selected.path) ?? null
     : null;
@@ -121,6 +120,7 @@ export function Inspector() {
       reason: lensRow?.cleanup_reason ?? null,
       verdict,
       kind: "folder",
+      fileId: null,
     });
   }, [selected, verdict, reclaimable, lensRow, toggleStaged]);
 
@@ -133,6 +133,7 @@ export function Inspector() {
       reason: null,
       verdict: "review",
       kind: "file",
+      fileId: selected.fileId ?? null,
     });
   }, [selected, toggleStaged]);
 
@@ -330,20 +331,14 @@ export function Inspector() {
             ) : null}
 
             <div className="flex items-center gap-1">
-              <IconButton
-                icon={Network}
-                label={pinned ? "Already pinned to Findings" : "Pin to Findings"}
-                active={pinned}
-                disabled={pinned}
-                onClick={() =>
-                  pinToBoard({ path: selected.path, name: selected.name, bytes: selected.bytes })
-                }
-              />
               {isFile ? (
                 <IconButton
                   icon={FolderInput}
                   label="Move to folder…"
-                  onClick={() => setMovePaths([selected.path])}
+                  onClick={() =>
+                    selected.fileId != null &&
+                    setMoveTargets([{ path: selected.path, fileId: selected.fileId }])
+                  }
                 />
               ) : null}
               {native ? (
@@ -365,10 +360,10 @@ export function Inspector() {
         </>
       )}
 
-      {movePaths ? (
+      {moveTargets ? (
         <MoveDialog
-          paths={movePaths}
-          onClose={() => setMovePaths(null)}
+          files={moveTargets}
+          onClose={() => setMoveTargets(null)}
           // The moved file's path is stale — drop the selection instead of showing it.
           onMoved={() => select(null)}
         />

@@ -335,7 +335,7 @@ export function TimelineView() {
                     <div
                       key={f.path}
                       className="group flex cursor-pointer items-center gap-3 rounded-[10px] px-2 py-1.5 transition-colors hover:bg-window"
-                      onClick={() => select({ kind: "file", path: f.path, name, bytes: f.size })}
+                      onClick={() => select({ kind: "file", path: f.path, name, bytes: f.size, fileId: f.file_id })}
                     >
                       <span
                         className="flex h-8 w-8 flex-none items-center justify-center rounded-lg"
@@ -371,6 +371,7 @@ export function TimelineView() {
                             reason: days !== null ? `untouched ${formatAge(days)}` : null,
                             verdict: "review",
                             kind: "file",
+                            fileId: f.file_id,
                           });
                         }}
                       >

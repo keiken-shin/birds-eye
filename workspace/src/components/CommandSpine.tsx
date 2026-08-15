@@ -17,7 +17,7 @@ import { Kbd } from "./ui/Chip";
  * literal file search on the Files view.
  */
 export function CommandSpine() {
-  const { runQuery, view, setView, pinned } = useWorkspace();
+  const { runQuery, view, setView, staged } = useWorkspace();
   const { ontology } = useIndexData();
   const scan = useScanController();
   const [focused, setFocused] = useState(false);
@@ -51,7 +51,9 @@ export function CommandSpine() {
   };
 
   const running = scan.view.status === "scanning" ? scan.view : null;
-  const boardBadge = (ontology?.pending_findings ?? 0) + pinned.length;
+  // The badge counts what is on the desk. Findings waiting on a yes or no
+  // are badged where they now live — above the Clean up list.
+  const boardBadge = staged.length;
   const catalogBadge = ontology?.pending_relocations ?? 0;
 
   return (

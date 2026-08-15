@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 13;
+pub const CURRENT_SCHEMA_VERSION: u32 = 15;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -686,6 +686,101 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (13, strftime('%s', 'now'));
 "#;
 
+/// Both mutation logs gain a transient in-flight state, so a crash between the
+/// filesystem write and the bookkeeping write leaves a row that says so instead
+/// of a row that lies.
+///
+/// `ontology_relocation_log` gains `move_pending` (written before the bytes
+/// move) and `restore_pending` (written before a put-back). `ontology_cleanup_log`
+/// gains `restore_pending` for the same reason on its own restore path, which
+/// previously stranded exactly the way relocation's did: filesystem restored,
+/// row still `in_recycle_bin`, every retry refusing forever.
+///
+/// SQLite cannot alter a CHECK constraint, so both are table rebuilds — the same
+/// dance MIGRATION_008 did to admit `pending`.
+pub const MIGRATION_014: &str = r#"
+CREATE TABLE ontology_relocation_log_v14 (
+  id INTEGER PRIMARY KEY,
+  file_id INTEGER,
+  from_path TEXT NOT NULL,
+  to_path TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  moved_at INTEGER NOT NULL,
+  modified_at INTEGER,
+  restore_status TEXT NOT NULL
+    CHECK (restore_status IN ('move_pending', 'moved', 'restore_pending', 'restored'))
+    DEFAULT 'moved'
+);
+
+INSERT INTO ontology_relocation_log_v14
+SELECT id, file_id, from_path, to_path, size, moved_at, modified_at, restore_status
+FROM ontology_relocation_log;
+
+DROP TABLE ontology_relocation_log;
+ALTER TABLE ontology_relocation_log_v14 RENAME TO ontology_relocation_log;
+
+CREATE INDEX IF NOT EXISTS idx_relocation_log_moved_at ON ontology_relocation_log(moved_at DESC, id DESC);
+
+CREATE TABLE ontology_cleanup_log_v14 (
+  id INTEGER PRIMARY KEY,
+  cleanup_plan_id INTEGER NOT NULL REFERENCES ontology_cleanup_plans(id) ON DELETE CASCADE,
+  file_id INTEGER NOT NULL,
+  original_path TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  cleaned_at INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  gating_facts TEXT NOT NULL,
+  restore_status TEXT NOT NULL
+    CHECK (restore_status IN ('pending', 'in_recycle_bin', 'restore_pending', 'restored', 'expired'))
+    DEFAULT 'in_recycle_bin',
+  expires_at INTEGER
+);
+
+INSERT INTO ontology_cleanup_log_v14
+SELECT id, cleanup_plan_id, file_id, original_path, size, cleaned_at, reason,
+       gating_facts, restore_status, expires_at
+FROM ontology_cleanup_log;
+
+DROP TABLE ontology_cleanup_log;
+ALTER TABLE ontology_cleanup_log_v14 RENAME TO ontology_cleanup_log;
+
+CREATE INDEX IF NOT EXISTS idx_cleanup_log_status ON ontology_cleanup_log(restore_status, expires_at);
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (14, strftime('%s', 'now'));
+"#;
+
+/// Staging, made durable.
+///
+/// The tray that collects things from every view lived in React state, so it
+/// died with the window — which is the difference between a desk you come back
+/// to and a clipboard you drop on the way to the kitchen.
+///
+/// Keyed on `path`, not `file_id`, because **folders are staged too** and have
+/// no file row: a folder selection is a path-prefix scope, which is exactly what
+/// picking a folder means. `file_id` is filled in for files so a cleanup plan
+/// can record the rows a person actually reviewed without a second lookup.
+pub const MIGRATION_015: &str = r#"
+CREATE TABLE IF NOT EXISTS ontology_staged_items (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('file', 'folder')),
+  path TEXT NOT NULL UNIQUE,
+  file_id INTEGER,
+  name TEXT NOT NULL,
+  bytes INTEGER NOT NULL DEFAULT 0,
+  verdict TEXT,
+  reason TEXT,
+  group_name TEXT,
+  note TEXT,
+  added_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_staged_group ON ontology_staged_items(group_name, added_at DESC);
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (15, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -700,6 +795,8 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (11, MIGRATION_011),
     (12, MIGRATION_012),
     (13, MIGRATION_013),
+    (14, MIGRATION_014),
+    (15, MIGRATION_015),
 ];
 
 #[cfg(test)]
@@ -708,8 +805,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 13);
-        assert_eq!(ALL_MIGRATIONS.len(), 13);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 15);
+        assert_eq!(ALL_MIGRATIONS.len(), 15);
     }
 
     #[test]

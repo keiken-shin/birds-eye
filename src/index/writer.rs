@@ -86,6 +86,8 @@ pub struct FileSummary {
     pub extension: Option<String>,
     pub media_kind: String,
     pub modified_at: Option<i64>,
+    /// `files.id` â see `FileSearchResult::id`.
+    pub id: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,6 +98,10 @@ pub struct FileSearchResult {
     pub extension: Option<String>,
     pub media_kind: String,
     pub modified_at: Option<i64>,
+    /// `files.id`. Selected last so the existing column indices stay put.
+    /// Staging and relocation both key on this — a path-only row cannot be put
+    /// into a plan, because every plan re-verifies against the index by id.
+    pub id: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -126,6 +132,8 @@ pub struct DuplicateFileSummary {
     pub size: i64,
     pub modified_at: Option<i64>,
     pub hash_state: i64,
+    /// `files.id` — see `FileSearchResult::id`.
+    pub id: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -538,7 +546,7 @@ impl IndexWriter {
 
     pub fn largest_files(&self, limit: usize) -> Result<Vec<FileSummary>, IndexError> {
         let mut statement = self.connection.prepare(
-            "SELECT path, size, extension, media_kind, modified_at
+            "SELECT path, size, extension, media_kind, modified_at, id
              FROM files
              WHERE deleted_at IS NULL
              ORDER BY size DESC
@@ -551,6 +559,7 @@ impl IndexWriter {
                 extension: row.get(2)?,
                 media_kind: row.get(3)?,
                 modified_at: row.get(4)?,
+                id: row.get(5)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -654,7 +663,7 @@ impl IndexWriter {
         let escaped_query = escape_like_pattern(trimmed_query);
         let pattern = format!("%{escaped_query}%");
         let mut statement = self.connection.prepare(
-            "SELECT path, name, size, extension, media_kind, modified_at
+            "SELECT path, name, size, extension, media_kind, modified_at, id
              FROM files
              WHERE deleted_at IS NULL
                AND (name LIKE ?1 ESCAPE '\\' OR path LIKE ?1 ESCAPE '\\')
@@ -669,6 +678,7 @@ impl IndexWriter {
                 extension: row.get(3)?,
                 media_kind: row.get(4)?,
                 modified_at: row.get(5)?,
+                id: row.get(6)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -763,7 +773,7 @@ impl IndexWriter {
             format!(" LIMIT ?{param_index}")
         };
         let sql = format!(
-            "SELECT path, name, size, extension, media_kind, modified_at
+            "SELECT path, name, size, extension, media_kind, modified_at, id
              FROM files
              WHERE {where_clause}
              ORDER BY size DESC, modified_at DESC{limit_clause}"
@@ -782,6 +792,7 @@ impl IndexWriter {
                 extension: row.get(3)?,
                 media_kind: row.get(4)?,
                 modified_at: row.get(5)?,
+                id: row.get(6)?,
             })
         })?;
         let mut results: Vec<FileSearchResult> = rows.collect::<Result<Vec<_>, _>>()?;
@@ -880,7 +891,7 @@ impl IndexWriter {
         limit: usize,
     ) -> Result<Vec<DuplicateFileSummary>, IndexError> {
         let mut statement = self.connection.prepare(
-            "SELECT files.path, files.size, files.modified_at, files.hash_state
+            "SELECT files.path, files.size, files.modified_at, files.hash_state, files.id
              FROM duplicate_group_files dgf
              JOIN files ON files.id = dgf.file_id
              WHERE dgf.group_id = ?1 AND files.deleted_at IS NULL
@@ -893,6 +904,7 @@ impl IndexWriter {
                 size: row.get(1)?,
                 modified_at: row.get(2)?,
                 hash_state: row.get(3)?,
+                id: row.get(4)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)

@@ -104,7 +104,13 @@ export function LibraryOverlay() {
 
   if (overlay !== "library") return null;
 
-  const movable = moves.filter((m) => m.restore_status === "moved");
+  // `move_pending` is a real, undoable move whose identity was never recorded —
+  // a crash between opening the log row and finishing it. Filtering to "moved"
+  // alone made exactly those rows invisible, which is the opposite of what the
+  // pending state exists for. `restore_pending` is a put-back that was claimed
+  // but not confirmed; retrying it converges rather than repeating a refusal.
+  const MOVE_RESTORABLE = new Set(["moved", "move_pending", "restore_pending"]);
+  const movable = moves.filter((m) => MOVE_RESTORABLE.has(m.restore_status));
   const restorable =
     entries.filter((e) => RESTORABLE.has(e.restore_status)).length + movable.length;
   const nowSec = Math.floor(Date.now() / 1000);
@@ -211,7 +217,13 @@ export function LibraryOverlay() {
                         <span className="truncate text-125 font-medium text-ink">
                           {lastSegment(entry.to_path)}
                         </span>
-                        <Tag tone="blue">MOVED</Tag>
+                        {/* A pending row is a move Bird's Eye was in the middle
+                            of when it stopped. Tagging it MOVED like any other
+                            would be a small lie on the one row where the state
+                            is genuinely uncertain. */}
+                        <Tag tone={entry.restore_status === "moved" ? "blue" : "amber"}>
+                          {entry.restore_status === "moved" ? "MOVED" : "INTERRUPTED"}
+                        </Tag>
                       </div>
                       <div className="mono truncate text-105 text-dim" title={entry.from_path}>
                         was {entry.from_path}
