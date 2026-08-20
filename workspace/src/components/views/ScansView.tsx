@@ -26,7 +26,8 @@ import {
 import { formatBytes, formatCount, lastSegment } from "@bridge/domain";
 import { useWorkspace } from "../../state/workspaceStore";
 import { useIndexData } from "../../state/indexData";
-import { useScanController } from "../../state/scanController";
+import { scanTargetLabel, useScanController } from "../../state/scanController";
+import { capabilitiesForSource } from "../../lib/sourceCapabilities";
 import { Button, IconButton } from "../ui/Button";
 import { Card, EmptyState, Meter, SectionLabel } from "../ui/Card";
 import { Tag } from "../ui/Chip";
@@ -238,15 +239,17 @@ export function ScansView() {
                 <span className="text-105 text-dim">runs after the active scan</span>
               </div>
               <div className="flex flex-col gap-1.5">
-                {queue.map((q, i) => (
+                {queue.map((q, i) => {
+                  const label = scanTargetLabel(q.target);
+                  return (
                   <div
-                    key={`${q.root}:${i}`}
+                    key={`${label}:${i}`}
                     className="flex items-center gap-2.5 rounded-[9px] border border-line-modal bg-inset px-3 py-2"
                   >
                     <ListOrdered size={13} className="flex-none text-label" aria-hidden />
                     <span className="mono flex-none text-11 text-dim">{i + 1}</span>
-                    <span className="min-w-0 truncate text-12 text-ink-soft" title={q.root}>
-                      {q.root}
+                    <span className="min-w-0 truncate text-12 text-ink-soft" title={label}>
+                      {label}
                     </span>
                     <Tag>{q.strategy}</Tag>
                     <IconButton
@@ -257,7 +260,8 @@ export function ScansView() {
                       onClick={() => dequeue(i)}
                     />
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
           ) : null}
@@ -281,6 +285,8 @@ export function ScansView() {
                   const rootName = entry.root_path ? lastSegment(entry.root_path) : "(unknown root)";
                   const issueCount = entry.walk_issues + entry.hash_issues;
                   const issuesOpen = issuesOpenId === entry.index_path;
+                  // Per row, not per active index — this list mixes local and remote scans.
+                  const entryCaps = capabilitiesForSource(entry.source);
 
                   return (
                     <Card
@@ -469,18 +475,24 @@ export function ScansView() {
                                             )}
                                           </div>
                                         </div>
-                                        <IconButton
-                                          icon={ScanSearch}
-                                          label="Check what's using this file"
-                                          size={13}
-                                          onClick={() => checkLock(issue.path)}
-                                        />
-                                        <IconButton
-                                          icon={FolderOpen}
-                                          label="Reveal in Explorer"
-                                          size={13}
-                                          onClick={() => void revealInExplorer(issue.path).catch(() => {})}
-                                        />
+                                        {/* Both act on a file on this PC — an index
+                                            scanned over SSH has neither. */}
+                                        {entryCaps.lockHolders ? (
+                                          <IconButton
+                                            icon={ScanSearch}
+                                            label="Check what's using this file"
+                                            size={13}
+                                            onClick={() => checkLock(issue.path)}
+                                          />
+                                        ) : null}
+                                        {entryCaps.reveal ? (
+                                          <IconButton
+                                            icon={FolderOpen}
+                                            label="Reveal in Explorer"
+                                            size={13}
+                                            onClick={() => void revealInExplorer(issue.path).catch(() => {})}
+                                          />
+                                        ) : null}
                                       </div>
                                     );
                                   })

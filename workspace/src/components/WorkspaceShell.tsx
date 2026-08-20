@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { useWorkspace } from "../state/workspaceStore";
+import { useIndexData } from "../state/indexData";
 import { STAGE_VIEWS } from "../lib/viewRegistry";
+import { capabilitiesForSource } from "../lib/sourceCapabilities";
 import { TitleBar } from "./TitleBar";
 import { CommandSpine } from "./CommandSpine";
 import { ActivityRail } from "./ActivityRail";
@@ -21,6 +23,8 @@ import { SidePanel, usePanelState } from "./ui/SidePanel";
 export function WorkspaceShell() {
   const { setView, setOverlay, openReview, review, overlay, closeReview, view, scopePath, popScopeTo } =
     useWorkspace();
+  const { activeEntry } = useIndexData();
+  const canClean = capabilitiesForSource(activeEntry?.source).mutate;
 
   const scope = usePanelState("be.ws.panel.scope", 230);
   const inspector = usePanelState("be.ws.panel.inspector", 316);
@@ -40,7 +44,8 @@ export function WorkspaceShell() {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key === "Enter") {
         e.preventDefault();
-        openReview();
+        // Same gate as the tray's button: nothing to clean on another machine.
+        if (canClean) openReview();
         return;
       }
       if (mod && e.key.toLowerCase() === "n") {
@@ -81,7 +86,7 @@ export function WorkspaceShell() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [review, overlay, setView, setOverlay, openReview, closeReview, view, scopePath, popScopeTo, inspector]);
+  }, [review, overlay, setView, setOverlay, openReview, closeReview, view, scopePath, popScopeTo, inspector, canClean]);
 
   return (
     <div className="relative flex h-screen flex-col overflow-hidden bg-base text-ink">

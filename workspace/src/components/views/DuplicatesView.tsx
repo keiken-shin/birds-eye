@@ -9,6 +9,7 @@ import {
 import { useIndexData } from "../../state/indexData";
 import { useWorkspace } from "../../state/workspaceStore";
 import { baseName } from "../../lib/discoveries";
+import { capabilitiesForSource } from "../../lib/sourceCapabilities";
 import { FilePreview } from "../FilePreview";
 import { MoveDialog, type MoveTarget } from "../MoveDialog";
 import { Card, EmptyState, Meter, SectionLabel } from "../ui/Card";
@@ -49,6 +50,7 @@ function newestOf(files: NativeDuplicateFile[]): NativeDuplicateFile | null {
  */
 export function DuplicatesView() {
   const { status, overview, dataVersion, activeEntry } = useIndexData();
+  const caps = capabilitiesForSource(activeEntry?.source);
   const { indexPath, toggleStaged, isStaged, select, setOverlay, setView } = useWorkspace();
   const unverified = activeEntry?.hash_issues ?? 0;
 
@@ -90,10 +92,11 @@ export function DuplicatesView() {
   const selectedGroup = groups.find((g) => g.id === selectedId) ?? null;
 
   // Let the asset protocol serve this scan root so previews can load (no-op in dev).
+  // A scan of another machine has no local root to allow, and no preview to load.
   useEffect(() => {
-    if (!indexPath) return;
+    if (!indexPath || !caps.preview) return;
     allowPreviewRoot(indexPath).catch(() => {});
-  }, [indexPath]);
+  }, [indexPath, caps.preview]);
 
   // Auto-select the first (biggest-waste) group; re-select if the current one vanished.
   useEffect(() => {
@@ -343,15 +346,17 @@ export function DuplicatesView() {
                           >
                             {staged ? "Staged" : "Stage"}
                           </Button>
-                          <IconButton
-                            icon={FolderInput}
-                            label="Move to folder…"
-                            className="flex-none self-center"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setMoveTargets([{ path: f.path, fileId: f.file_id }]);
-                            }}
-                          />
+                          {caps.mutate ? (
+                            <IconButton
+                              icon={FolderInput}
+                              label="Move to folder…"
+                              className="flex-none self-center"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setMoveTargets([{ path: f.path, fileId: f.file_id }]);
+                              }}
+                            />
+                          ) : null}
                         </div>
                       </Card>
                     );

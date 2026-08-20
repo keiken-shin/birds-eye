@@ -11,6 +11,7 @@ import {
 import { useIndexData } from "../../state/indexData";
 import { useWorkspace } from "../../state/workspaceStore";
 import { CATEGORIES, CATEGORY_ORDER, categoryOf, type MediaKind } from "../../lib/categories";
+import { capabilitiesForSource } from "../../lib/sourceCapabilities";
 import { Card, EmptyState } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Chip, Tag } from "../ui/Chip";
@@ -63,7 +64,9 @@ export function FilesView() {
     toggleStaged,
     setOverlay,
   } = useWorkspace();
-  const { status, overview, dataVersion } = useIndexData();
+  const { status, overview, dataVersion, activeEntry } = useIndexData();
+  // Moving happens on disk — not available for a scan of another machine.
+  const canMove = capabilitiesForSource(activeEntry?.source).mutate;
 
   const [savedViews, setSavedViews] = useState<NativeSavedView[]>([]);
   const [fetched, setFetched] = useState<FileRow[]>([]);
@@ -429,17 +432,19 @@ export function FilesView() {
                         Clear
                       </button>
                       <span className="flex-1" />
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        icon={FolderInput}
-                        onClick={() => {
-                          movedPathsRef.current = [];
-                          setMoveOpen(true);
-                        }}
-                      >
-                        Move to…
-                      </Button>
+                      {canMove ? (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          icon={FolderInput}
+                          onClick={() => {
+                            movedPathsRef.current = [];
+                            setMoveOpen(true);
+                          }}
+                        >
+                          Move to…
+                        </Button>
+                      ) : null}
                     </div>
                   ) : null}
                   {shown.map((r) => {

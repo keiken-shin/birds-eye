@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { allowPreviewRoot, previewSrc } from "@bridge/nativeClient";
 import { useWorkspace } from "../state/workspaceStore";
+import { useIndexData } from "../state/indexData";
+import { capabilitiesForSource } from "../lib/sourceCapabilities";
 
 const IMAGE_EXT = /\.(jpe?g|png|gif|webp|bmp|svg|ico|avif)$/i;
 const VIDEO_EXT = /\.(mp4|webm|mov|m4v)$/i;
@@ -14,13 +16,18 @@ const AUDIO_EXT = /\.(mp3|wav|flac|ogg|m4a)$/i;
  */
 export function FilePreview({ path }: { path: string }) {
   const { indexPath } = useWorkspace();
-  const kind = IMAGE_EXT.test(path)
-    ? "image"
-    : VIDEO_EXT.test(path)
-      ? "video"
-      : AUDIO_EXT.test(path)
-        ? "audio"
-        : null;
+  const { activeEntry } = useIndexData();
+  // A scan of another machine has nothing here to load — no preview, no request.
+  const canPreview = capabilitiesForSource(activeEntry?.source).preview;
+  const kind = !canPreview
+    ? null
+    : IMAGE_EXT.test(path)
+      ? "image"
+      : VIDEO_EXT.test(path)
+        ? "video"
+        : AUDIO_EXT.test(path)
+          ? "audio"
+          : null;
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
 

@@ -1,6 +1,8 @@
 import { ArrowRight, X } from "lucide-react";
 import { formatBytes } from "@bridge/domain";
 import { useWorkspace } from "../state/workspaceStore";
+import { useIndexData } from "../state/indexData";
+import { REMOTE_ACTION_HINT, capabilitiesForSource } from "../lib/sourceCapabilities";
 import { Button } from "./ui/Button";
 import { SectionLabel } from "./ui/Card";
 
@@ -23,6 +25,9 @@ type Chip = {
 export function CleanupTray() {
   const { staged, toggleStaged, openReview, stagedMoves, toggleStagedMove, openRelocateReview } =
     useWorkspace();
+  const { activeEntry } = useIndexData();
+  // Cleaning and moving happen on disk — a scan of another machine can't do either.
+  const canAct = capabilitiesForSource(activeEntry?.source).mutate;
 
   const cleanBytes = staged.reduce((s, item) => s + item.bytes, 0);
   const moveBytes = stagedMoves.reduce((s, item) => s + item.bytes, 0);
@@ -86,7 +91,7 @@ export function CleanupTray() {
           </>
         ) : (
           <span className="text-12 italic text-label">
-            Nothing staged — select something and add it here.
+            {canAct ? "Nothing staged — select something and add it here." : REMOTE_ACTION_HINT}
           </span>
         )}
       </div>
@@ -101,6 +106,8 @@ export function CleanupTray() {
           variant="primary"
           icon={ArrowRight}
           onClick={() => openReview()}
+          disabled={!canAct}
+          title={canAct ? undefined : REMOTE_ACTION_HINT}
           className="flex-none"
         >
           Review &amp; clean
@@ -111,6 +118,8 @@ export function CleanupTray() {
           variant="primary"
           icon={ArrowRight}
           onClick={openRelocateReview}
+          disabled={!canAct}
+          title={canAct ? undefined : REMOTE_ACTION_HINT}
           className="flex-none"
         >
           Review &amp; move

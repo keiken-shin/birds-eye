@@ -11,6 +11,7 @@ import { MoveDialog, type MoveTarget } from "../MoveDialog";
 import { ViewHeader } from "./ViewHeader";
 import type { StagedItem } from "../../state/types";
 import { discardCarryover, readCarryover, type Carryover } from "../../lib/boardCarryover";
+import { REMOTE_ACTION_HINT, capabilitiesForSource } from "../../lib/sourceCapabilities";
 
 /**
  * The desk. Things you set aside while looking around, kept until you decide.
@@ -27,7 +28,10 @@ import { discardCarryover, readCarryover, type Carryover } from "../../lib/board
 export function StagedView() {
   const { staged, toggleStaged, clearStaged, groupStaged, openReview, setOverlay, select, indexPath } =
     useWorkspace();
-  const { status } = useIndexData();
+  const { status, activeEntry } = useIndexData();
+  // Moving and deleting happen on disk — neither is available for a scan of
+  // another machine, so the desk keeps the items and drops the two actions.
+  const canAct = capabilitiesForSource(activeEntry?.source).mutate;
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [newGroup, setNewGroup] = useState("");
   const [moveTargets, setMoveTargets] = useState<MoveTarget[] | null>(null);
@@ -172,7 +176,7 @@ export function StagedView() {
                   <span className="min-w-0 flex-1 text-105 text-dim">
                     {formatCount(items.length)} · {formatBytes(bytes)}
                   </span>
-                  {movable.length ? (
+                  {movable.length && canAct ? (
                     <Button
                       size="sm"
                       variant="subtle"
@@ -302,6 +306,8 @@ export function StagedView() {
                 size="sm"
                 variant="primary"
                 icon={Trash2}
+                disabled={!canAct}
+                title={canAct ? undefined : REMOTE_ACTION_HINT}
                 onClick={() => openReview(picked.size ? [...picked] : undefined)}
               >
                 {picked.size ? `Review & delete ${formatCount(picked.size)}` : "Review & delete all"}

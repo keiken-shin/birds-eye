@@ -4,8 +4,10 @@ import {
   listenNativeJobEvents,
   nativeJobEvents,
   startNativeScan,
+  startScanJobForSsh,
   type NativeJobEvent,
   type NativeJobStatus,
+  type SshSource,
 } from "@bridge/nativeClient";
 import type { ScanStrategy } from "@bridge/domain";
 
@@ -107,10 +109,15 @@ export function useScanJob(onComplete?: (indexPath: string) => void) {
     };
   }, [view.jobId, apply]);
 
-  const start = useCallback(async (root: string, strategy: ScanStrategy, enableIntelligence?: boolean) => {
+  // A folder on this PC or one on another machine over SSH: two commands, one
+  // job stream — everything downstream of the start call is identical.
+  const start = useCallback(async (target: string | SshSource, strategy: ScanStrategy, enableIntelligence?: boolean) => {
     lineCount.current = 0;
     try {
-      const { jobId, indexPath } = await startNativeScan(root, strategy, enableIntelligence);
+      const { jobId, indexPath } =
+        typeof target === "string"
+          ? await startNativeScan(target, strategy, enableIntelligence)
+          : await startScanJobForSsh(target, strategy, enableIntelligence);
       jobRef.current = { jobId, indexPath };
       setView({ ...IDLE, jobId, indexPath, status: "scanning", message: "Scanning…" });
     } catch (e) {

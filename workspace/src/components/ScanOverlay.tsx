@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderOpen, HardDrive, Info, Play, Sparkles, Zap, type LucideIcon } from "lucide-react";
+import { FolderOpen, HardDrive, Info, Play, Server, Sparkles, Zap, type LucideIcon } from "lucide-react";
 import {
   chooseNativeFolder,
   isNativeRuntime,
@@ -9,7 +9,7 @@ import {
   type NativePhaseTimingEntry,
 } from "@bridge/nativeClient";
 import { formatBytes, formatCount, lastSegment, type ScanStrategy } from "@bridge/domain";
-import { useScanController } from "../state/scanController";
+import { useScanController, type ScanTarget } from "../state/scanController";
 import { useWorkspace } from "../state/workspaceStore";
 import {
   getDefaultEnableIntelligence,
@@ -29,6 +29,19 @@ const STRATEGIES: Array<{ id: ScanStrategy; icon: LucideIcon; title: string; not
 
 /** "C:\" — a whole drive, as opposed to a folder inside one. */
 const DRIVE_ROOT = /^[A-Za-z]:[\\/]?$/;
+
+/** Every text field in this sheet. */
+const FIELD =
+  "mono rounded-[9px] border border-line-input bg-field px-3 py-2.5 text-12 text-ink placeholder:text-dim focus:border-primary-edge focus:outline-none";
+
+/** Empty is fine (the host's default), otherwise it has to be a real TCP port. */
+function portError(value: string): string | null {
+  const t = value.trim();
+  if (!t) return null;
+  return /^\d{1,5}$/.test(t) && Number(t) >= 1 && Number(t) <= 65535
+    ? null
+    : "The port has to be a number between 1 and 65535.";
+}
 
 /** "C:\" → "C:" — what the button and the row call it. */
 const driveName = (root: string) => root.replace(/[\\/]+$/, "");
@@ -117,6 +130,10 @@ export function ScanOverlay() {
   const { overlay, setOverlay } = useWorkspace();
   const { view, enqueue, cancel, reset } = useScanController();
   const [folder, setFolder] = useState("");
+  const [remote, setRemote] = useState(false);
+  const [destination, setDestination] = useState("");
+  const [port, setPort] = useState("");
+  const [remoteFolder, setRemoteFolder] = useState("");
   const [strategy, setStrategy] = useState<ScanStrategy>(getDefaultStrategy);
   const [intelligence, setIntelligence] = useState<boolean>(getDefaultEnableIntelligence);
   const [error, setError] = useState<string | null>(null);
@@ -178,6 +195,16 @@ export function ScanOverlay() {
   const scanning = view.status === "scanning";
   const close = () => setOverlay(null);
   const trimmed = folder.trim();
+  const host = destination.trim();
+  const remoteRoot = remoteFolder.trim();
+  const badPort = portError(port);
+
+  /** What the button will scan — null while the form is still incomplete. */
+  const target: ScanTarget | null = remote
+    ? host && remoteRoot && !badPort
+      ? { destination: host, port: port.trim() ? Number(port.trim()) : undefined, root: remoteRoot }
+      : null
+    : trimmed || null;
 
   const browse = async () => {
     setError(null);
@@ -190,12 +217,12 @@ export function ScanOverlay() {
   };
 
   const scanNow = () => {
-    if (!trimmed) return;
+    if (!target) return;
     setError(null);
     setQueued(false);
     try {
       // Runs now if idle, otherwise joins the FIFO behind the active scan.
-      if (enqueue(trimmed, strategy, intelligence) === "queued") setQueued(true);
+      if (enqueue(target, strategy, intelligence) === "queued") setQueued(true);
     } catch (e) {
       setError(`Couldn't start scan: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -206,10 +233,14 @@ export function ScanOverlay() {
       <span className="min-w-0 flex-1 truncate text-105 text-dim">
         {error ? (
           <span className="text-danger">{error}</span>
+        ) : badPort ? (
+          <span className="text-danger">{badPort}</span>
         ) : queued ? (
           "Added to queue — runs after the current scan."
         ) : scanning ? (
           "A scan is already running — starting another adds it to the queue."
+        ) : remote ? (
+          "Bird's Eye reads the listing over SSH — it copies nothing and installs nothing."
         ) : (
           "Nothing leaves this PC."
         )}
@@ -217,11 +248,11 @@ export function ScanOverlay() {
       <Button
         variant="primary"
         icon={Play}
-        disabled={!trimmed}
+        disabled={!target}
         onClick={scanNow}
-        title={trimmed ? `Scan ${trimmed}` : undefined}
+        title={remote ? (host ? `Scan ${host}` : undefined) : trimmed ? `Scan ${trimmed}` : undefined}
       >
-        {scanLabel(trimmed)}
+        {remote ? (host ? `Scan ${host}` : "Scan") : scanLabel(trimmed)}
       </Button>
     </div>
   );
@@ -270,47 +301,114 @@ export function ScanOverlay() {
         <ScanProgress view={view} timings={timings} />
       ) : (
         <div className="flex flex-col gap-4 px-4.5 py-4">
-          {drives.length ? (
-            <section>
-              <SectionLabel className="mb-2">Your drives</SectionLabel>
-              <div role="radiogroup" aria-label="Drive to scan" className="flex flex-col gap-1.5">
-                {drives.map((d) => (
-                  <DriveRow
-                    key={d.root_path}
-                    drive={d}
-                    selected={trimmed.toLowerCase() === d.root_path.toLowerCase()}
-                    onSelect={() => setFolder(d.root_path)}
-                  />
-                ))}
-              </div>
-            </section>
-          ) : null}
+          <label className="flex cursor-pointer items-center gap-2.5 rounded-[10px] border border-line-modal p-3 transition-colors hover:border-line-strong">
+            <input
+              type="checkbox"
+              checked={remote}
+              onChange={(e) => setRemote(e.target.checked)}
+              className="h-3.5 w-3.5 flex-none accent-[var(--color-primary)]"
+            />
+            <span className="flex flex-none items-center gap-1.5 text-12 font-medium text-ink-soft">
+              <Server size={13} strokeWidth={2} aria-hidden />
+              Remote host (SSH)
+            </span>
+            <span className="ml-auto min-w-0 truncate text-105 text-dim">
+              Scan a Linux machine instead of this PC
+            </span>
+          </label>
 
-          <section>
-            <SectionLabel className="mb-2">Or a folder</SectionLabel>
-            <div className="flex gap-2">
+          {remote ? (
+            <section>
+              <SectionLabel className="mb-2">Host</SectionLabel>
+              <div className="flex gap-2">
+                <input
+                  aria-label="Remote host"
+                  value={destination}
+                  onChange={(e) => setDestination(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") scanNow();
+                  }}
+                  placeholder="user@host"
+                  spellCheck={false}
+                  className={`${FIELD} min-w-0 flex-1`}
+                />
+                <input
+                  aria-label="Port — leave it empty to use 22"
+                  value={port}
+                  onChange={(e) => setPort(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") scanNow();
+                  }}
+                  placeholder="22"
+                  inputMode="numeric"
+                  spellCheck={false}
+                  className={`${FIELD} w-20 flex-none ${badPort ? "border-danger" : ""}`}
+                />
+              </div>
+
+              <SectionLabel className="mb-2 mt-3.5">Folder on that host</SectionLabel>
               <input
-                value={folder}
-                onChange={(e) => setFolder(e.target.value)}
+                aria-label="Folder on that host"
+                value={remoteFolder}
+                onChange={(e) => setRemoteFolder(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") scanNow();
                 }}
-                placeholder="C:\Projects"
+                placeholder="/home/user"
                 spellCheck={false}
-                className="mono min-w-0 flex-1 rounded-[9px] border border-line-input bg-field px-3 py-2.5 text-12 text-ink placeholder:text-dim focus:border-primary-edge focus:outline-none"
+                className={`${FIELD} w-full`}
               />
-              {native ? (
-                <Button variant="ghost" icon={FolderOpen} onClick={() => void browse()}>
-                  Browse
-                </Button>
-              ) : null}
-            </div>
-            {!native ? (
-              <div className="mt-1.5 text-105 text-faint">
-                The folder picker needs the desktop app — type or paste a folder path instead.
+
+              <div className="mt-1.5 text-105 leading-relaxed text-faint">
+                Bird's Eye signs in with your SSH key — a host that asks for a password won't work.
+                Nothing is installed on it, and no file is copied back.
               </div>
-            ) : null}
-          </section>
+            </section>
+          ) : (
+            <>
+              {drives.length ? (
+                <section>
+                  <SectionLabel className="mb-2">Your drives</SectionLabel>
+                  <div role="radiogroup" aria-label="Drive to scan" className="flex flex-col gap-1.5">
+                    {drives.map((d) => (
+                      <DriveRow
+                        key={d.root_path}
+                        drive={d}
+                        selected={trimmed.toLowerCase() === d.root_path.toLowerCase()}
+                        onSelect={() => setFolder(d.root_path)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              <section>
+                <SectionLabel className="mb-2">Or a folder</SectionLabel>
+                <div className="flex gap-2">
+                  <input
+                    value={folder}
+                    onChange={(e) => setFolder(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") scanNow();
+                    }}
+                    placeholder="C:\Projects"
+                    spellCheck={false}
+                    className={`${FIELD} min-w-0 flex-1`}
+                  />
+                  {native ? (
+                    <Button variant="ghost" icon={FolderOpen} onClick={() => void browse()}>
+                      Browse
+                    </Button>
+                  ) : null}
+                </div>
+                {!native ? (
+                  <div className="mt-1.5 text-105 text-faint">
+                    The folder picker needs the desktop app — type or paste a folder path instead.
+                  </div>
+                ) : null}
+              </section>
+            </>
+          )}
 
           <section>
             <SectionLabel className="mb-2">Method</SectionLabel>

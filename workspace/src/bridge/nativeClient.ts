@@ -101,6 +101,10 @@ export type NativeIndexEntry = {
   hash_issues: number;
   /** whether the intelligence (ontology) layer is enabled for this index */
   intelligence: boolean;
+  /** where the files live: "local", or the JSON the backend writes for an SSH
+   *  scan. Absent on indexes built before the backend recorded it — read it
+   *  through `capabilitiesForSource`, never by comparing strings. */
+  source?: string;
 };
 
 export type NativeScanIssue = {
@@ -162,6 +166,32 @@ export async function startNativeScan(
   const response = await invoke<{ job_id: number; index_path: string }>("start_scan_job_for_root", {
     root,
     scanStrategy,
+    // undefined leaves the index's existing intelligence setting untouched.
+    enableIntelligence: enableIntelligence ?? null,
+  });
+
+  return { jobId: response.job_id, indexPath: response.index_path };
+}
+
+/**
+ * A folder on another machine, reached over SSH. `destination` is "user@host" or
+ * an ~/.ssh/config alias; `root` is an absolute POSIX path on that host.
+ */
+export type SshSource = {
+  destination: string;
+  port?: number;
+  root: string;
+};
+
+/** Same job, same "scan-job-event" stream as a local scan — only the source differs. */
+export async function startScanJobForSsh(
+  source: SshSource,
+  scanStrategy?: ScanStrategy,
+  enableIntelligence?: boolean
+) {
+  const response = await invoke<{ job_id: number; index_path: string }>("start_scan_job_for_ssh", {
+    source: { destination: source.destination, port: source.port ?? null, root: source.root },
+    scanStrategy: scanStrategy ?? null,
     // undefined leaves the index's existing intelligence setting untouched.
     enableIntelligence: enableIntelligence ?? null,
   });

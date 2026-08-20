@@ -24,6 +24,7 @@ import { useIndexData } from "../state/indexData";
 import { useWorkspace } from "../state/workspaceStore";
 import { VERDICT_STYLES, canStage, explainFolder, verdictForFolder } from "../lib/verdict";
 import { categoryOf } from "../lib/categories";
+import { capabilitiesForSource } from "../lib/sourceCapabilities";
 import { Card, EmptyState, SectionLabel } from "./ui/Card";
 import { Button, IconButton } from "./ui/Button";
 import { useSidePanel } from "./ui/SidePanel";
@@ -64,7 +65,9 @@ function fmtDate(sec: number): string {
 }
 
 export function Inspector() {
-  const { tree, overview, lensByPath } = useIndexData();
+  const { tree, overview, lensByPath, activeEntry } = useIndexData();
+  // Files catalogued over SSH aren't on this PC — nothing to open or move here.
+  const caps = capabilitiesForSource(activeEntry?.source);
   const { selected, ontologyEnabled, isStaged, toggleStaged, select } =
     useWorkspace();
 
@@ -331,7 +334,7 @@ export function Inspector() {
             ) : null}
 
             <div className="flex items-center gap-1">
-              {isFile ? (
+              {isFile && caps.mutate ? (
                 <IconButton
                   icon={FolderInput}
                   label="Move to folder…"
@@ -341,7 +344,7 @@ export function Inspector() {
                   }
                 />
               ) : null}
-              {native ? (
+              {native && caps.reveal ? (
                 <IconButton
                   icon={ExternalLink}
                   label="Reveal in Explorer"

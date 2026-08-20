@@ -14,6 +14,10 @@ const NOW = Math.floor(Date.now() / 1000);
 const ROOT = "C:\\Users\\alex";
 const MAIN_INDEX = "mock://indexes/alex.sqlite";
 const MEDIA_INDEX = "mock://indexes/media.sqlite";
+const REMOTE_INDEX = "mock://indexes/nas.sqlite";
+/** What the backend stores for a scan of another machine (`SshSource::to_source_json`). */
+const sshSourceJson = (destination: string, port: number | null, root: string) =>
+  JSON.stringify({ type: "ssh", destination, port, root });
 
 const j = (...segs: string[]) => [ROOT, ...segs].join("\\");
 
@@ -754,6 +758,8 @@ type IndexFix = {
   walk_issues: number;
   hash_issues: number;
   intelligence: boolean;
+  /** "local", or the SSH JSON — what gates the file-touching actions. */
+  source: string;
 };
 
 let INDEXES: IndexFix[] = [
@@ -769,6 +775,7 @@ let INDEXES: IndexFix[] = [
     walk_issues: 3,
     hash_issues: 2,
     intelligence: true,
+    source: "local",
   },
   {
     index_path: MEDIA_INDEX,
@@ -782,6 +789,22 @@ let INDEXES: IndexFix[] = [
     walk_issues: 0,
     hash_issues: 0,
     intelligence: false,
+    source: "local",
+  },
+  // A scan of another machine — everything that touches a file directly is gated off it.
+  {
+    index_path: REMOTE_INDEX,
+    root_path: "/srv/archive",
+    last_status: "completed",
+    last_scanned_at: NOW - 3 * DAY,
+    files_scanned: 21_480,
+    folders_scanned: 612,
+    bytes_scanned: Math.round(1.4 * 1024 * GB),
+    scan_strategy: "metadata",
+    walk_issues: 0,
+    hash_issues: 0,
+    intelligence: false,
+    source: sshSourceJson("alex@nas", null, "/srv/archive"),
   },
 ];
 
@@ -829,7 +852,7 @@ function emitJob(jobId: number, event: JobEvent) {
 /** Files that share a size with another file — what the hashing pass actually compares. */
 const DUP_CANDIDATE_FILES = 11_204;
 
-function startMockScan(root: string): { job_id: number; index_path: string } {
+function startMockScan(root: string, source = "local"): { job_id: number; index_path: string } {
   const jobId = nextJobId++;
   const indexPath = `mock://indexes/scan-${jobId}.sqlite`;
   jobBuffers.set(jobId, []);
@@ -858,6 +881,7 @@ function startMockScan(root: string): { job_id: number; index_path: string } {
           walk_issues: 3,
           hash_issues: 2,
           intelligence: ontologyEnabled,
+          source,
         },
         ...INDEXES.filter((e) => e.index_path !== indexPath),
       ];
@@ -1440,6 +1464,20 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       // Mirror the real backend: the opt-in is applied with the scan itself.
       if (typeof a.enableIntelligence === "boolean") ontologyEnabled = a.enableIntelligence;
       return done(startMockScan(a.root));
+    }
+    case "start_scan_job_for_ssh": {
+      const a = args as {
+        source: { destination: string; port: number | null; root: string };
+        enableIntelligence?: boolean | null;
+      };
+      if (typeof a.enableIntelligence === "boolean") ontologyEnabled = a.enableIntelligence;
+      // Same pump, same event stream as a local scan — only the recorded source differs.
+      return done(
+        startMockScan(
+          a.source.root,
+          sshSourceJson(a.source.destination, a.source.port ?? null, a.source.root)
+        )
+      );
     }
     case "cancel_scan_job": {
       const jobId = (args as { jobId: number }).jobId;
