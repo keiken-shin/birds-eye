@@ -88,6 +88,13 @@ pub struct ScanController {
 }
 
 impl ScanController {
+    pub(crate) fn new() -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+            paused: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
     }
@@ -115,10 +122,7 @@ impl Scanner {
     pub fn new(options: ScanOptions) -> Self {
         Self {
             options,
-            controller: ScanController {
-                cancelled: Arc::new(AtomicBool::new(false)),
-                paused: Arc::new(AtomicBool::new(false)),
-            },
+            controller: ScanController::new(),
         }
     }
 
