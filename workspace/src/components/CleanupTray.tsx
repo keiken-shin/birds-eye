@@ -91,7 +91,9 @@ export function CleanupTray() {
           </>
         ) : (
           <span className="text-12 italic text-label">
-            {canAct ? "Nothing staged — select something and add it here." : REMOTE_ACTION_HINT}
+            {canAct
+              ? "Nothing staged — select something and add it here."
+              : "Cleaning and moving only work on scans of this PC."}
           </span>
         )}
       </div>

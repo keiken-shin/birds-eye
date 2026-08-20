@@ -27,7 +27,7 @@ import { formatBytes, formatCount, lastSegment } from "@bridge/domain";
 import { useWorkspace } from "../../state/workspaceStore";
 import { useIndexData } from "../../state/indexData";
 import { scanTargetLabel, useScanController } from "../../state/scanController";
-import { capabilitiesForSource } from "../../lib/sourceCapabilities";
+import { REMOTE_RESCAN_HINT, capabilitiesForSource } from "../../lib/sourceCapabilities";
 import { Button, IconButton } from "../ui/Button";
 import { Card, EmptyState, Meter, SectionLabel } from "../ui/Card";
 import { Tag } from "../ui/Chip";
@@ -106,7 +106,9 @@ export function ScansView() {
   };
 
   const handleRescan = (entry: NativeIndexEntry) => {
-    if (!entry.root_path) return;
+    // Guarded here too, not just on the button: a local re-scan of a remote index's
+    // root would index this PC's copy of that path under the remote index's name.
+    if (!entry.root_path || !capabilitiesForSource(entry.source).mutate) return;
     setRescanningId(entry.index_path);
     setError(null);
     try {
@@ -125,7 +127,7 @@ export function ScansView() {
    *  an incremental rescan whose enrichment phase classifies fresh data. */
   const [enablingId, setEnablingId] = useState<string | null>(null);
   const handleEnableIntelligence = async (entry: NativeIndexEntry) => {
-    if (!entry.root_path) return;
+    if (!entry.root_path || !capabilitiesForSource(entry.source).mutate) return; // rescans — same guard
     setEnablingId(entry.index_path);
     setError(null);
     try {
@@ -308,6 +310,12 @@ export function ScansView() {
                               {rootName}
                             </span>
                             <Tag>{entry.scan_strategy}</Tag>
+                            {/* Not local ⇒ scanned over SSH — the only remote source there is. */}
+                            {entryCaps.mutate ? null : (
+                              <span className="inline-flex" title="Scanned over SSH — the files live on another machine">
+                                <Tag>SSH</Tag>
+                              </span>
+                            )}
                             {entry.intelligence ? (
                               <span
                                 className="inline-flex"
@@ -346,13 +354,21 @@ export function ScansView() {
                               Open
                             </Button>
                           ) : null}
+                          {/* Both of these re-scan the entry's root through the LOCAL scanner.
+                              For an index scanned over SSH that root is a POSIX path this PC
+                              would happily walk as its own — so they're off until re-scanning
+                              a remote host is wired up. */}
                           {!entry.intelligence && entry.root_path ? (
                             <Button
                               variant="subtle"
                               size="sm"
                               icon={Sparkles}
-                              disabled={enablingId === entry.index_path}
-                              title="Run the analysis: Bird's Eye reads your folders on this machine (including some file contents; nothing is uploaded) and works out what's safe to delete and why. It rescans what changed, so the answers match what's on disk now."
+                              disabled={enablingId === entry.index_path || !entryCaps.mutate}
+                              title={
+                                entryCaps.mutate
+                                  ? "Run the analysis: Bird's Eye reads your folders on this machine (including some file contents; nothing is uploaded) and works out what's safe to delete and why. It rescans what changed, so the answers match what's on disk now."
+                                  : REMOTE_RESCAN_HINT
+                              }
                               onClick={() => void handleEnableIntelligence(entry)}
                             >
                               {enablingId === entry.index_path ? "Enabling…" : ""}
@@ -361,9 +377,10 @@ export function ScansView() {
                           {entry.root_path ? (
                             <IconButton
                               icon={RefreshCw}
-                              label="Re-scan"
+                              // IconButton's tooltip is its label, so the reason has to ride along.
+                              label={entryCaps.mutate ? "Re-scan" : REMOTE_RESCAN_HINT}
                               size={14}
-                              disabled={isRescanning}
+                              disabled={isRescanning || !entryCaps.mutate}
                               onClick={() => handleRescan(entry)}
                             />
                           ) : null}

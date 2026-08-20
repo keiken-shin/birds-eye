@@ -26,3 +26,11 @@ export function capabilitiesForSource(source: string | undefined): SourceCapabil
 /** Why an action is unavailable — the tooltip on every gated entry point. */
 export const REMOTE_ACTION_HINT =
   "This scan is of another machine — Bird's Eye can only do this for files on this PC.";
+
+/**
+ * Re-running a scan of another machine needs the host details back, and only the
+ * New scan sheet has them — a plain re-scan here would walk the same path on THIS
+ * PC and overwrite the index with it.
+ */
+export const REMOTE_RESCAN_HINT =
+  "Re-scanning another machine isn't available here yet — start it again from New scan.";

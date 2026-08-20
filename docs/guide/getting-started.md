@@ -59,9 +59,10 @@ streams the listing back over a single SSH session. Auth is key-based only (no p
 prompts), and nothing is installed on the remote host.
 
 Because Bird's Eye never copies the remote files, actions that touch a file directly —
-**Reveal in Explorer**, preview, staging and cleanup, **Move to folder…** — are only available
-for scans of this machine. Duplicate detection also steps down to comparing sizes only, since
-there's nothing to hash.
+**Reveal in Explorer**, preview, cleanup, **Move to folder…** — are only available for scans of
+this machine. You can still stage what you find, so the list survives; the tray just won't act
+on it. Duplicate detection also steps down to comparing sizes only, since there's nothing to
+hash.
 
 ## Read the Overview
 

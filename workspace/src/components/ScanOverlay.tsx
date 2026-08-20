@@ -10,6 +10,7 @@ import {
 } from "@bridge/nativeClient";
 import { formatBytes, formatCount, lastSegment, type ScanStrategy } from "@bridge/domain";
 import { useScanController, type ScanTarget } from "../state/scanController";
+import { hostError, portError, rootError } from "../lib/sshTarget";
 import { useWorkspace } from "../state/workspaceStore";
 import {
   getDefaultEnableIntelligence,
@@ -22,8 +23,21 @@ import { Button } from "./ui/Button";
 import { Meter, SectionLabel, useCountUp } from "./ui/Card";
 import { Tag } from "./ui/Chip";
 
-const STRATEGIES: Array<{ id: ScanStrategy; icon: LucideIcon; title: string; note: string }> = [
-  { id: "smart", icon: Sparkles, title: "Smart", note: "sizes, types and duplicate detection" },
+const STRATEGIES: Array<{
+  id: ScanStrategy;
+  icon: LucideIcon;
+  title: string;
+  note: string;
+  /** Over SSH there's nothing to hash, so duplicates come down to matching sizes. */
+  remoteNote?: string;
+}> = [
+  {
+    id: "smart",
+    icon: Sparkles,
+    title: "Smart",
+    note: "sizes, types and duplicate detection",
+    remoteNote: "sizes, types and duplicates matched by size only",
+  },
   { id: "metadata", icon: Zap, title: "Metadata only", note: "fastest — sizes and dates" },
 ];
 
@@ -33,15 +47,6 @@ const DRIVE_ROOT = /^[A-Za-z]:[\\/]?$/;
 /** Every text field in this sheet. */
 const FIELD =
   "mono rounded-[9px] border border-line-input bg-field px-3 py-2.5 text-12 text-ink placeholder:text-dim focus:border-primary-edge focus:outline-none";
-
-/** Empty is fine (the host's default), otherwise it has to be a real TCP port. */
-function portError(value: string): string | null {
-  const t = value.trim();
-  if (!t) return null;
-  return /^\d{1,5}$/.test(t) && Number(t) >= 1 && Number(t) <= 65535
-    ? null
-    : "The port has to be a number between 1 and 65535.";
-}
 
 /** "C:\" → "C:" — what the button and the row call it. */
 const driveName = (root: string) => root.replace(/[\\/]+$/, "");
@@ -197,11 +202,15 @@ export function ScanOverlay() {
   const trimmed = folder.trim();
   const host = destination.trim();
   const remoteRoot = remoteFolder.trim();
+  // Checked here as well as in the backend: these end up as ssh arguments.
+  const badHost = hostError(destination);
   const badPort = portError(port);
+  const badRoot = rootError(remoteFolder);
+  const remoteError = badHost ?? badPort ?? badRoot;
 
   /** What the button will scan — null while the form is still incomplete. */
   const target: ScanTarget | null = remote
-    ? host && remoteRoot && !badPort
+    ? host && remoteRoot && !remoteError
       ? { destination: host, port: port.trim() ? Number(port.trim()) : undefined, root: remoteRoot }
       : null
     : trimmed || null;
@@ -233,8 +242,8 @@ export function ScanOverlay() {
       <span className="min-w-0 flex-1 truncate text-105 text-dim">
         {error ? (
           <span className="text-danger">{error}</span>
-        ) : badPort ? (
-          <span className="text-danger">{badPort}</span>
+        ) : remoteError ? (
+          <span className="text-danger">{remoteError}</span>
         ) : queued ? (
           "Added to queue — runs after the current scan."
         ) : scanning ? (
@@ -330,7 +339,7 @@ export function ScanOverlay() {
                   }}
                   placeholder="user@host"
                   spellCheck={false}
-                  className={`${FIELD} min-w-0 flex-1`}
+                  className={`${FIELD} min-w-0 flex-1 ${badHost ? "border-danger" : ""}`}
                 />
                 <input
                   aria-label="Port — leave it empty to use 22"
@@ -356,7 +365,7 @@ export function ScanOverlay() {
                 }}
                 placeholder="/home/user"
                 spellCheck={false}
-                className={`${FIELD} w-full`}
+                className={`${FIELD} w-full ${badRoot ? "border-danger" : ""}`}
               />
 
               <div className="mt-1.5 text-105 leading-relaxed text-faint">
@@ -437,7 +446,9 @@ export function ScanOverlay() {
                       <Icon size={13} strokeWidth={2} aria-hidden />
                       {s.title}
                     </span>
-                    <span className="text-105 leading-relaxed text-dim">{s.note}</span>
+                    <span className="text-105 leading-relaxed text-dim">
+                      {(remote && s.remoteNote) || s.note}
+                    </span>
                   </button>
                 );
               })}
