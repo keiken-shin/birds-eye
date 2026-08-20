@@ -80,7 +80,7 @@ impl RemoteScanner {
 }
 
 fn run_remote_scan(source: SshSource, controller: ScanController, events_tx: Sender<ScanEvent>) {
-    let root = source.root.clone();
+    let root = normalized_root(&source.root).to_owned();
     let started_at = Instant::now();
 
     let mut child = match Command::new("ssh")
@@ -134,12 +134,15 @@ fn run_remote_scan(source: SshSource, controller: ScanController, events_tx: Sen
     let stdout = child.stdout.take().expect("ssh stdout is piped");
     // ponytail: cancel is checked per-record; a fully idle network read blocks until the
     // child dies with the app — add a watchdog kill if that ever bites.
-    let (completed, files_scanned) = scan_stream(stdout, &events_tx, &controller, &root);
+    let (terminal, files_scanned) = read_stream(stdout, &events_tx, &controller, &root);
 
+    let completed = matches!(terminal, ScanEvent::Finished(_));
     if !completed {
         let _ = child.kill();
     }
     let status = child.wait();
+    // Join before the terminal event: consumers stop reading there, so every stderr line
+    // has to be in the channel already.
     if let Some(drain) = stderr_drain {
         let _ = drain.join();
     }
@@ -156,6 +159,8 @@ fn run_remote_scan(source: SshSource, controller: ScanController, events_tx: Sen
             }
         }
     }
+
+    let _ = events_tx.send(terminal);
 }
 
 pub(crate) enum Entry {
@@ -243,14 +248,16 @@ fn to_system_time(seconds: f64) -> Option<SystemTime> {
         .and_then(|since_epoch| UNIX_EPOCH.checked_add(since_epoch))
 }
 
-/// Parse one `find -printf` stream into scan events. Returns `(ran_to_completion,
-/// files_indexed)`; a caller that sees `false` still has a child process to kill.
-pub(crate) fn scan_stream<R: Read>(
+/// Parse one `find -printf` stream into scan events. Returns the terminal event
+/// (`Finished` only when the whole stream was read) and the file count *without sending
+/// it*: consumers stop at the terminal event, so the caller has to get its own failure
+/// reports into the channel ahead of it.
+fn read_stream<R: Read>(
     reader: R,
     events_tx: &Sender<ScanEvent>,
     controller: &ScanController,
     root: &str,
-) -> (bool, u64) {
+) -> (ScanEvent, u64) {
     let started_at = Instant::now();
     let _ = events_tx.send(ScanEvent::Started {
         root: PathBuf::from(root),
@@ -268,8 +275,10 @@ pub(crate) fn scan_stream<R: Read>(
 
     loop {
         if controller.is_cancelled() {
-            let _ = events_tx.send(ScanEvent::Cancelled(with_rates(&stats, started_at)));
-            return (false, stats.files_scanned);
+            return (
+                ScanEvent::Cancelled(with_rates(&stats, started_at)),
+                stats.files_scanned,
+            );
         }
 
         buffer.clear();
@@ -277,11 +286,16 @@ pub(crate) fn scan_stream<R: Read>(
             Ok(0) => break,
             Ok(_) => {}
             Err(error) => {
+                // A connection that drops mid-tree leaves a partial listing. Report it the
+                // way a cancel is reported, never as a complete catalog.
                 let _ = events_tx.send(ScanEvent::Error(ScanError {
                     path: PathBuf::from(root),
                     message: error.to_string(),
                 }));
-                break;
+                return (
+                    ScanEvent::Cancelled(with_rates(&stats, started_at)),
+                    stats.files_scanned,
+                );
             }
         }
 
@@ -347,15 +361,31 @@ pub(crate) fn scan_stream<R: Read>(
         }));
     }
 
-    let _ = events_tx.send(ScanEvent::Finished(ScanReport {
-        root: PathBuf::from(root),
-        stats: with_rates(&stats, started_at),
-        started_at,
-        finished_at: Instant::now(),
-        cancelled: false,
-    }));
+    (
+        ScanEvent::Finished(ScanReport {
+            root: PathBuf::from(root),
+            stats: with_rates(&stats, started_at),
+            started_at,
+            finished_at: Instant::now(),
+            cancelled: false,
+        }),
+        stats.files_scanned,
+    )
+}
 
-    (true, stats.files_scanned)
+/// Stream in, events out, terminal event included — the shape the parser tests drive.
+/// Production holds the terminal event back until the child's exit status is known.
+#[cfg(test)]
+fn scan_stream<R: Read>(
+    reader: R,
+    events_tx: &Sender<ScanEvent>,
+    controller: &ScanController,
+    root: &str,
+) -> (bool, u64) {
+    let (terminal, files_scanned) = read_stream(reader, events_tx, controller, root);
+    let completed = matches!(terminal, ScanEvent::Finished(_));
+    let _ = events_tx.send(terminal);
+    (completed, files_scanned)
 }
 
 fn with_rates(stats: &ScanStats, started_at: Instant) -> ScanStats {
@@ -374,8 +404,27 @@ pub(crate) fn sh_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
+/// `find` echoes the root exactly as given, so `/srv/` would list the root folder as
+/// "/srv/" while every file under it reports a parent of "/srv" — two rows for one folder.
+/// The filesystem root is the one trailing slash that has to stay.
+fn normalized_root(root: &str) -> &str {
+    let trimmed = root.trim_end_matches('/');
+    if trimmed.is_empty() {
+        "/"
+    } else {
+        trimmed
+    }
+}
+
 pub(crate) fn ssh_args(source: &SshSource) -> Vec<String> {
-    let mut args = vec!["-o".to_owned(), "BatchMode=yes".to_owned()];
+    // BatchMode: never sit at a password prompt. ConnectTimeout: a black-holed host has to
+    // fail rather than park the scan thread in a read that no cancel can reach.
+    let mut args = vec![
+        "-o".to_owned(),
+        "BatchMode=yes".to_owned(),
+        "-o".to_owned(),
+        "ConnectTimeout=10".to_owned(),
+    ];
 
     if let Some(port) = source.port {
         args.push("-p".to_owned());
@@ -390,7 +439,7 @@ pub(crate) fn ssh_args(source: &SshSource) -> Vec<String> {
     // remote command line.
     args.push(format!(
         r"find {} -printf '%y\t%s\t%T@\t%A@\t%C@\t%p\0'",
-        sh_quote(&source.root)
+        sh_quote(normalized_root(&source.root))
     ));
 
     args
@@ -544,6 +593,8 @@ f\t200\t1.0\t1.0\t1.0\t/srv/sub/b.txt\0";
         let args = ssh_args(&s);
         assert_eq!(args[0], "-o");
         assert_eq!(args[1], "BatchMode=yes");
+        assert_eq!(args[2], "-o");
+        assert_eq!(args[3], "ConnectTimeout=10");
         assert!(args.contains(&"-p".to_string()) && args.contains(&"2222".to_string()));
         // destination comes after "--" so a hostile destination can't inject options
         let dd = args.iter().position(|a| a == "--").unwrap();
@@ -551,6 +602,86 @@ f\t200\t1.0\t1.0\t1.0\t/srv/sub/b.txt\0";
         let remote_cmd = args.last().unwrap();
         assert!(remote_cmd.starts_with("find '/home/anubhav'"));
         assert!(remote_cmd.contains(r"-printf '%y\t%s\t%T@\t%A@\t%C@\t%p\0'"));
+
+        // a trailing slash would make find print the root as "/home/anubhav/" while every
+        // file under it reports "/home/anubhav" as its parent — two rows for one folder
+        let slashed = SshSource {
+            root: "/home/anubhav/".into(),
+            ..s
+        };
+        assert!(ssh_args(&slashed)
+            .last()
+            .unwrap()
+            .starts_with("find '/home/anubhav' "));
+
+        let filesystem_root = SshSource {
+            root: "/".into(),
+            ..slashed
+        };
+        assert!(ssh_args(&filesystem_root)
+            .last()
+            .unwrap()
+            .starts_with("find '/' "));
+    }
+
+    #[test]
+    fn hostile_timestamps_have_no_system_time() {
+        assert!(to_system_time(-1.0).is_none() && to_system_time(1e300).is_none());
+    }
+
+    #[test]
+    fn read_stream_holds_back_the_terminal_event() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (terminal, files) = read_stream(
+            &b"f\t100\t1.0\t1.0\t1.0\t/srv/a.txt\0"[..],
+            &tx,
+            &ScanController::new(),
+            "/srv",
+        );
+        assert!(matches!(terminal, ScanEvent::Finished(_)));
+        assert_eq!(files, 1);
+        // the caller still has failure reports to send, so nothing terminal may be queued yet
+        let events: Vec<ScanEvent> = rx.try_iter().collect();
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, ScanEvent::Finished(_) | ScanEvent::Cancelled(_))));
+    }
+
+    #[test]
+    fn mid_stream_read_error_is_not_a_complete_scan() {
+        /// Hands over one good record, then fails the way a dropped connection does.
+        struct DroppedConnection(bool);
+
+        impl std::io::Read for DroppedConnection {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "connection reset by peer",
+                    ));
+                }
+                self.0 = true;
+                let record = b"f\t100\t1.0\t1.0\t1.0\t/srv/a.txt\0";
+                buf[..record.len()].copy_from_slice(record);
+                Ok(record.len())
+            }
+        }
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (completed, files) = scan_stream(
+            DroppedConnection(false),
+            &tx,
+            &ScanController::new(),
+            "/srv",
+        );
+        assert!(!completed, "a half-read tree is not a completed scan");
+        assert_eq!(files, 1);
+        let events: Vec<ScanEvent> = rx.try_iter().collect();
+        assert!(matches!(events.last().unwrap(), ScanEvent::Cancelled(_)));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            ScanEvent::Error(error) if error.message.contains("connection reset")
+        )));
     }
 
     #[test]
