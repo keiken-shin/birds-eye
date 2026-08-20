@@ -51,6 +51,18 @@ running scan, the queue, and everything you've scanned before all live there.
   <figcaption>Scans — track the running scan and queue, and manage what you've already scanned.</figcaption>
 </figure>
 
+## Remote hosts (SSH)
+
+Scanning isn't limited to this machine. In **New scan**, flip the **Remote host (SSH)** toggle
+to point Bird's Eye at a Linux machine instead — give it `user@host` and a folder, and it
+streams the listing back over a single SSH session. Auth is key-based only (no password
+prompts), and nothing is installed on the remote host.
+
+Because Bird's Eye never copies the remote files, actions that touch a file directly —
+**Reveal in Explorer**, preview, staging and cleanup, **Move to folder…** — are only available
+for scans of this machine. Duplicate detection also steps down to comparing sizes only, since
+there's nothing to hash.
+
 ## Read the Overview
 
 When the scan settles, the **Overview** greets you with a headline like *"42 GB can likely be

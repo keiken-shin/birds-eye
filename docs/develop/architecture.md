@@ -139,7 +139,9 @@ For each path the index stores size, modified time, parent folder, hashes, and
 These are architectural guarantees, not preferences — treat them as invariants when
 changing code:
 
-- **Fully offline.** No file paths, metadata, hashes, or contents ever leave the machine.
+- **No third parties.** Data moves only between machines you own: local scans never leave
+  the machine, and remote scans travel exclusively over SSH sessions you configured
+  (key-based, host-verified). Nothing ever touches an external service.
 - **Recycle bin first.** Deletions go through `trash` to the OS Recycle Bin by default.
 - **Review before mutation.** Cleanup plans require preview + confirmation; the safety
   predicate holds back protected paths.
