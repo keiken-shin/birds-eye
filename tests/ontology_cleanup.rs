@@ -189,6 +189,7 @@ fn invariant_2_and_v4_recycle_bin_first_round_trip() {
         reasons: vec!["scratch".to_string()],
         max_size: None,
         path_prefix: None,
+        file_ids: None,
     })
     .expect("cleanup_plan");
     assert_eq!(plan.total_files, 1);
@@ -293,6 +294,7 @@ fn v3_backup_protected_once_origin_deleted() {
         reasons: vec![],
         max_size: None,
         path_prefix: None,
+        file_ids: None,
     })
     .unwrap();
     assert_eq!(alive.total_files, 1);
@@ -308,6 +310,7 @@ fn v3_backup_protected_once_origin_deleted() {
         reasons: vec![],
         max_size: None,
         path_prefix: None,
+        file_ids: None,
     })
     .unwrap();
     assert_eq!(protected.total_files, 0, "backup must be protected once origin is gone");

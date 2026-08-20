@@ -22,12 +22,8 @@ const GROUPS: Array<{ title: string; rows: Row[] }> = [
     rows: [{ label: "Focus command bar", keys: isMac ? "⌘K" : "Ctrl+K" }],
   },
   {
-    title: "Findings canvas",
+    title: "Staged",
     rows: [
-      { label: "Marquee select", keys: "Shift+Drag" },
-      { label: "Add / remove from selection", keys: "Shift+Click" },
-      { label: "Select all cards", keys: `${MOD}A` },
-      { label: "Nudge selection", keys: "Arrows" },
       { label: "Clear selection", keys: "Esc" },
     ],
   },

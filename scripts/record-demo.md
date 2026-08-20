@@ -1,117 +1,109 @@
-# Recording the demo
+# Recording the docs workflow
 
-The demo shown in the [README](../README.md) and on the docs landing page lives at
-**`docs/assets/demo.gif`**. Replace that file to update the demo everywhere at once.
+The landing page and README use `docs/assets/demo.gif`. The current Staged screen lives at
+`docs/assets/screenshots/staged.png`.
 
-## What the demo is for
+Both assets come from the browser-mode mock app. That keeps the capture repeatable, avoids putting
+a real person's paths in the repository, and lets a docs update run without the Rust desktop shell.
 
-Reasoning doesn't photograph. A treemap screenshot of Bird's Eye is indistinguishable from a
-treemap screenshot of twenty free tools — and the thing that actually makes Bird's Eye different
-is a *sentence*, not a picture. The demo GIF is the one place that sentence can be forced into
-view.
+## What the recording proves
 
-So the demo is **one story, not a feature tour**. Not eight views. One.
+The recording is one decision, not a tour of eight views:
 
-> **The frame that must be legible when someone pauses it is the reason line — not the map.**
+| Beat | What the viewer should notice | Hold |
+|---|---|---:|
+| Overview | The result is a sentence: **You can safely free 148.9 GB.** | 1.8 s |
+| Clean up | A row has a name, size, last-touched age, reason, and safety label. | 2.6 s |
+| Persistent tray | Selected items are staged; nothing on disk changed. | 1.8 s |
+| Staged | The items survive as a named group on the decision desk. | 2.6 s |
+| Review | The exact chosen set reaches the Review gate. | 2.8 s |
 
-## The story, in about 25 seconds
+The old recording showed the retired Findings canvas. Do not recreate it. Finding confirmation now
+lives at the top of **Clean up**, and view 3 is **Staged**.
 
-| Beat | On screen | Hold |
-|---|---|---|
-| 1 | A drive that's nearly full — the used bar deep in the red | 2 s |
-| 2 | Click **Scan C:**; findings stream past as they're found | 4 s |
-| 3 | Land on the headline: **"You can safely free 148.9 GB"** | 3 s |
-| 4 | **Hover a row so the reason is readable** — `node_modules · 12.3 GB · untouched 8 months · rebuildable from package.json` | **4 s — the longest hold in the demo** | 
-| 5 | Click **Review 6 safe items · 41.2 GB**; the review list shows exactly what will happen | 4 s |
-| 6 | Confirm — items go to the Recycle Bin | 2 s |
-| 7 | The freed space lands: the used bar drops, the toast says how much came back | 3 s |
+## Capture with the deterministic scripts
 
-Beat 4 is the whole demo. Everything before it is setup and everything after it is proof. If you
-have to cut time, cut from beats 1, 2 and 6 — never from 4.
+Start the mock workspace:
 
-Move deliberately. A demo that races is harder to read than one that breathes.
+```powershell
+cd workspace
+npm run dev -- --host 127.0.0.1 --port 5174
+```
 
-## What not to record
+In another terminal, from the repository root:
 
-- **Not the eight views.** A tour of views says "this has a lot of features". The story says
-  "this solves your problem". Only one of those makes someone install it.
-- **Not the plain map.** If a frame of the demo could belong to WinDirStat, it's a wasted frame.
-  Where the map appears at all, it should be coloured by safety — that's the view no competitor
-  has.
-- **No cursor hunting.** Rehearse the path first so the pointer moves straight to each target.
+```powershell
+node scripts/capture-doc-assets.cjs
+python scripts/assemble-demo.py
+```
 
-## Option A — the real desktop app (best)
+`capture-doc-assets.cjs` expects Playwright and a matching Chromium install. If the browser
+binary is in a non-default location, set `BIRDS_EYE_CHROMIUM` to its full path. If Vite uses a
+different URL, set `BIRDS_EYE_CAPTURE_URL`.
 
-1. Build and launch: `cd workspace && npm run tauri:dev` (or run a release build).
-2. **Maximize** the window on a 1920×1080 (or 2560×1440) display. Keep the aspect 16:9 — don't
-   drag it to an odd size. The previous demo was captured on a resized window and looked squashed.
-3. Record with [ScreenToGif](https://www.screentogif.com/) (free, Windows): *Recorder* → size the
-   capture region to the window → record the story → *Edit* → trim.
+The capture script:
 
-Record against a drive that genuinely has something to find. A demo where the headline says
-"You can safely free 400 MB" undersells a tool that routinely finds hundreds of gigabytes.
+1. Opens a fresh 1600 × 1000 browser context.
+2. Selects two real recommendation rows from the mock index.
+3. Stages them and opens Staged.
+4. Groups them as **Build leftovers**.
+5. Opens the clean review.
+6. Writes the still and five workflow PNGs.
 
-## Option B — the browser dev build (no Rust needed)
+The assembler resizes the frames to 1280 pixels wide, uses a constrained GIF palette, and writes a
+looping `demo.gif`. The result should stay well below 5 MiB; the current five-frame recording is
+about 0.5 MiB.
 
-The workspace renders identically against mock data, which is handy for a clean, repeatable
-capture:
+Temporary frames live in `.capture/docs-workflow/` and are ignored by Git.
 
-1. `cd workspace && npm run dev` → open the printed localhost URL.
-2. Put the browser in a **1920×1080** window (fullscreen `F11`, or DevTools device toolbar set to
-   a 1920×1080 custom size at 100%).
-3. Record the region with ScreenToGif, as above.
+## Capture manually
 
-## Export settings
+Use a manual recording only when the workflow itself needs motion that the deterministic capture
+does not show.
 
-- **GIF** (`docs/assets/demo.gif`): target **~1280–1440 px wide**, ~15 fps, looped. Keep it under
-  ~5 MB so pages stay snappy — ScreenToGif's built-in optimizer or `gifsicle -O3` handles this.
-  Check the reason line is still readable *after* optimisation; GIF colour quantisation eats small
-  text first, and that text is the point of the demo.
-- **MP4** (optional, `docs/assets/demo.mp4`): smaller and sharper, and it keeps the reason line
-  crisp. If you add one, swap the landing-page `<img>` in `docs/index.md` for a muted,
-  autoplaying, looping `<video>`.
+1. Run the browser-mode workspace or the real Tauri app.
+2. Use a 16:10 or 16:9 window at 100% scale; do not stretch a capture afterwards.
+3. Start on Overview, move deliberately through Clean up → Stage selected → Staged → Review.
+4. Hold the recommendation long enough to read the reason.
+5. Keep the pointer path direct. Rehearse before recording.
+6. Export at 1280–1440 pixels wide, about 15 fps, looped, under 5 MiB.
 
-## Stills
+A manual capture must use synthetic or non-sensitive data. Paths, account names, and file names are
+part of the picture.
 
-Screenshots live in `docs/assets/screenshots/` and are referenced from
-`docs/guide/the-workspace.md` and `docs/guide/getting-started.md`.
+## Other screenshots
 
-**The hero image** — README, docs landing, store listing — should be **a Clean up row or the
-safety-coloured map**, never the plain map. A plain treemap is indistinguishable from twenty free
-tools, and using one throws away the only picture that shows what Bird's Eye does differently.
+The view references live in `docs/assets/screenshots/`:
 
-### All nine stills are currently out of date
+- `overview.png`
+- `treemap.png`
+- `staged.png`
+- `files.png`
+- `duplicates.png`
+- `cleanup.png`
+- `timeline.png`
+- `organise.png`
+- `scans.png`
+- `new-scan.png`
 
-They were captured before the positioning pass and now contradict the text around them. Every one
-needs recapturing. What changed:
+`board.png` is retained only as history and is no longer referenced by the docs. Do not use it in
+new copy or social previews.
 
-- **View names.** Treemap → **Map**, Board → **Findings**, Cleanup → **Clean up**, Timeline →
-  **By age**, Catalog → **Organise**. The old shots show the old words.
-- **The switcher shows all eight labels now.** The old shots show one label and seven bare icons.
-- **Three safety labels, not four.** *Safe to delete · Check first · Don't touch* replace
-  safe/review/protected/keep.
-- **The Map lands on safety colouring**, not colour-by-type.
-- **"Reclaimable" is gone** — headings now read *"You can free"*, and Overview headlines
-  *"You can safely free X"*.
-- **Clean up rows carry a size, an age and a reason.** That row is the single most valuable thing
-  to photograph; make it legible.
+## Check the result
 
-The file names (`treemap.png`, `board.png`, `cleanup.png`, `timeline.png`) can stay as they are —
-renaming them means touching every reference for no reader-visible gain.
+After capture:
 
-### One is missing entirely
+```powershell
+cd docs-site
+npm run build
+npm test
+```
 
-**Organise has no screenshot.** It is view 8 in `docs/guide/the-workspace.md` and the only view
-without one. Capture `organise.png` and add it there.
+Then inspect the landing page at desktop and mobile widths. Confirm:
 
-### Capturing
-
-`cd workspace && npm run dev` gives the whole workspace against realistic mock data — no Rust
-toolchain, no real drive needed, and repeatable. Window at 1920×1080, then crop per view.
-
-## After recording
-
-- Overwrite `docs/assets/demo.gif` (and `docs/assets/demo.mp4` if used).
-- The README and the docs site both point at that path already — no other edits needed.
-- Build the docs locally and check the demo renders before pushing (see
-  [Building from source](../docs/develop/building.md)).
+- Staged is legible in the top switcher.
+- The recommendation reason survives GIF quantization.
+- The screenshot shows the current grouped workspace, not the retired canvas.
+- The demo reaches Review without confirming a destructive action.
+- No personal path or file name appears.
+- The image keeps its aspect ratio and has no clipped app chrome.

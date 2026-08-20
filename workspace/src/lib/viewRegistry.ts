@@ -5,7 +5,7 @@ import {
   FolderTree,
   Gauge,
   LayoutGrid,
-  Network,
+  Inbox,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
@@ -23,7 +23,7 @@ export type StageViewEntry = { view: StageView; label: string; icon: LucideIcon;
 export const STAGE_VIEWS: StageViewEntry[] = [
   { view: "overview", label: "Overview", icon: Gauge, key: "1" },
   { view: "treemap", label: "Map", icon: LayoutGrid, key: "2" },
-  { view: "board", label: "Findings", icon: Network, key: "3" },
+  { view: "board", label: "Staged", icon: Inbox, key: "3" },
   { view: "files", label: "Files", icon: Files, key: "4" },
   { view: "duplicates", label: "Duplicates", icon: Copy, key: "5" },
   { view: "cleanup", label: "Clean up", icon: Sparkles, key: "6" },

@@ -10,7 +10,7 @@ The system is five layers, from disk to pixels:
 
 | Layer | Where | Responsibility |
 |---|---|---|
-| **Scanner engine** | `src/scanner/` | Parallel, cancellable, symlink-safe filesystem crawl that *streams* facts as events — it never waits for a full scan to publish progress. |
+| **Scanner engine** | `src/scanner/` | Parallel, cancellable filesystem crawl that *streams* facts as events — it never waits for a full scan to publish progress. Symbolic links and junctions are never followed; hard links are counted once per name. |
 | **Index store** | `src/index/` | SQLite schema, batched writer, rollups, search, timeline/age aggregates, and staged-hash duplicate detection. |
 | **Analysis** | `src/ontology/` | The reasoning that produces safety labels: heuristic populators, discoveries, saved views, and the cleanup engine (plans → safety predicate → recycle-bin executor → restore). Runs by default. |
 | **Native boundary** | `src/native/`, `src-tauri/` | Serializable Rust DTOs and background-job APIs, wrapped by Tauri commands in the desktop shell. |
@@ -61,9 +61,10 @@ The reasoning that turns an index into safety verdicts:
 ```text
 ontology/
   populators/     heuristics, metadata extractors, perceptual-hash near-dupes
-  discoveries*    findings surfaced to the Findings, Clean up, and Organise views
+  discoveries*    proposed relationships; the confirmation UI lives in Clean up
   cleanup/        plans → predicate (safety) → executor (recycle bin) → restore
   catalog/        inference (zones, rules, learned homes) → plans → executor (mover)
+  staging.rs      durable files/folders, groups, and notes for the Staged workspace
   saved_views     the curated Files presets
   entities, relations, vocabulary, sensitivity, pinning, …
   enabled.rs      the per-index on/off switch

@@ -93,8 +93,16 @@ export function CleanupTray() {
       <span className="mono flex-none text-13 text-primary-ink">
         {formatBytes(cleanBytes + moveBytes)}
       </span>
+      {/* The tray shows the whole desk, so its button reviews the whole desk —
+          hence no argument. Passed as `onClick={openReview}` it would hand the
+          click event in as the path list. */}
       {staged.length ? (
-        <Button variant="primary" icon={ArrowRight} onClick={openReview} className="flex-none">
+        <Button
+          variant="primary"
+          icon={ArrowRight}
+          onClick={() => openReview()}
+          className="flex-none"
+        >
           Review &amp; clean
         </Button>
       ) : null}

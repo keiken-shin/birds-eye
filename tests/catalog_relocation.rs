@@ -2,8 +2,9 @@
 
 use birds_eye::index::schema::ALL_MIGRATIONS;
 use birds_eye::native::api::{
-    execute_relocation_plan, move_files, relocation_plan, ExecuteRelocationPlanRequest,
-    MoveFilesRequest, MoveSpec, RelocationMoveInput, RelocationPlanRequest,
+    execute_relocation_plan, relocation_plan, restore_from_relocation_log,
+    ExecuteRelocationPlanRequest, RestoreMoveRequest,
+    RelocationMoveInput, RelocationPlanRequest,
 };
 use birds_eye::ontology::catalog::payload::RELOCATION_KIND;
 use birds_eye::ontology::discoveries::{get_discovery, insert_discovery, DiscoveryStatus, NewDiscovery};
@@ -81,20 +82,16 @@ fn relocation_round_trips_and_undoes() {
     assert!(to.exists(), "file moved to its destination");
     assert!(!from.exists(), "source is gone");
 
-    // Undo is the reversed pairs through move_files — no dedicated command.
-    let undo = move_files(MoveFilesRequest {
-        moves: result
-            .pairs
-            .iter()
-            .map(|p| MoveSpec {
-                from: p.to.clone(),
-                to: p.from.clone(),
-            })
-            .collect(),
-        index_path: Some(index_path.clone()),
-    });
+    // Undo goes through the durable move log, which is why the executor returns
+    // its entry ids. It used to run the executed pairs backwards through a raw
+    // move — a path that no longer exists, and that died with the window anyway.
+    assert_eq!(result.entry_ids.len(), 1, "the move is logged, and the id comes back");
+    restore_from_relocation_log(RestoreMoveRequest {
+        index_path: index_path.clone(),
+        entry_id: result.entry_ids[0],
+    })
+    .expect("put back");
 
-    assert_eq!(undo.moved, 1);
     assert!(from.exists(), "undo restored the source");
     assert!(!to.exists(), "undo emptied the destination");
 

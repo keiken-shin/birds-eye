@@ -180,7 +180,7 @@ export function CatalogView() {
           </div>
         ) : null}
         {/* `ontology === null` means "not loaded yet" — without this guard the
-            enable CTA flashes on every startup, same as BoardView's findings tab. */}
+            enable CTA flashes on every startup, same as the findings queue. */}
         {ontology && !ontologyEnabled ? (
           // EnableIntelligenceCard already renders its own Card — don't wrap it in another.
           <div className="mt-6">

@@ -23,6 +23,12 @@ export type RecItem = {
   verdict: Verdict;
   kind: "folder" | "file";
   reason: string | null;
+  /**
+   * The index row, for file rows. Null for folders — a folder recommendation is
+   * a path-prefix scope by nature, and the lens rows carry folder ids, not file
+   * ones. Carried so staging a file records what was reviewed.
+   */
+  fileId: number | null;
 };
 
 /** Every cleanup reason the backend can attach to a folder, safest first. */
@@ -86,6 +92,7 @@ export function folderRecommendations(
       verdict: verdictForFolder(r),
       kind: "folder" as const,
       reason: r.cleanup_reason,
+      fileId: null,
     }));
 }
 
@@ -105,6 +112,7 @@ export function staleFileRecommendations(files: NativeOverviewFile[], limit = 8)
       verdict: "review" as const,
       kind: "file" as const,
       reason: null,
+      fileId: f.file_id,
     }));
 }
 

@@ -97,11 +97,10 @@ file to refresh it everywhere. The full recipe — resolutions and export settin
 [`scripts/record-demo.md`](https://github.com/keiken-shin/birds-eye/blob/main/scripts/record-demo.md).
 Record at a real 16:9 resolution so it isn't squashed.
 
-The demo is **one story, not a feature tour**: a full drive → a scan → *"you can safely free
-148.9 GB"* → a row hovered so its reason is readable → review → Recycle Bin → the space back.
-The frame that must be legible when someone pauses it is **the reason line**, not the map.
-Reasoning is the thing that doesn't photograph, and the demo is the one place you can force it
-to.
+The demo is **one story, not a feature tour**: Overview → a recommendation with its reason →
+Stage selected → a grouped decision in Staged → Review. It stops before confirmation, so the
+capture never performs a destructive action. The recommendation frame must stay legible after
+GIF quantization; the size, age, and reason are the proof.
 
 ## Updating this documentation site
 

@@ -1,3 +1,8 @@
+---
+title: The workspace
+description: A reference for Bird's Eye's eight views, Inspector, persistent tray, and Review gate.
+---
+
 # The workspace
 
 Bird's Eye is **one workspace**, not a stack of pages. A single scan sits underneath, and the
@@ -6,7 +11,8 @@ view:
 
 - **The Inspector** — click anything and it tells you what it is, what it's made of, and
   whether it's safe to remove.
-- **The Cleanup Tray** — collects what you want to get rid of, from wherever you found it.
+- **The persistent tray** — collects files and folders you stage for cleaning or moving, from
+  wherever you found them. Its contents survive an app restart.
 - **The Review gate** — the one and only path to your disk. Tray → Review → Recycle Bin, or the
   place you're moving a file to. Nothing skips it.
 
@@ -36,17 +42,18 @@ spotted last time is where you left it.
   <figcaption>The Map — size as area, coloured by safety or by kind of file, drillable to any depth.</figcaption>
 </figure>
 
-## 3 · Findings
+## 3 · Staged
 
-An open canvas of everything the scan turned up. Findings become cards that cluster around
-whatever they have in common, joined by labelled links, and duplicate groups connect to related
-findings. Card positions stay put, so you can remember where things are — select a group with a
-marquee, drag several at once, or let it arrange them for you, and use the minimap to get around
-a big board.
+The files and folders you set aside while deciding. Staging changes nothing on disk and survives
+an app restart. Keep items loose or group related decisions, then review a selection—or the whole
+desk—for cleaning or moving.
+
+Staged deliberately has no To do / Doing / Done columns. It is a decision desk, not a project
+manager, and every action still passes through Review.
 
 <figure markdown="span">
-  ![Findings — cards clustered around what they have in common, joined by labelled links](../assets/screenshots/board.png){ .be-shot }
-  <figcaption>Findings — an open canvas where related findings cluster together.</figcaption>
+  ![Staged — grouped files and folders waiting for a clean or move decision](../assets/screenshots/staged.png){ .be-shot }
+  <figcaption>Staged — persistent, groupable decisions with the size, reason, and safety label intact.</figcaption>
 </figure>
 
 ## 4 · Files
@@ -81,6 +88,10 @@ The recommendations, in one list. Every row carries three things — **how much 
 long since you touched it**, and **a reason in plain English** — and a label: **Safe to
 delete**, **Check first**, or **Don't touch**. Select as many as you like and send them to the
 tray in one go. You are never asked to trust a number without the reason next to it.
+
+Findings that need a yes or no appear above the recommendation list. Confirming a relationship
+can add the corresponding item to the list below, so the evidence and its consequence stay on
+the same screen.
 
 <figure markdown="span">
   ![Clean up — recommendations with a size, an age, a reason and a label](../assets/screenshots/cleanup.png){ .be-shot }
@@ -125,12 +136,13 @@ The detail panel that's always there. For any folder or file it answers three qu
 is this**, **what's in it**, and **is it safe to remove** — the same three the whole app is
 organised around. Drag it wider, or close it with `Ctrl+I`.
 
-### Cleanup Tray
+### Persistent tray
 
-A holding area that follows you around. Add things from the Overview, a cell on the Map, a
-search result, a duplicate group, or an Organise suggestion — they all land in the same tray,
-ready for one reviewed pass. Deletions and moves sit side by side, each reviewed on its own
-path.
+A holding area that follows you around and survives an app restart. Add things from a Clean up
+recommendation, a search result, a duplicate group, an old file in By age, or an Organise
+suggestion — they all land in the same tray, ready for one reviewed pass. Anywhere without a
+Stage button of its own, including the **Map** and the **Overview**, select the item and stage it
+from the Inspector. Deletions and moves sit side by side, each reviewed on its own path.
 
 ### Review gate
 

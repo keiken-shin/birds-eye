@@ -4,7 +4,7 @@ import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
 
 /**
- * Shown wherever the analysis is off (Inspector, Findings, Clean up, Organise).
+ * Shown wherever the analysis is off (Inspector, Clean up, Organise).
  * One component so the empty state is identical everywhere — the locked honesty
  * decision.
  *

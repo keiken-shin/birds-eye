@@ -21,17 +21,27 @@ pub fn list_all_candidates(conn: &Connection) -> Result<Vec<CleanupCandidate>, O
 /// - `reasons`: keep only candidates whose reason is in this set (empty = all reasons).
 /// - `max_size`: keep only candidates with `size <= max_size` (None = no cap).
 /// - `path_prefix`: keep only candidates at or under this path (None = any path).
+/// - `file_ids`: keep only these exact rows (None = whatever the scope matches).
+///
+/// `file_ids` is the record of what a person reviewed; every other argument is
+/// the live predicate re-deciding whether those rows are still safe. Because it
+/// only ever intersects, a file that stopped qualifying drops out and a file
+/// that newly qualifies is never silently added to someone's reviewed list.
 pub fn filter_candidates(
     candidates: Vec<CleanupCandidate>,
     reasons: &[String],
     max_size: Option<i64>,
     path_prefix: Option<&str>,
+    file_ids: Option<&[i64]>,
 ) -> Vec<CleanupCandidate> {
+    let selected: Option<std::collections::HashSet<i64>> =
+        file_ids.map(|ids| ids.iter().copied().collect());
     candidates
         .into_iter()
         .filter(|c| reasons.is_empty() || reasons.iter().any(|r| r == &c.reason))
         .filter(|c| max_size.map(|m| c.size <= m).unwrap_or(true))
         .filter(|c| path_prefix.map(|p| path_under_prefix(&c.path, p)).unwrap_or(true))
+        .filter(|c| selected.as_ref().map(|s| s.contains(&c.file_id)).unwrap_or(true))
         .collect()
 }
 
@@ -292,15 +302,34 @@ mod tests {
             CleanupCandidate { file_id: 3, entity_id: 3, path: "/a/z.js".into(), size: 50, modified_at: None, reason: "scratch".into() },
         ];
 
-        let only_scratch = filter_candidates(all.clone(), &["scratch".to_string()], None, None);
+        let only_scratch =
+            filter_candidates(all.clone(), &["scratch".to_string()], None, None, None);
         assert_eq!(only_scratch.len(), 2);
 
-        let capped = filter_candidates(all.clone(), &[], Some(99), None);
+        let capped = filter_candidates(all.clone(), &[], Some(99), None, None);
         assert_eq!(capped.len(), 1);
         assert_eq!(capped[0].file_id, 3);
 
-        let under_a = filter_candidates(all, &[], None, Some("/a/"));
+        let under_a = filter_candidates(all, &[], None, Some("/a/"), None);
         assert_eq!(under_a.len(), 2);
+    }
+
+    #[test]
+    fn file_ids_only_ever_narrow_what_the_scope_matched() {
+        let all = vec![
+            CleanupCandidate { file_id: 1, entity_id: 1, path: "/a/x.js".into(), size: 100, modified_at: None, reason: "scratch".into() },
+            CleanupCandidate { file_id: 2, entity_id: 2, path: "/a/y.js".into(), size: 100, modified_at: None, reason: "scratch".into() },
+        ];
+
+        let picked = filter_candidates(all.clone(), &[], None, None, Some(&[2]));
+        assert_eq!(picked.len(), 1, "only the reviewed row survives");
+        assert_eq!(picked[0].file_id, 2);
+
+        // An id the live predicate no longer returns cannot resurrect it: the
+        // selection narrows the scope's result, it never re-adds to it.
+        let ghost = filter_candidates(all, &[], None, None, Some(&[2, 99]));
+        assert_eq!(ghost.len(), 1);
+        assert_eq!(ghost[0].file_id, 2);
     }
 
     #[test]
@@ -314,11 +343,12 @@ mod tests {
             CleanupCandidate { file_id: 4, entity_id: 4, path: r"D:\project\b.js".into(), size: 10, modified_at: None, reason: "scratch".into() },
         ];
 
-        let just_report = filter_candidates(all.clone(), &[], None, Some(r"D:\x\report.txt"));
+        let just_report =
+            filter_candidates(all.clone(), &[], None, Some(r"D:\x\report.txt"), None);
         assert_eq!(just_report.len(), 1, "report.txt must not drag in report.txt.bak");
         assert_eq!(just_report[0].file_id, 1);
 
-        let under_proj = filter_candidates(all, &[], None, Some(r"D:\proj"));
+        let under_proj = filter_candidates(all, &[], None, Some(r"D:\proj"), None);
         assert_eq!(under_proj.len(), 1, "folder proj must not catch sibling project");
         assert_eq!(under_proj[0].file_id, 3);
     }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Lock, RefreshCw, Square, SquareCheck, Undo2 } from "lucide-react";
 import { formatBytes, formatCount, lastSegment } from "@bridge/domain";
 import {
@@ -40,7 +40,19 @@ type PlanState = {
 };
 
 export function ReviewModal() {
-  const { review, staged, closeReview, clearStaged, setUndo, indexPath } = useWorkspace();
+  const { review, staged, reviewPaths, closeReview, toggleStaged, setUndo, indexPath } =
+    useWorkspace();
+  /**
+   * What this review covers. The desk is durable now, so a confirmed clean must
+   * take off exactly what it reviewed and leave the rest — parked items, their
+   * groups, everything held back. Clearing the whole desk here (which is what
+   * this did) meant one routine clean destroyed a person's entire arrangement
+   * as a side effect: the files were gated, their organisation was not.
+   */
+  const inReview = useMemo(
+    () => (reviewPaths ? staged.filter((s) => reviewPaths.includes(s.path)) : staged),
+    [staged, reviewPaths]
+  );
   const { refreshData } = useIndexData();
   const [plan, setPlan] = useState<PlanState | null>(null);
   const [loading, setLoading] = useState(false);
@@ -61,12 +73,44 @@ export function ReviewModal() {
 
     void (async () => {
       try {
-        const targets = nonOverlapping(staged.map((s) => s.path));
-        const responses = await Promise.all(
-          targets.map((pathPrefix) =>
-            buildCleanupPlan(indexPath, { reasons: ALL_CLEANUP_REASONS, maxSize: null, pathPrefix })
-          )
+        const targets = nonOverlapping(inReview.map((s) => s.path));
+        // Two different things get staged, and they mean different things.
+        //
+        // A folder is a scope: "everything safe under here", which is a path
+        // prefix and stays one. A file the person picked out one at a time is a
+        // selection, and the plan records those ids so execution acts on the
+        // rows that were reviewed rather than on whatever the scope matches by
+        // the time the button is pressed. Files with no index row (nothing
+        // produces one today, but the type allows it) fall back to the prefix
+        // form, which is exactly the old behaviour.
+        const stagedByPath = new Map(inReview.map((s) => [s.path, s]));
+        const pickedIds = targets
+          .map((p) => stagedByPath.get(p))
+          .filter((s) => s?.kind === "file" && s.fileId != null)
+          .map((s) => s!.fileId!);
+        const pickedPaths = new Set(
+          targets.filter((p) => {
+            const s = stagedByPath.get(p);
+            return s?.kind === "file" && s.fileId != null;
+          })
         );
+
+        const requests = targets
+          .filter((p) => !pickedPaths.has(p))
+          .map((pathPrefix) =>
+            buildCleanupPlan(indexPath, { reasons: ALL_CLEANUP_REASONS, maxSize: null, pathPrefix })
+          );
+        if (pickedIds.length) {
+          requests.push(
+            buildCleanupPlan(indexPath, {
+              reasons: ALL_CLEANUP_REASONS,
+              maxSize: null,
+              pathPrefix: null,
+              fileIds: pickedIds,
+            })
+          );
+        }
+        const responses = await Promise.all(requests);
         if (id !== reqId.current) return;
         const seen = new Set<string>();
         const candidates: NativeCleanupCandidate[] = [];
@@ -88,7 +132,7 @@ export function ReviewModal() {
         if (id === reqId.current) setLoading(false);
       }
     })();
-  }, [review, indexPath, staged]);
+  }, [review, indexPath, inReview]);
 
   if (review !== "clean") return null;
 
@@ -98,7 +142,7 @@ export function ReviewModal() {
   // plan candidates for it — every protected item (the backend hard-excludes
   // those), plus anything else the safety predicate declined.
   const heldBack = plan
-    ? staged.filter(
+    ? inReview.filter(
         (s) => s.verdict === "protected" || !plan.candidates.some((c) => isUnder(c.path, s.path))
       )
     : [];
@@ -106,7 +150,7 @@ export function ReviewModal() {
   const overrideCount = overriddenItems.length;
   const overrideBytes = overriddenItems.reduce((sum, s) => sum + Math.max(0, s.bytes), 0);
   const totalItems = count + overrideCount;
-  const skeletonRows = Math.min(3, Math.max(2, staged.length));
+  const skeletonRows = Math.min(3, Math.max(2, inReview.length));
 
   const toggleOverride = (path: string) =>
     setOverrides((prev) => {
@@ -166,7 +210,8 @@ export function ReviewModal() {
         return;
       }
 
-      clearStaged();
+      // Take off the desk exactly what was reviewed — never the rest of it.
+      for (const item of inReview) toggleStaged(item);
       closeReview();
       // Undo covers only the audited cleanup-log entries — recycled overrides
       // are restored from the Windows Recycle Bin, not from here.

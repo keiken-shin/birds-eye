@@ -25,8 +25,8 @@ const SITE = {
   url: "https://birds-eye.keiken.dev",
   repo: "https://github.com/keiken-shin/birds-eye",
   description:
-    "Bird's Eye scans your Windows drive and tells you what's safe to delete and why — " +
-    "with the size, the age, and the reason. Recycle Bin first. Nothing leaves your PC.",
+    "Free, offline disk cleanup for Windows that explains what is safe to remove — " +
+    "with a size, last-touched date, and reason for every recommendation.",
 };
 
 /**
@@ -37,15 +37,16 @@ const SITE = {
 const NAV = [
   { title: "Home", page: "index.md" },
   {
-    title: "User Guide",
+    title: "Guides",
     children: [
       { title: "Getting started", page: "guide/getting-started.md" },
       { title: "The workspace", page: "guide/the-workspace.md" },
+      { title: "Stage, group, and review", page: "guide/stage-and-review.md" },
       { title: "Working safely", page: "guide/working-safely.md" },
     ],
   },
   {
-    title: "Developer",
+    title: "Develop",
     children: [
       { title: "Architecture", page: "develop/architecture.md" },
       { title: "Building from source", page: "develop/building.md" },
@@ -522,6 +523,21 @@ function layout(page) {
   const toc = page.hide.includes("toc") ? "" : tocHtml(page.toc);
   const title = page.title.includes(SITE.name) ? page.title : `${page.title} — ${SITE.name}`;
   const canonical = SITE.url + page.url;
+  const structuredData = page.url === "/" ? JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: SITE.name,
+    description: SITE.description,
+    url: SITE.url,
+    downloadUrl: "https://apps.microsoft.com/detail/9NZH5J31GHSL",
+    operatingSystem: "Windows 10, Windows 11",
+    applicationCategory: "UtilitiesApplication",
+    offers: {
+      "@type": "Offer",
+      price: 0,
+      priceCurrency: "USD",
+    },
+  }).replace(/</g, "\\u003c") : null;
 
   return `<!DOCTYPE html>
 <html lang="en" data-theme="dark">
@@ -536,9 +552,11 @@ function layout(page) {
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(page.description)}">
 <meta property="og:url" content="${esc(canonical)}">
-<meta property="og:image" content="${esc(SITE.url)}/assets/icon.png">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="${esc(SITE.url)}/assets/screenshots/staged.png">
+<meta property="og:image:alt" content="Bird's Eye Staged workspace with grouped files ready for review">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#0a0b0d">
+${structuredData ? `<script type="application/ld+json">${structuredData}</script>` : ""}
 <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/assets/icon.png">
 <link rel="stylesheet" href="/fonts/space-grotesk/index.css">
@@ -571,7 +589,7 @@ function layout(page) {
 
 <div class="layout${full ? " layout--full" : ""}${toc ? "" : " layout--notoc"}">
   ${full ? "" : `<nav class="sidebar" id="sidebar" aria-label="Documentation">${navHtml(page.url)}</nav>`}
-  <main class="content" id="content"${full || page.section === SITE.name ? "" : ` data-eyebrow="${esc(page.section)}"`}>
+  <main class="content" id="content">
 ${page.body}
   </main>
   ${toc}
@@ -581,6 +599,9 @@ ${page.body}
   <div class="footer-in">
     <p><b>${esc(SITE.name)} — disk cleanup for Windows.</b> Free and MIT-licensed. Everything runs on your PC; nothing is uploaded.</p>
     <p class="footer-links">
+      <a href="/guide/getting-started/">Getting started</a>
+      <a href="/guide/stage-and-review/">Stage and review</a>
+      <a href="/guide/working-safely/">Safety and recovery</a>
       <a href="${SITE.repo}">Source on GitHub</a>
       <a href="${SITE.repo}/blob/main/LICENSE">MIT License</a>
       <a href="${SITE.repo}/issues">Report an issue</a>
@@ -696,6 +717,7 @@ function build() {
       pages.map((p) => `  <url><loc>${SITE.url}${p.url}</loc></url>`).join("\n") +
       `\n</urlset>\n`
   );
+  write("robots.txt", `User-agent: *\nAllow: /\nSitemap: ${SITE.url}/sitemap.xml\n`);
 
   // Guard the offline promise: nothing in the output may load from another host.
   // Subresources only: <a href> and <link rel=canonical> are navigation/metadata, not loads.
@@ -881,5 +903,5 @@ if (process.argv.includes("--selftest")) {
   selftest();
 } else {
   build();
-  if (process.argv.includes("--serve")) await serve(Number(process.env.PORT) || 8000);
+  if (process.argv.includes("--serve")) await serve(Number(process.env.PORT) || 9001);
 }

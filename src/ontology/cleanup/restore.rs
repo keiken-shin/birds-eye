@@ -100,25 +100,55 @@ pub fn restore_with(
 ) -> Result<(), OntologyError> {
     let entry = get_log_entry(conn, entry_id)?
         .ok_or_else(|| OntologyError::Populator(format!("cleanup-log entry {entry_id} not found")))?;
-    if entry.restore_status != "in_recycle_bin" {
+    if entry.restore_status != "in_recycle_bin" && entry.restore_status != "restore_pending" {
         return Err(OntologyError::Populator(format!(
             "cleanup-log entry {entry_id} is not restorable (status={})",
             entry.restore_status
         )));
     }
 
-    restorer
-        .restore(Path::new(&entry.original_path))
-        .map_err(OntologyError::Populator)?;
+    // A row left at `restore_pending` by a crash means the bin restore may
+    // already have run. If the file is back at its original path, the only thing
+    // outstanding is the bookkeeping — finish it rather than asking the recycle
+    // bin for an item that is no longer in it, which fails identically on every
+    // retry while the Library keeps offering the button.
+    if entry.restore_status == "restore_pending" && Path::new(&entry.original_path).exists() {
+        return close_as_restored(conn, entry_id, entry.file_id);
+    }
 
+    // Claim the restore before doing it, so the crash window above is a state
+    // rather than a silence. Same shape as the relocation log's put-back.
+    conn.execute(
+        "UPDATE ontology_cleanup_log SET restore_status = 'restore_pending' WHERE id = ?1",
+        params![entry_id],
+    )?;
+
+    if let Err(reason) = restorer.restore(Path::new(&entry.original_path)) {
+        // Scoped, for the same reason the relocation log's rollback is.
+        conn.execute(
+            "UPDATE ontology_cleanup_log SET restore_status = 'in_recycle_bin'
+             WHERE id = ?1 AND restore_status = 'restore_pending'",
+            params![entry_id],
+        )?;
+        return Err(OntologyError::Populator(reason));
+    }
+
+    close_as_restored(conn, entry_id, entry.file_id)
+}
+
+/// Mark an entry restored and re-link its index row if it still exists.
+fn close_as_restored(
+    conn: &Connection,
+    entry_id: i64,
+    file_id: i64,
+) -> Result<(), OntologyError> {
     conn.execute(
         "UPDATE ontology_cleanup_log SET restore_status = 'restored' WHERE id = ?1",
         params![entry_id],
     )?;
-    // Re-link to the scan index if the file row still exists.
     conn.execute(
         "UPDATE files SET deleted_at = NULL WHERE id = ?1",
-        params![entry.file_id],
+        params![file_id],
     )?;
     Ok(())
 }
@@ -216,6 +246,84 @@ mod tests {
             self.seen.lock().unwrap().push(original_path.display().to_string());
             Ok(())
         }
+    }
+
+    /// The peer of the relocation log's stranding: bin restore succeeds, the
+    /// status write fails, and every retry then asks the recycle bin for an item
+    /// that is no longer in it — failing identically forever while the Library
+    /// keeps offering the button. Safe, but never convergent.
+    #[test]
+    fn a_bin_restore_that_already_happened_converges_on_retry() {
+        struct AlwaysFails;
+        impl Restorer for AlwaysFails {
+            fn restore(&self, _p: &Path) -> Result<(), String> {
+                Err("no recycle-bin item matches original path".to_string())
+            }
+        }
+
+        let dir = std::env::temp_dir().join(format!(
+            "be-cleanup-converge-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = dir.join("back-already.txt");
+        std::fs::write(&original, b"the file is already home").unwrap();
+
+        let mut conn = migrated_conn();
+        let entry_id = seed_cleaned_file(&conn, Some(i64::MAX));
+        // The state a crash between the bin restore and the status write leaves:
+        // claimed, and the file already back at its original path.
+        conn.execute(
+            "UPDATE ontology_cleanup_log
+             SET restore_status = 'restore_pending', original_path = ?2
+             WHERE id = ?1",
+            params![entry_id, original.to_string_lossy()],
+        )
+        .unwrap();
+
+        // Even a restorer that always fails must not block this: the work is
+        // already done, so nothing is asked of the recycle bin at all.
+        restore_with(&mut conn, entry_id, &AlwaysFails)
+            .expect("a completed restore must converge, not refuse forever");
+
+        let status: String = conn
+            .query_row(
+                "SELECT restore_status FROM ontology_cleanup_log WHERE id=?1",
+                params![entry_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "restored");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A failed restore must hand the row back, or a locked file strands its own
+    /// entry at `restore_pending` and the Library stops offering the undo.
+    #[test]
+    fn a_failed_bin_restore_leaves_the_entry_restorable() {
+        struct AlwaysFails;
+        impl Restorer for AlwaysFails {
+            fn restore(&self, _p: &Path) -> Result<(), String> {
+                Err("bin item is gone".to_string())
+            }
+        }
+
+        let mut conn = migrated_conn();
+        let entry_id = seed_cleaned_file(&conn, Some(i64::MAX));
+
+        restore_with(&mut conn, entry_id, &AlwaysFails).expect_err("the restorer refused");
+
+        let status: String = conn
+            .query_row(
+                "SELECT restore_status FROM ontology_cleanup_log WHERE id=?1",
+                params![entry_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "in_recycle_bin", "a failed restore must not strand the row");
     }
 
     #[test]

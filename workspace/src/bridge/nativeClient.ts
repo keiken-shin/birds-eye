@@ -48,6 +48,7 @@ export type NativeOverviewFile = {
   extension: string | null;
   media_kind: string;
   modified_at: number | null;
+  file_id: number;
 };
 
 /** One month of modified-time activity (`bucket` = `YYYY-MM`). */
@@ -82,6 +83,7 @@ export type NativeSearchResult = {
   extension: string | null;
   media_kind: string;
   modified_at: number | null;
+  file_id: number;
 };
 
 export type NativeIndexEntry = {
@@ -113,6 +115,7 @@ export type NativeDuplicateFile = {
   size: number;
   modified_at: number | null;
   hash_state: 0 | 2 | 4;
+  file_id: number;
 };
 
 /**
@@ -310,17 +313,6 @@ export async function trashFiles(paths: string[], indexPath?: string | null) {
 }
 
 export type NativeMoveFailure = { path: string; reason: string };
-export type NativeMoveResult = { moved: number; failed: NativeMoveFailure[] };
-
-/** Move files to a new folder (rename, or copy+remove across volumes). */
-export async function moveFiles(
-  moves: Array<{ from: string; to: string }>,
-  indexPath?: string | null
-) {
-  return invoke<NativeMoveResult>("move_files", {
-    request: { moves, index_path: indexPath ?? null },
-  });
-}
 
 // ---- Ontology: cleanup ----
 
@@ -363,7 +355,17 @@ export type NativeCleanupLogEntry = {
 
 export async function buildCleanupPlan(
   indexPath: string,
-  scope: { reasons?: string[]; maxSize?: number | null; pathPrefix?: string | null }
+  scope: {
+    reasons?: string[];
+    maxSize?: number | null;
+    pathPrefix?: string | null;
+    /**
+     * The exact rows the person reviewed. Recorded on the plan, and intersected
+     * with the live predicate at execute time — so the plan can only ever act on
+     * fewer files than were reviewed, never on different ones.
+     */
+    fileIds?: number[] | null;
+  }
 ) {
   return invoke<NativeCleanupPlan>("cleanup_plan", {
     request: {
@@ -371,6 +373,7 @@ export async function buildCleanupPlan(
       reasons: scope.reasons ?? [],
       max_size: scope.maxSize ?? null,
       path_prefix: scope.pathPrefix ?? null,
+      file_ids: scope.fileIds ?? null,
     },
   });
 }
@@ -579,6 +582,8 @@ export type NativeRelocationResult = {
   moved: number;
   bytes_moved: number;
   pairs: Array<{ from: string; to: string }>;
+  /** Move-log rows for the files that moved. Undo goes through these. */
+  entry_ids: number[];
   failed: Array<{ path: string; reason: string }>;
 };
 
@@ -652,6 +657,50 @@ export async function restoreMove(indexPath: string, entryId: number) {
   return invoke<void>("restore_from_relocation_log", {
     request: { index_path: indexPath, entry_id: entryId },
   });
+}
+
+/** One thing on the staging desk. Durable — it survives closing the app. */
+export type NativeStagedItem = {
+  id: number;
+  kind: "file" | "folder";
+  path: string;
+  file_id: number | null;
+  name: string;
+  bytes: number;
+  verdict: string | null;
+  reason: string | null;
+  group_name: string | null;
+  note: string | null;
+  added_at: number;
+};
+
+export async function stageItem(
+  indexPath: string,
+  item: Omit<NativeStagedItem, "id" | "added_at">
+) {
+  await invoke("stage_item", { request: { index_path: indexPath, ...item } });
+}
+
+export async function unstageItem(indexPath: string, path: string) {
+  await invoke("unstage_item", { request: { index_path: indexPath, path } });
+}
+
+export async function stagedItems(indexPath: string) {
+  return invoke<NativeStagedItem[]>("staged_items", { request: { index_path: indexPath } });
+}
+
+export async function setStagedGroup(
+  indexPath: string,
+  paths: string[],
+  groupName: string | null
+) {
+  await invoke("set_staged_group", {
+    request: { index_path: indexPath, paths, group_name: groupName },
+  });
+}
+
+export async function clearStagedItems(indexPath: string, groupName: string | null = null) {
+  await invoke("clear_staged", { request: { index_path: indexPath, group_name: groupName } });
 }
 
 export async function catalogRules(indexPath: string) {

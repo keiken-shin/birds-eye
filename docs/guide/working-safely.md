@@ -1,3 +1,8 @@
+---
+title: Working safely
+description: How Bird's Eye reviews, rechecks, records, restores, and keeps file decisions on your PC.
+---
+
 # Working safely
 
 Deleting files is easy to make fast and hard to make *safe*. Bird's Eye is built for the second.
@@ -9,8 +14,8 @@ shouldn't have to be certain before you act — you should be able to change you
 There is exactly one path from the app to your disk, whichever kind of change you've staged:
 
 ```text
-Cleanup tray  →  Review  →  Recycle Bin
-Move tray     →  Review  →  the folder you chose
+Staged clean  →  Review  →  Recycle Bin
+Staged move   →  Review  →  the folder you chose
 ```
 
 You collect things from any view — including an **Organise** suggestion — into the tray. When
@@ -24,11 +29,14 @@ confirm does anything move. No view has a shortcut around this.
   what happened, not to oblivion.
 - **Restorable for 30 days** from **Recently cleaned**, or undone instantly with **Undo** right
   after the action.
-- **Move instead of delete.** Sometimes the right answer isn't deleting — it's putting a file
-  somewhere sensible. The **Organise** view finds these for you, or move files by hand; either
-  way Bird's Eye brings its records up to date with a background rescan afterwards. A move can
-  be undone right after it happens — it never touches the Recycle Bin, so it doesn't have the
-  30-day window a deletion has.
+- **Put reviewed moves back.** Sometimes the right answer is putting a file somewhere sensible.
+  The **Organise** view finds these for you, or move staged files by hand. Bird's Eye records the
+  move, updates its index, and offers **Put back** in **Recently cleaned**.
+- **Interrupted state stays honest.** If a move stopped between disk and index updates, its history
+  says **Interrupted**. Bird's Eye does not label an uncertain move complete.
+
+Staging is durable too. Closing the app does not clear the files, folders, or groups on the
+Staged desk. Unstaging removes the decision from Bird's Eye; it never touches the file.
 
 ## The three labels
 

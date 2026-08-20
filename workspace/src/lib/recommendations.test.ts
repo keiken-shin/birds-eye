@@ -85,12 +85,14 @@ describe("which folders make the list", () => {
 });
 
 describe("stale files", () => {
+  let nextId = 1;
   const file = (path: string, size: number, modified_at: number | null) => ({
     path,
     size,
     extension: null,
     media_kind: "other",
     modified_at,
+    file_id: nextId++,
   });
 
   it("keeps only what genuinely hasn't been touched in a year, biggest first", () => {

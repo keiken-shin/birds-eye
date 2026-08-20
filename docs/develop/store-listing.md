@@ -94,13 +94,13 @@ Shipped on the [documentation home page](../index.md). Repeated here so the whol
 one place.
 
 ```text
-Know what's safe to delete.
+See what you can delete. Know why it's safe.
 
-Bird's Eye scans your Windows drive, works out what each folder is
-actually for, and tells you what you can safely remove — with the size,
-the age, and the reason.
+Bird's Eye is a free, offline disk cleanup tool for Windows. It turns a
+drive scan into specific decisions: the size, when you last touched it,
+and the reason it can—or cannot—go.
 
-Recycle Bin first. Restorable for 30 days. Nothing leaves your PC.
+Recycle Bin first. Review every change. 0 bytes uploaded.
 
 [ Get it from the Microsoft Store ]  [ Download the portable .exe ]
 
@@ -114,8 +114,8 @@ A disk map answers "where did my space go?"
 Bird's Eye answers the question that actually unblocks you:
 "which of this can I delete, and how do you know?"
 
-12.4 GB of build cache, untouched 8 months, rebuildable in one command.
-That's a sentence you can act on. A coloured rectangle isn't.
+node_modules · 12.3 GB · untouched 8 months · a build cache that fills
+itself back in when needed. That's a decision you can inspect.
 ```
 
 ## Site metadata
@@ -124,10 +124,9 @@ The site title and description, for whichever generator builds this site:
 
 ```text
 title:       Bird's Eye — disk cleanup for Windows
-description: Free, offline disk cleanup for Windows. It tells you what's safe
-             to delete and why — not just what's big — with a size, an age and
-             a reason for every recommendation. Recycle Bin first, restorable
-             for 30 days. Nothing ever leaves your machine.
+description: Free, offline disk cleanup for Windows that explains what is safe
+             to remove, lets you stage a decision, and reviews every change
+             before it reaches your drive.
 ```
 
 ## The answer to "isn't WizTree faster?"

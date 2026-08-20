@@ -25,6 +25,7 @@ import { Card, EmptyState } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { VerdictTag } from "../ui/Chip";
 import { EnableIntelligenceCard } from "../EnableIntelligenceCard";
+import { FindingsReview } from "../FindingsReview";
 import { ViewHeader } from "./ViewHeader";
 import type { Verdict } from "../../state/types";
 
@@ -114,7 +115,7 @@ export function CleanupView() {
   );
 
   const togglePick = (item: RecItem) => {
-    select({ kind: item.kind, path: item.path, name: item.name, bytes: item.bytes });
+    select({ kind: item.kind, path: item.path, name: item.name, bytes: item.bytes, fileId: item.fileId });
     setPicked((prev) => {
       const next = new Set(prev);
       if (next.has(item.path)) next.delete(item.path);
@@ -147,6 +148,7 @@ export function CleanupView() {
         reason: item.reason,
         verdict: item.verdict,
         kind: item.kind,
+        fileId: item.fileId,
       });
     }
     setPicked(new Set());
@@ -207,6 +209,11 @@ export function CleanupView() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[1080px] flex-col gap-4 p-4">
+          {/* Findings waiting on a yes or no. Above the list because that is
+              where saying yes shows up — two of the reasons below only exist
+              once the relation behind them is confirmed. */}
+          <FindingsReview />
+
           {/* Safety legend */}
           <Card className="be-rise flex flex-wrap items-center gap-x-5 gap-y-1.5 px-4 py-2.5">
             <span className="text-10 font-semibold tracking-[0.12em] text-label uppercase">

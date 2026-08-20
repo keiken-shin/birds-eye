@@ -92,17 +92,17 @@ keys **1–8**) — never a page reload:
 |---|---|
 | **Overview** | Where you stand: capacity bar, what's taking the space, an age snapshot, and a headline — *"X GB can likely be freed"*. |
 | **Map** | A space map where area is size, coloured by safety or by kind of file, drillable to any depth. |
-| **Findings** | An open canvas of what the scan turned up: findings cluster around shared sources with labelled links, and duplicate groups connect to related findings. |
+| **Staged** | A durable decision desk for files and folders you set aside, group, and review for cleaning or moving. |
 | **Files** | Ranked search with filters, size and date sorting, and saved views for the questions you ask every time — big files you can rebuild, projects you finished and haven't opened in a year. |
 | **Duplicates** | Groups ranked by how much space they waste, with side-by-side previews — keep the newest, stage the rest, or move a copy where it belongs. |
-| **Clean up** | The recommendations, each labelled and each with a size, an age and a reason, with multi-select staging. |
+| **Clean up** | Recommendations and findings waiting on a yes or no, each with a size, an age, a reason, and multi-select staging. |
 | **By age** | Monthly activity, how old your files are, and the large-and-untouched items that are usually the easiest wins. |
 | **Organise** | Grouped "these files belong somewhere else" suggestions, learned from where you already keep things, reviewed before anything moves. |
 
 Around every view: an **Inspector** (what something is · what it's made of · whether it's safe
-to remove), a **Cleanup Tray** that collects from anywhere, and a **Review gate** that checks
-everything again before it moves. Files can also be **moved to a better home** instead of
-deleted — the index heals itself with a background rescan.
+to remove), a **persistent tray** that collects from anywhere, and a **Review gate** that checks
+the chosen items again before they move. Staged decisions survive an app restart. Files can also
+be **moved to a better home** instead of deleted, and reviewed moves can be put back.
 
 ## Install
 
@@ -144,7 +144,8 @@ npx vitest run                                    # frontend unit tests
 
 ## Project layout
 
-- `src/scanner/` — parallel filesystem scanner (cancellation, symlink-safe traversal).
+- `src/scanner/` — parallel filesystem scanner. Symbolic links and junctions are never
+  followed, so nothing is counted twice through one; hard links are counted once per name.
 - `src/index/` — SQLite schema, index writer, rollups, search, timeline/age aggregates,
   duplicate detection.
 - `src/ontology/` — the analysis: heuristic populators, metadata extraction, perceptual-hash
@@ -163,7 +164,14 @@ npx vitest run                                    # frontend unit tests
 
 Issues and PRs are welcome. A good change:
 
-1. Keeps the safety model intact — no path to disk mutation that skips the review gate.
+1. Keeps the safety model intact. Five commands can touch a file the user owns:
+   `cleanup_plan` / `execute_cleanup_plan`, `relocation_plan` / `execute_relocation_plan`, and
+   `trash_files`. The four plan commands are *structurally* gated — nothing moves or is removed
+   except through a persisted plan that the backend re-verifies at execute time, and every one
+   leaves a restore-log row. `trash_files` is the exception and worth naming: it takes paths
+   directly, so its only gate is the review UI in front of it, and its undo is the Windows
+   Recycle Bin rather than Recently cleaned. There is deliberately no raw "move these paths"
+   command at all. Adding a sixth is a review topic, not a routine change.
 2. Keeps the gates green (`cargo test`, `npx tsc --noEmit`, `npx vitest run`, `npm run build`).
 3. Uses the design tokens (`workspace/src/index.css`) and shared primitives
    (`workspace/src/components/ui/`) — no hardcoded colors, lucide icons only.

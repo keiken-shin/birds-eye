@@ -36,6 +36,9 @@ type FileRow = {
   /** media_kind when known; null for saved-view rows (backend returns none). */
   kind: MediaKind | null;
   modifiedAt: number | null;
+  /** `files.id` â what staging records so a plan acts on the row reviewed.
+   *  Every source of this list carries one. */
+  fileId: number;
 };
 
 const fileName = (p: string) => p.split(/[\\/]/).pop() || p;
@@ -165,6 +168,7 @@ export function FilesView() {
             extension: r.extension,
             kind: categoryOf(r.media_kind).kind,
             modifiedAt: r.modified_at,
+            fileId: r.file_id,
           }));
         } else {
           const res = await runSavedView(indexPath, resultsQuery.viewId);
@@ -175,6 +179,7 @@ export function FilesView() {
             extension: null,
             kind: null,
             modifiedAt: null,
+            fileId: r.file_id,
           }));
         }
         if (id !== reqId.current) return;
@@ -198,6 +203,7 @@ export function FilesView() {
         extension: f.extension,
         kind: categoryOf(f.media_kind).kind,
         modifiedAt: f.modified_at,
+        fileId: f.file_id,
       })),
     [overview]
   );
@@ -366,7 +372,7 @@ export function FilesView() {
             <EmptyState
               icon={Lock}
               title="This view needs the analysis"
-              hint="Curated views read what Bird's Eye found about your folders. Run the analysis from Findings, or just search instead."
+              hint="Curated views read what Bird's Eye found about your folders. Turn the analysis on in Settings, or just search instead."
               className="be-rise be-d3"
             />
           ) : (
@@ -450,7 +456,7 @@ export function FilesView() {
                     return (
                       <div
                         key={r.path}
-                        onClick={() => select({ kind: "file", path: r.path, name: r.name, bytes: r.size })}
+                        onClick={() => select({ kind: "file", path: r.path, name: r.name, bytes: r.size, fileId: r.fileId })}
                         className={`flex cursor-pointer items-center gap-3 border-b border-line-soft px-3 py-2 transition-colors last:border-b-0 ${
                           sel
                             ? "bg-primary-wash shadow-[inset_2px_0_0_var(--color-primary)]"
@@ -517,6 +523,7 @@ export function FilesView() {
                               reason: null,
                               verdict: "review",
                               kind: "file",
+                              fileId: r.fileId,
                             });
                           }}
                         >
@@ -539,7 +546,7 @@ export function FilesView() {
 
       {moveOpen ? (
         <MoveDialog
-          paths={[...picked]}
+          files={rows.filter((r) => picked.has(r.path)).map((r) => ({ path: r.path, fileId: r.fileId }))}
           onClose={() => setMoveOpen(false)}
           onMoved={(destination, movedPaths, allMoved) => {
             // Drop only the paths that actually moved — a partial failure

@@ -4,7 +4,7 @@ use crate::ontology::attrs::{assert_attr, get_attrs, NewAssertion};
 use crate::ontology::catalog::executor::SystemMover;
 use crate::ontology::catalog::payload::RELOCATION_KIND;
 use crate::ontology::catalog::relocation_log::{
-    log_move, recently_moved, restore_move_with, RelocationLogEntry,
+    recently_moved, restore_move_with, RelocationLogEntry,
 };
 use crate::ontology::cleanup::executor::{execute_plan_with, CleanupResult, SystemTrasher, DEFAULT_RETENTION_DAYS};
 use crate::ontology::cleanup::plans::{candidates_for_plan, create_plan, CleanupScope};
@@ -98,6 +98,8 @@ pub struct FileSummaryDto {
     pub extension: Option<String>,
     pub media_kind: String,
     pub modified_at: Option<i64>,
+    /// See `FileSearchResultDto::file_id`.
+    pub file_id: i64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -108,6 +110,10 @@ pub struct FileSearchResultDto {
     pub extension: Option<String>,
     pub media_kind: String,
     pub modified_at: Option<i64>,
+    /// The index row this result came from. Every plan — cleanup or relocation —
+    /// re-verifies by id, so a row that reaches the UI without one cannot be
+    /// staged into anything reviewable.
+    pub file_id: i64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -136,6 +142,8 @@ pub struct DuplicateFileSummaryDto {
     pub modified_at: Option<i64>,
     /// 0 = unresolved (size match only), 2 = sample hash, 4 = full-file XXH3
     pub hash_state: i64,
+    /// See `FileSearchResultDto::file_id`.
+    pub file_id: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -167,6 +175,10 @@ pub struct CleanupPlanRequest {
     pub max_size: Option<i64>,
     #[serde(default)]
     pub path_prefix: Option<String>,
+    /// The exact rows the person staged, when they staged files rather than a
+    /// folder. Recorded on the plan so execution acts on what was reviewed.
+    #[serde(default)]
+    pub file_ids: Option<Vec<i64>>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -284,15 +296,18 @@ fn mark_deleted_in_index(index_path: &Path, paths: &[String]) {
     }
 }
 
-/// Records a batch of successful `move_files` moves, in `(source, destination)`
-/// lockstep order.
+/// Reconciles the index after a batch of successful moves, in
+/// `(source, destination)` lockstep order.
 ///
-/// Three writes per pair. First the durable move log — the row that makes an
-/// undo survive closing the app, written while the source row is still live so
-/// its id can be captured. Then the source gets `deleted_at` set, same as any
-/// other delete-from-index call (`mark_deleted_in_index` above), and the
-/// destination gets `deleted_at` CLEARED wherever a row already sits at that
-/// exact path.
+/// Two writes per pair. The source gets `deleted_at` set, same as any other
+/// delete-from-index call (`mark_deleted_in_index` above), and the destination
+/// gets `deleted_at` CLEARED wherever a row already sits at that exact path.
+///
+/// The durable move log is deliberately NOT written here. It used to be, which
+/// forced it to happen after the bytes had already moved and gave every move two
+/// possible loggers once the executor needed to open a row of its own. The
+/// relocation executor is now the single owner: it opens the row before the move
+/// and promotes it after. This function only reconciles rows.
 ///
 /// That last half is what makes a relocate's undo — reversed pairs run back
 /// through this same function — leave the index consistent immediately,
@@ -311,16 +326,6 @@ fn reconcile_index_after_move(index_path: &Path, sources: &[String], destination
         return;
     };
     for (from, to) in sources.iter().zip(destinations) {
-        let file_id: Option<i64> = conn
-            .query_row(
-                "SELECT id FROM files WHERE path = ?1",
-                rusqlite::params![from],
-                |row| row.get(0),
-            )
-            .optional()
-            .ok()
-            .flatten();
-        let _ = log_move(&conn, from, to, file_id);
         let _ = conn.execute(
             "UPDATE files SET deleted_at = strftime('%s','now') WHERE path = ?1",
             rusqlite::params![from],
@@ -360,7 +365,13 @@ pub struct MoveFilesResponse {
 /// Move files to a new location: rename when possible, copy+remove across
 /// volumes. Never overwrites an existing destination. Moved sources are marked
 /// deleted in the index; destinations are picked up by the next (re)scan.
-pub fn move_files(request: MoveFilesRequest) -> MoveFilesResponse {
+///
+/// Deliberately `pub(crate)` and deliberately not a Tauri command. It was both,
+/// which meant the webview could name any two paths and have the bytes moved,
+/// with no plan, no re-verification and no log — while the README promised no
+/// path to disk mutation skipped the review gate. The only caller now is
+/// `SystemMover`, which is reached through `execute_relocation_plan`.
+pub(crate) fn move_files(request: MoveFilesRequest) -> MoveFilesResponse {
     let mut failed = Vec::new();
     let mut moved_sources = Vec::new();
     let mut moved_destinations = Vec::new();
@@ -406,17 +417,35 @@ pub fn move_files(request: MoveFilesRequest) -> MoveFilesResponse {
     }
 }
 
-/// Cross-volume fallback: copy then remove the source, rolling back whatever
-/// landed at `to` if EITHER step fails. Rolling back only the remove-failed
-/// case (the original shape here) misses the copy itself failing partway —
-/// e.g. a full destination disk — which leaves a truncated file at `to`, and
-/// every retry then fails forever on the `to.exists()` guard above. Wrapping
-/// `inspect_err` around the whole chain (rather than nesting it inside the
-/// `remove_file` call alone) catches both arms with the same cleanup.
+/// Cross-volume fallback: copy to a temporary name beside the destination, then
+/// rename it into place, then remove the source.
+///
+/// The rollback closure handles a *returned* error. It cannot handle the process
+/// dying mid-copy — and a half-written file at `to` is worse than no file,
+/// because the `to.exists()` guard above then refuses every retry forever. A
+/// safety check that permanently blocks the operation it was protecting is not a
+/// safety check.
+///
+/// Renaming within a volume is atomic, so `to` either does not exist or is the
+/// whole file. A leftover `.beparked` is inert, obviously machine-made, and safe
+/// to delete on sight.
+///
+/// ponytail: this closes crash-during-copy. A crash after the rename but before
+/// `remove_file` leaves the same bytes at both ends — duplication, not loss or
+/// truncation — and the retry still refuses. Closing that needs a real move
+/// journal, which only earns its keep if multi-GB moves become routine.
 fn copy_then_remove(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::copy(from, to).and_then(|_| std::fs::remove_file(from)).inspect_err(|_| {
-        let _ = std::fs::remove_file(to);
-    })
+    let mut parked = to.as_os_str().to_owned();
+    parked.push(".beparked");
+    let parked = PathBuf::from(parked);
+
+    std::fs::copy(from, &parked)
+        .and_then(|_| std::fs::rename(&parked, to))
+        .and_then(|_| std::fs::remove_file(from))
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&parked);
+            let _ = std::fs::remove_file(to);
+        })
 }
 
 /// Build a draft cleanup plan from a scope and return its live candidate preview.
@@ -426,6 +455,7 @@ pub fn cleanup_plan(request: CleanupPlanRequest) -> Result<CleanupPlanResponse, 
         reasons: request.reasons,
         max_size: request.max_size,
         path_prefix: request.path_prefix,
+        file_ids: request.file_ids,
     };
     let plan_id = create_plan(&conn, &scope).map_err(|e| e.to_string())?;
     let candidates = candidates_for_plan(&conn, plan_id).map_err(|e| e.to_string())?;
@@ -479,6 +509,70 @@ pub fn recently_moved_log(
 pub fn restore_from_relocation_log(request: RestoreMoveRequest) -> Result<(), String> {
     let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
     restore_move_with(&conn, request.entry_id, &SystemMover { index_path: None })
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StageItemRequest {
+    pub index_path: PathBuf,
+    #[serde(flatten)]
+    pub item: crate::ontology::staging::NewStagedItem,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UnstageItemRequest {
+    pub index_path: PathBuf,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StagedItemsRequest {
+    pub index_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SetStagedGroupRequest {
+    pub index_path: PathBuf,
+    pub paths: Vec<String>,
+    #[serde(default)]
+    pub group_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClearStagedRequest {
+    pub index_path: PathBuf,
+    #[serde(default)]
+    pub group_name: Option<String>,
+}
+
+/// Put one thing on the staging desk. Durable, so it is still there tomorrow.
+pub fn stage_item(request: StageItemRequest) -> Result<(), String> {
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    crate::ontology::staging::stage(&conn, &request.item).map_err(|e| e.to_string())
+}
+
+pub fn unstage_item(request: UnstageItemRequest) -> Result<(), String> {
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    crate::ontology::staging::unstage(&conn, &request.path).map_err(|e| e.to_string())
+}
+
+pub fn staged_items(
+    request: StagedItemsRequest,
+) -> Result<Vec<crate::ontology::staging::StagedItem>, String> {
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    crate::ontology::staging::list_staged(&conn).map_err(|e| e.to_string())
+}
+
+pub fn set_staged_group(request: SetStagedGroupRequest) -> Result<(), String> {
+    let mut conn =
+        crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    crate::ontology::staging::set_group(&mut conn, &request.paths, request.group_name.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+pub fn clear_staged(request: ClearStagedRequest) -> Result<(), String> {
+    let conn = crate::index::open_index_connection(&request.index_path).map_err(|e| e.to_string())?;
+    crate::ontology::staging::clear_staged(&conn, request.group_name.as_deref())
         .map_err(|e| e.to_string())
 }
 
@@ -879,6 +973,7 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
                 extension: file.extension,
                 media_kind: file.media_kind,
                 modified_at: file.modified_at,
+                file_id: file.id,
             })
             .collect(),
         extensions: writer
@@ -968,6 +1063,7 @@ pub fn search_files(request: SearchFilesRequest) -> Result<Vec<FileSearchResultD
             extension: file.extension,
             media_kind: file.media_kind,
             modified_at: file.modified_at,
+            file_id: file.id,
         })
         .collect::<Vec<_>>();
 
@@ -987,6 +1083,7 @@ pub fn duplicate_group_files(
             size: file.size,
             modified_at: file.modified_at,
             hash_state: file.hash_state,
+            file_id: file.id,
         })
         .collect::<Vec<_>>();
 
@@ -2248,6 +2345,7 @@ mod tests {
             reasons: vec!["scratch".to_string()],
             max_size: None,
             path_prefix: None,
+            file_ids: None,
         })
         .expect("cleanup_plan");
         assert_eq!(resp.total_files, 1);
@@ -2691,9 +2789,14 @@ mod tests {
         cleanup(&root);
     }
 
-    /// The whole seam end to end through the public API: a move writes a row
-    /// that outlives the process, and that row alone is enough to put the file
-    /// back — no React state involved.
+    /// The whole seam end to end through the public API: a reviewed move writes
+    /// a row that outlives the process, and that row alone is enough to put the
+    /// file back — no React state involved.
+    ///
+    /// This goes through `relocation_plan` → `execute_relocation_plan` because
+    /// that is now the only route a move can take. It used to call `move_files`
+    /// directly, which is exactly the door that was open: an arbitrary
+    /// renderer-named pair of paths, moved with no plan and no re-verification.
     #[test]
     fn a_move_is_logged_and_restorable_from_the_log_alone() {
         use crate::index::schema::ALL_MIGRATIONS;
@@ -2728,13 +2831,23 @@ mod tests {
             .unwrap();
         }
 
-        let response = move_files(MoveFilesRequest {
-            moves: vec![MoveSpec {
+        let plan = relocation_plan(RelocationPlanRequest {
+            index_path: index_path.clone(),
+            moves: vec![RelocationMoveInput {
+                file_id: 1,
                 from: from.to_string_lossy().to_string(),
                 to: to.to_string_lossy().to_string(),
+                discovery_id: None,
             }],
-            index_path: Some(index_path.clone()),
-        });
+        })
+        .expect("relocation_plan");
+        assert!(plan.dropped.is_empty());
+
+        let response = execute_relocation_plan(ExecuteRelocationPlanRequest {
+            index_path: index_path.clone(),
+            plan_id: plan.plan_id,
+        })
+        .expect("execute_relocation_plan");
         assert_eq!(response.moved, 1);
 
         let logged = recently_moved_log(RecentlyMovedRequest {
@@ -2743,11 +2856,18 @@ mod tests {
             offset: 0,
         })
         .expect("recently_moved_log");
-        assert_eq!(logged.len(), 1, "a manual move is logged too");
+        assert_eq!(logged.len(), 1, "the executor logs exactly one row per move");
+        assert_eq!(logged[0].restore_status, "moved");
+        assert_eq!(
+            response.entry_ids,
+            vec![logged[0].id],
+            "the result carries the log ids undo needs — without them the only \
+             reachable undo is a session-scoped pair reversal"
+        );
 
         restore_from_relocation_log(RestoreMoveRequest {
             index_path: index_path.clone(),
-            entry_id: logged[0].id,
+            entry_id: response.entry_ids[0],
         })
         .expect("restore");
 

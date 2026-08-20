@@ -19,6 +19,7 @@ pub mod populators;
 pub mod relations;
 pub mod saved_views;
 pub mod sensitivity;
+pub mod staging;
 pub mod vocabulary;
 
 pub use errors::OntologyError;

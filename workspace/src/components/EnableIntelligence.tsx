@@ -50,7 +50,7 @@ export function EnableIntelligence() {
             </div>
             <div className="mt-1 text-115 leading-relaxed text-muted">
               Let Bird's Eye read your folders and it will tell you what's safe to delete and why —
-              on the Map, in Findings, and in Clean up. It reads your own folder structure on this
+              on the Map and in Clean up. It reads your own folder structure on this
               machine; nothing is uploaded. Runs in the background, so keep working.
             </div>
           </div>
