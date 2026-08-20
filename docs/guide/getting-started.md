@@ -25,8 +25,8 @@ No installer wizard, no account.
 [Building from source](../develop/building.md).
 
 !!! info "What you need"
-    Windows 10 or 11 (x64). Bird's Eye works with the network switched off and never needs
-    internet access, at any point.
+    Windows 10 or 11 (x64). Local scans need no network or internet access, at any point;
+    scanning a remote host uses whatever connection reaches it.
 
 ## Run your first scan
 
