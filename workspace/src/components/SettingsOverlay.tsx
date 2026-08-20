@@ -6,6 +6,7 @@ import { useScanController } from "../state/scanController";
 import { useWorkspace } from "../state/workspaceStore";
 import { useEnableIntelligence } from "../hooks/useEnableIntelligence";
 import { getDefaultStrategy, setDefaultStrategy } from "../lib/prefs";
+import { REMOTE_RESCAN_HINT, capabilitiesForSource } from "../lib/sourceCapabilities";
 import { OverlayShell } from "./ui/OverlayShell";
 import { SectionLabel } from "./ui/Card";
 import { Button } from "./ui/Button";
@@ -38,6 +39,7 @@ export function SettingsOverlay() {
   if (overlay !== "settings") return null;
   const close = () => setOverlay(null);
   const root = activeEntry?.root_path ?? null;
+  const canRescan = capabilitiesForSource(activeEntry?.source).mutate;
 
   const pick = (s: ScanStrategy) => {
     setStrategy(s);
@@ -45,7 +47,9 @@ export function SettingsOverlay() {
   };
 
   const rerunEnrichment = () => {
-    if (!root || rerunBusy) return;
+    // Same guard as the Scans view: this rescan walks THIS PC, so an index of another
+    // machine would come back full of local paths under the remote's name.
+    if (!root || rerunBusy || !canRescan) return;
     setRerunBusy(true);
     // An incremental rescan's phase 2 re-runs enrichment with live progress.
     enqueue(root, strategy);
@@ -136,7 +140,8 @@ export function SettingsOverlay() {
                   variant="ghost"
                   size="sm"
                   icon={RefreshCw}
-                  disabled={rerunBusy}
+                  disabled={rerunBusy || !canRescan}
+                  title={canRescan ? undefined : REMOTE_RESCAN_HINT}
                   onClick={rerunEnrichment}
                   className="flex-none"
                 >

@@ -81,7 +81,6 @@ impl RemoteScanner {
 
 fn run_remote_scan(source: SshSource, controller: ScanController, events_tx: Sender<ScanEvent>) {
     let root = normalized_root(&source.root).to_owned();
-    let started_at = Instant::now();
 
     let mut child = match Command::new("ssh")
         .args(ssh_args(&source))
@@ -92,23 +91,7 @@ fn run_remote_scan(source: SshSource, controller: ScanController, events_tx: Sen
     {
         Ok(child) => child,
         Err(error) => {
-            // Started first: consumers open their session on it, and an issue without a
-            // session has nowhere to land.
-            let _ = events_tx.send(ScanEvent::Started {
-                root: PathBuf::from(&root),
-                workers: 1,
-            });
-            let _ = events_tx.send(ScanEvent::Error(ScanError {
-                path: PathBuf::from(&root),
-                message: format!("failed to run ssh — is the OpenSSH client installed? ({error})"),
-            }));
-            let _ = events_tx.send(ScanEvent::Finished(ScanReport {
-                root: PathBuf::from(&root),
-                stats: ScanStats::empty(),
-                started_at,
-                finished_at: Instant::now(),
-                cancelled: false,
-            }));
+            send_spawn_failure(&events_tx, &root, error);
             return;
         }
     };
@@ -149,28 +132,64 @@ fn run_remote_scan(source: SshSource, controller: ScanController, events_tx: Sen
 
     // A failed wait() leaves no status to trust, so treat it like a non-zero exit.
     let exit_ok = matches!(&status, Ok(status) if status.success());
+    let exit_code = status.as_ref().ok().and_then(|status| status.code());
+    let terminal = terminal_after_exit(terminal, files_scanned, exit_ok, exit_code);
 
-    // find exits non-zero for any unreadable subdirectory, so only a run that produced
-    // nothing at all is worth reporting as a failure of its own.
-    if completed && !exit_ok && files_scanned == 0 {
+    // A stream that read to the end but was demoted anyway is exactly the run worth explaining:
+    // find's own non-zero exits over unreadable subdirectories are left alone.
+    if completed && matches!(terminal, ScanEvent::Cancelled(_)) {
         if let Ok(status) = &status {
             let _ = events_tx.send(ScanEvent::Error(ScanError {
                 path: PathBuf::from(&root),
-                message: format!("ssh exited with {status} without listing any files"),
+                message: if files_scanned == 0 {
+                    format!("ssh exited with {status} without listing any files")
+                } else {
+                    format!("ssh exited with {status} — this listing is incomplete, so nothing was removed from the previous scan")
+                },
             }));
         }
     }
 
-    let _ = events_tx.send(terminal_after_exit(terminal, files_scanned, exit_ok));
+    let _ = events_tx.send(terminal);
 }
 
-/// A run that ended non-zero with nothing to show for it is not a catalog. `Finished` is
-/// authoritative — the index writer closes the session as "complete" and soft-deletes every
-/// row it did not see this pass — so a failed auth on a re-scan would erase the previous
-/// one. `Cancelled` keeps the old catalog and the session honest.
-fn terminal_after_exit(terminal: ScanEvent, files_scanned: u64, exit_ok: bool) -> ScanEvent {
+/// ssh never started, so there is no listing at all. `Started` goes first — consumers open
+/// their session on it, and an issue without a session has nowhere to land — and the run ends
+/// on `Cancelled` for the reason [`terminal_after_exit`] spells out: nothing was scanned, so
+/// nothing here may be allowed to close the session as an authoritative catalog.
+fn send_spawn_failure(events_tx: &Sender<ScanEvent>, root: &str, error: impl std::fmt::Display) {
+    let _ = events_tx.send(ScanEvent::Started {
+        root: PathBuf::from(root),
+        workers: 1,
+    });
+    let _ = events_tx.send(ScanEvent::Error(ScanError {
+        path: PathBuf::from(root),
+        message: format!("failed to run ssh — is the OpenSSH client installed? ({error})"),
+    }));
+    let _ = events_tx.send(ScanEvent::Cancelled(ScanStats::empty()));
+}
+
+/// ssh reserves 255 for its own failures — connection lost, auth refused — while any other
+/// non-zero code came from the remote `find` (an unreadable subdirectory, say).
+const SSH_FAILURE_EXIT: i32 = 255;
+
+/// A run that ssh itself failed, or that ended non-zero with nothing to show for it, is not a
+/// catalog. `Finished` is authoritative — the index writer closes the session as "complete" and
+/// soft-deletes every row it did not see this pass — so a dropped connection on a re-scan would
+/// erase everything it had not streamed yet. `Cancelled` keeps the old catalog and the session
+/// honest.
+///
+/// A connection that dies mid-tree usually surfaces as a clean stdout EOF, so the file count is
+/// no guide at all: only the exit code separates "ssh broke" from "find complained".
+fn terminal_after_exit(
+    terminal: ScanEvent,
+    files_scanned: u64,
+    exit_ok: bool,
+    exit_code: Option<i32>,
+) -> ScanEvent {
+    let ssh_failed = exit_code == Some(SSH_FAILURE_EXIT);
     match terminal {
-        ScanEvent::Finished(report) if !exit_ok && files_scanned == 0 => {
+        ScanEvent::Finished(report) if !exit_ok && (ssh_failed || files_scanned == 0) => {
             ScanEvent::Cancelled(report.stats)
         }
         terminal => terminal,
@@ -653,25 +672,74 @@ f\t200\t1.0\t1.0\t1.0\t/srv/sub/b.txt\0";
         // ssh failed and listed nothing: Finished here would close the session as complete
         // and soft-delete the whole previous catalog under this root
         assert!(matches!(
-            terminal_after_exit(finished(), 0, false),
+            terminal_after_exit(finished(), 0, false, Some(255)),
             ScanEvent::Cancelled(_)
         ));
         // find exits non-zero over any unreadable subdirectory — the files it did list are
         // still a real catalog
         assert!(matches!(
-            terminal_after_exit(finished(), 12, false),
+            terminal_after_exit(finished(), 12, false, Some(1)),
             ScanEvent::Finished(_)
         ));
         // a clean exit that genuinely found nothing stays authoritative
         assert!(matches!(
-            terminal_after_exit(finished(), 0, true),
+            terminal_after_exit(finished(), 0, true, Some(0)),
             ScanEvent::Finished(_)
         ));
         // a cancel is already non-authoritative and passes through untouched
         assert!(matches!(
-            terminal_after_exit(ScanEvent::Cancelled(ScanStats::empty()), 0, false),
+            terminal_after_exit(ScanEvent::Cancelled(ScanStats::empty()), 0, false, Some(255)),
             ScanEvent::Cancelled(_)
         ));
+    }
+
+    #[test]
+    fn ssh_exit_255_is_never_authoritative_but_find_failures_are() {
+        let finished = || {
+            ScanEvent::Finished(ScanReport {
+                root: PathBuf::from("/srv"),
+                stats: ScanStats::empty(),
+                started_at: Instant::now(),
+                finished_at: Instant::now(),
+                cancelled: false,
+            })
+        };
+
+        // A dropped connection usually reaches us as a clean stdout EOF, so the stream reads
+        // as "Finished" with a partial listing. 255 is ssh's own failure code: what it handed
+        // over is half a tree, and closing the session complete would sweep the rest away.
+        assert!(matches!(
+            terminal_after_exit(finished(), 4_000, false, Some(255)),
+            ScanEvent::Cancelled(_)
+        ));
+        // Any other non-zero code came from the remote `find` (unreadable subdirectories) —
+        // the listing is whole enough to keep.
+        assert!(matches!(
+            terminal_after_exit(finished(), 4_000, false, Some(1)),
+            ScanEvent::Finished(_)
+        ));
+        // No code at all (a failed wait, or a signal) with files listed stays as it was.
+        assert!(matches!(
+            terminal_after_exit(finished(), 4_000, false, None),
+            ScanEvent::Finished(_)
+        ));
+    }
+
+    #[test]
+    fn ssh_that_never_started_does_not_terminate_as_finished() {
+        // No ssh binary means no listing at all. Finished would close the session "complete",
+        // and the writer's Finished path soft-deletes every row this pass did not see — so a
+        // re-scan on a machine without OpenSSH would wipe the previous catalog.
+        let (tx, rx) = std::sync::mpsc::channel();
+        send_spawn_failure(&tx, "/srv", "program not found");
+        let events: Vec<ScanEvent> = rx.try_iter().collect();
+
+        assert!(matches!(events.first().unwrap(), ScanEvent::Started { .. }));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            ScanEvent::Error(error) if error.message.contains("OpenSSH")
+        )));
+        assert!(matches!(events.last().unwrap(), ScanEvent::Cancelled(_)));
     }
 
     #[test]

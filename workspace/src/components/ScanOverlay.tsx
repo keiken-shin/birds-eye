@@ -28,7 +28,7 @@ const STRATEGIES: Array<{
   icon: LucideIcon;
   title: string;
   note: string;
-  /** Over SSH there's nothing to hash, so duplicates come down to matching sizes. */
+  /** Finding duplicates means reading the files, which only works on this PC. */
   remoteNote?: string;
 }> = [
   {
@@ -36,7 +36,7 @@ const STRATEGIES: Array<{
     icon: Sparkles,
     title: "Smart",
     note: "sizes, types and duplicate detection",
-    remoteNote: "sizes, types and duplicates matched by size only",
+    remoteNote: "sizes and types — duplicate detection needs files on this PC",
   },
   { id: "metadata", icon: Zap, title: "Metadata only", note: "fastest — sizes and dates" },
 ];

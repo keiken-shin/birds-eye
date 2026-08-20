@@ -323,6 +323,19 @@ impl IndexWriter {
             return Ok(());
         }
 
+        // A remote catalog's paths live on the other machine. Hashing them means opening them
+        // here, where every one of them fails — a scan full of phantom issues, and still no
+        // groups at the end, since grouping needs a hash that was never computed.
+        if self.source_json.is_some() {
+            progress_stage(
+                &mut progress,
+                "Skipping duplicate analysis — the files are on another machine",
+                1,
+                1,
+            );
+            return Ok(());
+        }
+
         let scan_id = self.current_scan_session_id()?;
 
         progress_stage(&mut progress, "Preparing duplicate analysis", 0, 1);
@@ -2497,6 +2510,53 @@ mod tests {
             .all(|path| path.ends_with("one.bin") || path.ends_with("two.bin")));
 
         cleanup(&root);
+    }
+
+    #[test]
+    fn remote_scan_skips_duplicate_refinement() {
+        let root = test_root("remote-refinement");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("one.bin"), &[1; 32]);
+        write_file(&root.join("two.bin"), &[1; 32]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        writer.set_source(r#"{"type":"ssh","destination":"a@h","port":null,"root":"/d"}"#);
+        scan_into_index(&root, &mut writer);
+        // A remote catalog's paths are on the other machine and cannot be opened here.
+        // Deleting the local files is the closest stand-in for that.
+        cleanup(&root);
+
+        writer
+            .refine_duplicates_with_progress(&|| false, |_| {})
+            .expect("failed to refine duplicates");
+
+        let hash_issues = writer
+            .scan_issues(SCAN_ISSUES_CAP as usize)
+            .expect("scan issues")
+            .into_iter()
+            .filter(|issue| issue.phase == "hash")
+            .count();
+        let candidates: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_candidates", [], |row| {
+                row.get(0)
+            })
+            .expect("failed to count duplicate candidates");
+        let running_hash_jobs: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM hash_jobs WHERE status != 'pending'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("failed to count hash jobs");
+
+        assert_eq!(
+            hash_issues, 0,
+            "hashing a remote path against this PC's disk only invents issues"
+        );
+        assert_eq!(candidates, 0, "no local hashing means no candidates to hash");
+        assert_eq!(running_hash_jobs, 0);
     }
 
     #[test]

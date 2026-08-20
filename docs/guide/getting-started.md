@@ -56,13 +56,15 @@ running scan, the queue, and everything you've scanned before all live there.
 Scanning isn't limited to this machine. In **New scan**, flip the **Remote host (SSH)** toggle
 to point Bird's Eye at a Linux machine instead — give it `user@host` and a folder, and it
 streams the listing back over a single SSH session. Auth is key-based only (no password
-prompts), and nothing is installed on the remote host.
+prompts), and nothing is installed on the remote host. Connect to a new host once from a
+terminal first, so its host key gets recorded — Bird's Eye never weakens host-key checking to
+get a connection through.
 
 Because Bird's Eye never copies the remote files, actions that touch a file directly —
 **Reveal in Explorer**, preview, cleanup, **Move to folder…** — are only available for scans of
 this machine. You can still stage what you find, so the list survives; the tray just won't act
-on it. Duplicate detection also steps down to comparing sizes only, since there's nothing to
-hash.
+on it. Duplicate detection isn't available for remote scans either: telling two files apart
+means reading both, and Bird's Eye only reads files on this PC.
 
 ## Read the Overview
 

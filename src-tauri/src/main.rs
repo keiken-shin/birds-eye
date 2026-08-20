@@ -158,11 +158,22 @@ fn delete_index(app: tauri::AppHandle, index_path: PathBuf) -> Result<(), String
     fs::remove_file(canonical_index).map_err(|error| format!("failed to delete index: {error}"))
 }
 
+/// `start_scan_job` predates the request's `ssh` field, so nothing here runs
+/// [`validate_ssh_source`] — a remote source arriving on this command would reach the
+/// shell-out unchecked. It has one legitimate way in, and this is not it.
+fn reject_ssh_on_generic_command(request: &StartScanJobRequest) -> Result<(), String> {
+    if request.ssh.is_some() {
+        return Err("a remote scan has to be started through start_scan_job_for_ssh".to_owned());
+    }
+    Ok(())
+}
+
 #[tauri::command(async)]
 fn start_scan_job(
     state: tauri::State<'_, AppState>,
     request: StartScanJobRequest,
 ) -> Result<StartScanJobResponse, String> {
+    reject_ssh_on_generic_command(&request)?;
     let jobs = state
         .jobs
         .lock()
@@ -688,6 +699,27 @@ mod ssh_source_tests {
         assert!(validate_ssh_source(&SshSource { destination: "".into(), ..base.clone() }).is_err());
         assert!(validate_ssh_source(&SshSource { root: "srv/data".into(), ..base.clone() }).is_err());
         assert!(validate_ssh_source(&SshSource { port: Some(0), ..base.clone() }).is_err());
+    }
+
+    #[test]
+    fn generic_start_scan_job_turns_ssh_requests_away() {
+        let request = |ssh| StartScanJobRequest {
+            root: PathBuf::from("/home/anubhav"),
+            index_path: PathBuf::from("index.sqlite"),
+            scan_strategy: None,
+            enable_intelligence: None,
+            ssh,
+        };
+
+        assert!(reject_ssh_on_generic_command(&request(None)).is_ok());
+        // an unvalidated destination is exactly what this command must not forward
+        let error = reject_ssh_on_generic_command(&request(Some(SshSource {
+            destination: "-oProxyCommand=x".into(),
+            port: None,
+            root: "/srv".into(),
+        })))
+        .expect_err("a request carrying an ssh source must be refused here");
+        assert!(error.contains("start_scan_job_for_ssh"), "{error}");
     }
 
     #[test]

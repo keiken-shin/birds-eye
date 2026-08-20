@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { setOntologyEnabled as setOntologyEnabledNative } from "@bridge/nativeClient";
 import { getDefaultStrategy } from "../lib/prefs";
+import { REMOTE_RESCAN_HINT, capabilitiesForSource } from "../lib/sourceCapabilities";
 import { useIndexData } from "../state/indexData";
 import { useScanController } from "../state/scanController";
 import { useWorkspace } from "../state/workspaceStore";
@@ -27,6 +28,12 @@ export function useEnableIntelligence() {
     const root = activeEntry?.root_path;
     if (!root) {
       setError("No scan root recorded for this index — run a new scan instead.");
+      return;
+    }
+    // The enable hands the work to a rescan, and a rescan here walks THIS PC — which for an
+    // index of another machine would index our copy of that path under the remote's name.
+    if (!capabilitiesForSource(activeEntry?.source).mutate) {
+      setError(REMOTE_RESCAN_HINT);
       return;
     }
     setBusy(true);
