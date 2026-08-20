@@ -69,6 +69,7 @@ use birds_eye::ontology::saved_views::{SavedView, SavedViewRow};
 use birds_eye::native::{
     JobEventDto, JobStatusDto, ScanJobManager, StartScanJobRequest, StartScanJobResponse,
 };
+use birds_eye::scanner::SshSource;
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
@@ -196,6 +197,93 @@ fn start_scan_job_for_root(
             scan_strategy,
             enable_intelligence,
             ssh: None,
+        },
+        Some(Arc::new(move |event| {
+            let _ = event_app.emit("scan-job-event", event);
+        })),
+    )?;
+
+    Ok(StartScanJobForRootResponse {
+        job_id: response.job_id,
+        index_path,
+    })
+}
+
+/// Trims trailing '/' so "/srv/" and "/srv" hash and store identically — the
+/// scanner already does this internally, but the index filename hash and the
+/// stored source JSON see the raw root unless it's normalized here first.
+fn normalize_ssh_root(root: &str) -> String {
+    let trimmed = root.trim_end_matches('/');
+    if trimmed.is_empty() {
+        "/".to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+/// Server-side validation for an SSH source — the frontend validates too, but this
+/// command is the authoritative boundary. Rejects anything that could be read as an
+/// ssh(1) option (a destination starting with '-') before it ever reaches a shell-out.
+fn validate_ssh_source(source: &SshSource) -> Result<(), String> {
+    let destination = source.destination.trim();
+    if destination.starts_with('-') {
+        return Err("host can't start with '-' — enter user@host or an SSH config name".to_owned());
+    }
+    let chars_ok = !destination.is_empty()
+        && destination
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '@' | '-'));
+    if !chars_ok {
+        return Err("enter the host as user@host or an SSH config name".to_owned());
+    }
+    if !source.root.starts_with('/') {
+        return Err("enter the remote folder as an absolute path, e.g. /home/user".to_owned());
+    }
+    if source.port == Some(0) {
+        return Err("port must be between 1 and 65535".to_owned());
+    }
+    Ok(())
+}
+
+fn ssh_index_file_name(source: &SshSource) -> String {
+    let mut hasher = DefaultHasher::new();
+    "ssh".hash(&mut hasher);
+    source.destination.hash(&mut hasher);
+    source.port.hash(&mut hasher);
+    source.root.hash(&mut hasher);
+    format!("{:016x}.sqlite", hasher.finish())
+}
+
+#[tauri::command(async)]
+fn start_scan_job_for_ssh(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    source: SshSource,
+    scan_strategy: Option<String>,
+    enable_intelligence: Option<bool>,
+) -> Result<StartScanJobForRootResponse, String> {
+    let source = SshSource {
+        root: normalize_ssh_root(&source.root),
+        ..source
+    };
+    validate_ssh_source(&source)?;
+
+    let index_path = index_dir(&app).and_then(|dir| {
+        fs::create_dir_all(&dir).map_err(|e| format!("failed to create index directory: {e}"))?;
+        Ok(dir.join(ssh_index_file_name(&source)))
+    })?;
+    let jobs = state
+        .jobs
+        .lock()
+        .map_err(|_| "job manager lock poisoned".to_owned())?;
+    let event_app = app.clone();
+    let response = jobs.start_scan_job_with_listener(
+        StartScanJobRequest {
+            root: PathBuf::from(&source.root),
+            index_path: index_path.clone(),
+            scan_strategy,
+            enable_intelligence,
+            ssh: Some(source),
         },
         Some(Arc::new(move |event| {
             let _ = event_app.emit("scan-job-event", event);
@@ -477,6 +565,7 @@ fn main() {
             delete_index,
             start_scan_job,
             start_scan_job_for_root,
+            start_scan_job_for_ssh,
             cancel_scan_job,
             scan_job_events,
             scan_job_status,
@@ -552,4 +641,51 @@ fn index_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .app_data_dir()
         .map_err(|error| format!("failed to resolve app data dir: {error}"))?
         .join("indexes"))
+}
+
+#[cfg(test)]
+mod ssh_source_tests {
+    use super::*;
+
+    #[test]
+    fn ssh_index_filename_differs_from_local_and_is_stable() {
+        let a = ssh_index_file_name(&SshSource { destination: "u@h".into(), port: Some(2222), root: "/home/u".into() });
+        let b = ssh_index_file_name(&SshSource { destination: "u@h2".into(), port: Some(2222), root: "/home/u".into() });
+        assert_ne!(a, b);
+        assert_eq!(a, ssh_index_file_name(&SshSource { destination: "u@h".into(), port: Some(2222), root: "/home/u".into() }));
+        assert!(a.ends_with(".sqlite"));
+    }
+
+    #[test]
+    fn normalize_ssh_root_trims_trailing_slashes_but_keeps_bare_slash() {
+        assert_eq!(normalize_ssh_root("/srv/"), "/srv");
+        assert_eq!(normalize_ssh_root("/"), "/");
+    }
+
+    #[test]
+    fn validate_ssh_source_rejects_bad_input() {
+        let base = SshSource {
+            destination: "anubhav@localhost".into(),
+            port: Some(2222),
+            root: "/home/anubhav".into(),
+        };
+
+        assert!(validate_ssh_source(&SshSource { destination: "-oProxyCommand=x".into(), ..base.clone() }).is_err());
+        assert!(validate_ssh_source(&SshSource { destination: "bad host".into(), ..base.clone() }).is_err());
+        assert!(validate_ssh_source(&SshSource { destination: "".into(), ..base.clone() }).is_err());
+        assert!(validate_ssh_source(&SshSource { root: "srv/data".into(), ..base.clone() }).is_err());
+        assert!(validate_ssh_source(&SshSource { port: Some(0), ..base.clone() }).is_err());
+    }
+
+    #[test]
+    fn validate_ssh_source_accepts_good_input() {
+        let base = SshSource {
+            destination: "anubhav@localhost".into(),
+            port: Some(2222),
+            root: "/home/anubhav".into(),
+        };
+
+        assert!(validate_ssh_source(&base).is_ok());
+        assert!(validate_ssh_source(&SshSource { port: None, ..base.clone() }).is_ok());
+    }
 }
