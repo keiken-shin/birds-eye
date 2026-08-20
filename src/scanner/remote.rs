@@ -147,20 +147,34 @@ fn run_remote_scan(source: SshSource, controller: ScanController, events_tx: Sen
         let _ = drain.join();
     }
 
+    // A failed wait() leaves no status to trust, so treat it like a non-zero exit.
+    let exit_ok = matches!(&status, Ok(status) if status.success());
+
     // find exits non-zero for any unreadable subdirectory, so only a run that produced
     // nothing at all is worth reporting as a failure of its own.
-    if completed && files_scanned == 0 {
-        if let Ok(status) = status {
-            if !status.success() {
-                let _ = events_tx.send(ScanEvent::Error(ScanError {
-                    path: PathBuf::from(&root),
-                    message: format!("ssh exited with {status} without listing any files"),
-                }));
-            }
+    if completed && !exit_ok && files_scanned == 0 {
+        if let Ok(status) = &status {
+            let _ = events_tx.send(ScanEvent::Error(ScanError {
+                path: PathBuf::from(&root),
+                message: format!("ssh exited with {status} without listing any files"),
+            }));
         }
     }
 
-    let _ = events_tx.send(terminal);
+    let _ = events_tx.send(terminal_after_exit(terminal, files_scanned, exit_ok));
+}
+
+/// A run that ended non-zero with nothing to show for it is not a catalog. `Finished` is
+/// authoritative — the index writer closes the session as "complete" and soft-deletes every
+/// row it did not see this pass — so a failed auth on a re-scan would erase the previous
+/// one. `Cancelled` keeps the old catalog and the session honest.
+fn terminal_after_exit(terminal: ScanEvent, files_scanned: u64, exit_ok: bool) -> ScanEvent {
+    match terminal {
+        ScanEvent::Finished(report) if !exit_ok && files_scanned == 0 => {
+            ScanEvent::Cancelled(report.stats)
+        }
+        terminal => terminal,
+    }
 }
 
 pub(crate) enum Entry {
@@ -622,6 +636,42 @@ f\t200\t1.0\t1.0\t1.0\t/srv/sub/b.txt\0";
             .last()
             .unwrap()
             .starts_with("find '/' "));
+    }
+
+    #[test]
+    fn failed_ssh_with_no_files_does_not_terminate_as_finished() {
+        let finished = || {
+            ScanEvent::Finished(ScanReport {
+                root: PathBuf::from("/srv"),
+                stats: ScanStats::empty(),
+                started_at: Instant::now(),
+                finished_at: Instant::now(),
+                cancelled: false,
+            })
+        };
+
+        // ssh failed and listed nothing: Finished here would close the session as complete
+        // and soft-delete the whole previous catalog under this root
+        assert!(matches!(
+            terminal_after_exit(finished(), 0, false),
+            ScanEvent::Cancelled(_)
+        ));
+        // find exits non-zero over any unreadable subdirectory — the files it did list are
+        // still a real catalog
+        assert!(matches!(
+            terminal_after_exit(finished(), 12, false),
+            ScanEvent::Finished(_)
+        ));
+        // a clean exit that genuinely found nothing stays authoritative
+        assert!(matches!(
+            terminal_after_exit(finished(), 0, true),
+            ScanEvent::Finished(_)
+        ));
+        // a cancel is already non-authoritative and passes through untouched
+        assert!(matches!(
+            terminal_after_exit(ScanEvent::Cancelled(ScanStats::empty()), 0, false),
+            ScanEvent::Cancelled(_)
+        ));
     }
 
     #[test]
