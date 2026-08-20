@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 15;
+pub const CURRENT_SCHEMA_VERSION: u32 = 16;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -781,6 +781,16 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (15, strftime('%s', 'now'));
 "#;
 
+/// Where a session's bytes came from: `'local'` for a filesystem walk, or the
+/// source JSON of a remote (SSH) scan. Old indexes get `'local'` on open, which
+/// is what they were.
+pub const MIGRATION_016: &str = r#"
+ALTER TABLE scan_sessions ADD COLUMN source TEXT NOT NULL DEFAULT 'local';
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (16, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -797,6 +807,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (13, MIGRATION_013),
     (14, MIGRATION_014),
     (15, MIGRATION_015),
+    (16, MIGRATION_016),
 ];
 
 #[cfg(test)]
@@ -805,8 +816,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 15);
-        assert_eq!(ALL_MIGRATIONS.len(), 15);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 16);
+        assert_eq!(ALL_MIGRATIONS.len(), 16);
     }
 
     #[test]

@@ -195,6 +195,7 @@ fn start_scan_job_for_root(
             index_path: index_path.clone(),
             scan_strategy,
             enable_intelligence,
+            ssh: None,
         },
         Some(Arc::new(move |event| {
             let _ = event_app.emit("scan-job-event", event);

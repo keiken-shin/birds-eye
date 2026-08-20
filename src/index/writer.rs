@@ -59,6 +59,8 @@ pub struct IndexWriter {
     active_root: Option<PathBuf>,
     active_scan_started_at: Option<i64>,
     active_scan_mode: ScanMode,
+    /// Source JSON stamped on the sessions this writer starts; `None` = local.
+    source_json: Option<String>,
     scan_transaction_open: bool,
     folder_ids: HashMap<PathBuf, i64>,
     files_since_commit: u64,
@@ -197,6 +199,7 @@ impl IndexWriter {
             active_root: None,
             active_scan_started_at: None,
             active_scan_mode: ScanMode::default(),
+            source_json: None,
             scan_transaction_open: false,
             folder_ids: HashMap::new(),
             files_since_commit: 0,
@@ -213,6 +216,7 @@ impl IndexWriter {
             active_root: None,
             active_scan_started_at: None,
             active_scan_mode: ScanMode::default(),
+            source_json: None,
             scan_transaction_open: false,
             folder_ids: HashMap::new(),
             files_since_commit: 0,
@@ -284,6 +288,26 @@ impl IndexWriter {
             )
             .optional()?;
         Ok(mode.as_deref().map(ScanMode::from_id).unwrap_or_default())
+    }
+
+    /// Stamp the sessions this writer starts with where their bytes came from
+    /// (a remote source's JSON). Unset means a local filesystem walk.
+    pub fn set_source(&mut self, source_json: &str) {
+        self.source_json = Some(source_json.to_owned());
+    }
+
+    /// Source of the most recent session — `"local"` for a filesystem walk, and
+    /// for indexes written before the column existed.
+    pub fn latest_source(&self) -> Result<String, IndexError> {
+        let source = self
+            .connection
+            .query_row(
+                "SELECT source FROM scan_sessions ORDER BY started_at DESC LIMIT 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(source.unwrap_or_else(|| "local".to_owned()))
     }
 
     pub fn refine_duplicates_with_progress<F, C>(
@@ -1059,8 +1083,14 @@ impl IndexWriter {
         self.files_since_commit = 0;
         self.begin_scan_transaction()?;
         self.connection.execute(
-            "INSERT INTO scan_sessions (root_path, started_at, status, scan_strategy) VALUES (?1, ?2, 'running', ?3)",
-            params![path_to_string(root), started_at, self.active_scan_mode.as_id()],
+            "INSERT INTO scan_sessions (root_path, started_at, status, scan_strategy, source)
+             VALUES (?1, ?2, 'running', ?3, ?4)",
+            params![
+                path_to_string(root),
+                started_at,
+                self.active_scan_mode.as_id(),
+                self.source_json.as_deref().unwrap_or("local")
+            ],
         )?;
         self.session_id = Some(self.connection.last_insert_rowid());
         self.active_root = Some(root.to_path_buf());
@@ -2573,6 +2603,29 @@ mod tests {
         );
         assert_eq!(by_path.len(), 1);
         assert!(empty.is_empty());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn scan_session_records_source() {
+        let root = test_root("session-source");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("one.bin"), &[1; 16]);
+
+        let source = r#"{"type":"ssh","destination":"a@h","port":null,"root":"/d"}"#;
+        let mut remote = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        remote.set_source(source);
+        scan_into_index(&root, &mut remote);
+        assert_eq!(remote.latest_source().expect("latest source"), source);
+
+        let mut local = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut local);
+        assert_eq!(
+            local.latest_source().expect("latest source"),
+            "local",
+            "a session with no source set must read back as local"
+        );
+
         cleanup(&root);
     }
 

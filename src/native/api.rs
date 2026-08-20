@@ -897,6 +897,8 @@ pub struct IndexMetadataDto {
     pub hash_issues: i64,
     /// Whether the intelligence (ontology) layer is enabled for this index.
     pub intelligence: bool,
+    /// Where the last scan's bytes came from: `"local"`, or a remote source's JSON.
+    pub source: String,
 }
 
 pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse, String> {
@@ -1100,7 +1102,7 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
     let metadata = writer
         .connection()
         .query_row(
-            "SELECT root_path, status, COALESCE(finished_at, started_at), files_scanned, folders_scanned, bytes_scanned, scan_strategy
+            "SELECT root_path, status, COALESCE(finished_at, started_at), files_scanned, folders_scanned, bytes_scanned, scan_strategy, COALESCE(source, 'local')
              FROM scan_sessions
              ORDER BY started_at DESC
              LIMIT 1",
@@ -1118,6 +1120,7 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
                     walk_issues,
                     hash_issues,
                     intelligence,
+                    source: row.get(7)?,
                 })
             },
         )
@@ -1136,6 +1139,7 @@ pub fn index_metadata(index_path: PathBuf) -> Result<IndexMetadataDto, String> {
         walk_issues: 0,
         hash_issues: 0,
         intelligence,
+        source: "local".to_owned(),
     }))
 }
 
@@ -1186,6 +1190,11 @@ pub struct RetryScanIssuesResponse {
 /// files aren't touched. No full rescan.
 pub fn retry_scan_issues(request: RetryScanIssuesRequest) -> Result<RetryScanIssuesResponse, String> {
     let mut writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    // The retry re-walks the failed paths on THIS machine, which for a remote
+    // index would probe the wrong filesystem entirely.
+    if writer.latest_source().map_err(|error| format!("{error:?}"))? != "local" {
+        return Err("retrying scan issues is not yet supported for remote indexes".to_owned());
+    }
     let mode = writer.latest_scan_mode().map_err(|error| format!("{error:?}"))?;
     writer.set_scan_mode(mode);
 
@@ -2260,6 +2269,48 @@ mod tests {
         assert!(deleted_at.is_none(), "moving a file back to its original path must heal deleted_at");
         drop(conn);
 
+        cleanup(&root);
+    }
+
+    #[test]
+    fn index_metadata_exposes_source() {
+        let root = test_root("metadata-source");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("failed to create folders");
+        write_file(&root.join("data").join("one.bin"), &[1; 32]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+            scan_strategy: None,
+        })
+        .expect("scan command failed");
+
+        let metadata = index_metadata(index_path).expect("metadata");
+        assert_eq!(metadata.source, "local");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn retry_scan_issues_refuses_remote_index() {
+        let root = test_root("retry-remote");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("failed to create folders");
+
+        {
+            let mut writer = IndexWriter::open(&index_path).expect("failed to open index");
+            writer.set_source(r#"{"type":"ssh","destination":"a@h","port":null,"root":"/d"}"#);
+            for event in Scanner::new(ScanOptions::new(root.join("data"))).scan() {
+                writer.handle_event(&event).expect("failed to index event");
+                if matches!(event, ScanEvent::Finished(_)) {
+                    break;
+                }
+            }
+        }
+
+        let error = retry_scan_issues(RetryScanIssuesRequest { index_path })
+            .expect_err("a remote index must refuse a retry");
+        assert!(error.contains("remote"), "unexpected error: {error}");
         cleanup(&root);
     }
 

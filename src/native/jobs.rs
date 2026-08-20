@@ -2,7 +2,7 @@ use crate::index::writer::ScanMode;
 use crate::index::IndexWriter;
 use crate::native::phase_timer::{PhaseTimer, PhaseTimingEntry};
 use crate::ontology::populators::BudgetTier;
-use crate::scanner::{ScanController, ScanEvent, ScanOptions, Scanner};
+use crate::scanner::{RemoteScanner, ScanController, ScanEvent, ScanOptions, Scanner, SshSource};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -25,6 +25,10 @@ pub struct StartScanJobRequest {
     /// None leaves the index's existing setting untouched.
     #[serde(default)]
     pub enable_intelligence: Option<bool>,
+    /// Present = walk a remote host over SSH instead of `root`, which is then
+    /// only a label. The index records the source so later reads know.
+    #[serde(default)]
+    pub ssh: Option<SshSource>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -107,11 +111,21 @@ impl ScanJobManager {
         listener: Option<JobEventListener>,
     ) -> Result<StartScanJobResponse, String> {
         let job_id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let root_display = request.root.display().to_string();
-        let scanner = Scanner::new(ScanOptions::new(request.root));
-        let controller = scanner.controller();
+        let (controller, events, root_display) = match request.ssh.clone() {
+            Some(ssh) => {
+                let scanner = RemoteScanner::new(ssh.clone());
+                let controller = scanner.controller();
+                let events = scanner.scan();
+                (controller, events, ssh.display_label())
+            }
+            None => {
+                let scanner = Scanner::new(ScanOptions::new(request.root.clone()));
+                let controller = scanner.controller();
+                let events = scanner.scan();
+                (controller, events, request.root.display().to_string())
+            }
+        };
         let enrichment_pause = Arc::new(AtomicBool::new(false));
-        let events = scanner.scan();
         let jobs = Arc::clone(&self.jobs);
         let worker_enrichment_pause = Arc::clone(&enrichment_pause);
         let worker_controller = controller.clone();
@@ -181,6 +195,9 @@ impl ScanJobManager {
                     .as_deref()
                     .unwrap_or(ScanMode::default().as_id()),
             ));
+            if let Some(ssh) = &request.ssh {
+                writer.set_source(&ssh.to_source_json());
+            }
 
             if let Some(enabled) = request.enable_intelligence {
                 let result = if enabled {
@@ -965,6 +982,7 @@ mod tests {
                 index_path: index_path.clone(),
                 scan_strategy: None,
                 enable_intelligence: None,
+                ssh: None,
             })
             .expect("failed to start job");
 
@@ -1005,6 +1023,7 @@ mod tests {
                 index_path: index_path.clone(),
                 scan_strategy: Some("metadata".to_owned()),
                 enable_intelligence: None,
+                ssh: None,
             })
             .expect("failed to start job");
 
@@ -1055,6 +1074,7 @@ mod tests {
                 index_path,
                 scan_strategy: None,
                 enable_intelligence: None,
+                ssh: None,
             })
             .expect("failed to start job");
         manager
@@ -1109,6 +1129,7 @@ mod tests {
                 index_path: index_path.clone(),
                 scan_strategy: None,
                 enable_intelligence: None,
+                ssh: None,
             })
             .expect("failed to start initial job");
         wait_for_terminal(&manager, initial.job_id);
@@ -1126,6 +1147,7 @@ mod tests {
                     index_path,
                     scan_strategy: None,
                 enable_intelligence: None,
+                ssh: None,
                 },
                 Some(Arc::new(move |event| {
                     if event
@@ -1178,6 +1200,7 @@ mod tests {
                     index_path,
                     scan_strategy: None,
                 enable_intelligence: None,
+                ssh: None,
                 },
                 Some(Arc::new(move |event| {
                     captured.lock().unwrap().push(event);
@@ -1225,6 +1248,7 @@ mod tests {
                     index_path,
                     scan_strategy: None,
                 enable_intelligence: None,
+                ssh: None,
                 },
                 Some(Arc::new(move |event| {
                     captured.lock().unwrap().push(event);
@@ -1259,6 +1283,7 @@ mod tests {
                 index_path: index_path.clone(),
                 scan_strategy: None,
                 enable_intelligence: None,
+                ssh: None,
             })
             .expect("failed to start initial job");
         wait_for_terminal(&manager, initial.job_id);
@@ -1274,6 +1299,7 @@ mod tests {
                 index_path: index_path.clone(),
                 scan_strategy: None,
                 enable_intelligence: None,
+                ssh: None,
             })
             .expect("failed to start rerun job");
         wait_for_terminal(&manager, rerun.job_id);
@@ -1323,6 +1349,7 @@ mod tests {
                 // Explicit off: the analysis is on by default now, so this
                 // test must opt out to exercise the disabled path.
                 enable_intelligence: Some(false),
+                ssh: None,
             })
             .expect("failed to start job");
         wait_for_terminal(&manager, response.job_id);
@@ -1426,6 +1453,7 @@ mod tests {
                 index_path: index_path.clone(),
                 scan_strategy: None,
                 enable_intelligence: None,
+                ssh: None,
             })
             .expect("failed to start job");
 
