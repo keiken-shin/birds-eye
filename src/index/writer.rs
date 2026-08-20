@@ -1555,8 +1555,11 @@ pub(crate) fn insert_scan_issue(
 
 fn path_prefix(path: &Path) -> String {
     let mut path = path_to_string(path);
-    if !path.ends_with(std::path::MAIN_SEPARATOR) {
-        path.push(std::path::MAIN_SEPARATOR);
+    // Derive the separator from the path itself: remote roots are POSIX ('/')
+    // even on a Windows build, so the compile-time MAIN_SEPARATOR is wrong here.
+    let sep = if path.contains('\\') { '\\' } else { '/' };
+    if !path.ends_with(sep) {
+        path.push(sep);
     }
     path
 }
@@ -2711,5 +2714,21 @@ mod tests {
         assert_eq!(child_files, 2, "child should roll up 2 files (its own + grandchild)");
         assert_eq!(child_bytes, 500, "child should roll up 200+300 bytes");
         cleanup(&root);
+    }
+
+    #[test]
+    fn path_prefix_uses_posix_separator_for_posix_paths() {
+        assert_eq!(super::path_prefix(std::path::Path::new("/home/user")), "/home/user/");
+    }
+
+    #[test]
+    fn path_prefix_uses_backslash_for_windows_paths() {
+        assert_eq!(super::path_prefix(std::path::Path::new(r"C:\Users\a")), r"C:\Users\a\");
+    }
+
+    #[test]
+    fn path_prefix_does_not_double_separator() {
+        assert_eq!(super::path_prefix(std::path::Path::new("/home/user/")), "/home/user/");
+        assert_eq!(super::path_prefix(std::path::Path::new(r"C:\")), r"C:\");
     }
 }
