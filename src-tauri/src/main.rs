@@ -263,6 +263,7 @@ fn start_scan_job_for_ssh(
     enable_intelligence: Option<bool>,
 ) -> Result<StartScanJobForRootResponse, String> {
     let source = SshSource {
+        destination: source.destination.trim().to_owned(),
         root: normalize_ssh_root(&source.root),
         ..source
     };
@@ -654,6 +655,18 @@ mod ssh_source_tests {
         assert_ne!(a, b);
         assert_eq!(a, ssh_index_file_name(&SshSource { destination: "u@h".into(), port: Some(2222), root: "/home/u".into() }));
         assert!(a.ends_with(".sqlite"));
+    }
+
+    #[test]
+    fn padded_destination_hashes_and_stores_same_as_trimmed() {
+        // start_scan_job_for_ssh trims `destination` the same way it normalizes `root` before
+        // hashing/storing it — pin that a padded destination collapses to the trimmed identity.
+        let padded = SshSource { destination: " anubhav@localhost ".into(), port: Some(2222), root: "/home/anubhav".into() };
+        let trimmed = SshSource { destination: "anubhav@localhost".into(), ..padded.clone() };
+        let as_command_sees_it = SshSource { destination: padded.destination.trim().to_owned(), ..padded };
+
+        assert_eq!(as_command_sees_it.destination, trimmed.destination);
+        assert_eq!(ssh_index_file_name(&as_command_sees_it), ssh_index_file_name(&trimmed));
     }
 
     #[test]
