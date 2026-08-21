@@ -203,8 +203,10 @@ where
     Ok(())
 }
 
-const BLOCK: usize = 64 * 1024;
-const SMALL_MAX: u64 = 256 * 1024;
+// Shared with the remote hasher: the plan a remote file is sampled on has to be
+// the local plan, or the two catalogs disagree about what "sampled" means.
+pub(super) const BLOCK: usize = 64 * 1024;
+pub(super) const SMALL_MAX: u64 = 256 * 1024;
 const MEDIUM_MAX: u64 = 1024 * 1024;
 const LARGE_MAX: u64 = 512 * 1024 * 1024;
 
@@ -252,7 +254,7 @@ fn with_lock_retry<T>(op: impl Fn() -> std::io::Result<T>) -> std::io::Result<T>
 
 /// Returns the (offset, len) chunks to sample for a file of `size` bytes.
 /// Empty means "skip sampling, hash the whole file directly".
-fn sample_chunk_plan(size: u64) -> Vec<(u64, usize)> {
+pub(super) fn sample_chunk_plan(size: u64) -> Vec<(u64, usize)> {
     if size == 0 || size <= SMALL_MAX {
         return Vec::new();
     }

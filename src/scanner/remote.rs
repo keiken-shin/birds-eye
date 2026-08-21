@@ -35,6 +35,24 @@ impl SshSource {
         }
     }
 
+    /// The inverse of [`Self::to_source_json`]. Anything that is not this app's
+    /// own ssh source — another source type, or the bare `"local"` marker older
+    /// indexes carry — is `None` rather than a guess.
+    pub fn from_source_json(json: &str) -> Option<SshSource> {
+        let value: serde_json::Value = serde_json::from_str(json).ok()?;
+        if value.get("type")?.as_str()? != "ssh" {
+            return None;
+        }
+        Some(SshSource {
+            destination: value.get("destination")?.as_str()?.to_owned(),
+            port: value
+                .get("port")
+                .and_then(|port| port.as_u64())
+                .and_then(|port| u16::try_from(port).ok()),
+            root: value.get("root")?.as_str()?.to_owned(),
+        })
+    }
+
     pub fn to_source_json(&self) -> String {
         serde_json::json!({
             "type": "ssh",
@@ -449,7 +467,9 @@ fn normalized_root(root: &str) -> &str {
     }
 }
 
-pub(crate) fn ssh_args(source: &SshSource) -> Vec<String> {
+/// Everything up to (and including) the destination — one remote command string is all
+/// that is left to push. Shared with the remote hasher so both reach a host the same way.
+pub(crate) fn ssh_prefix_args(source: &SshSource) -> Vec<String> {
     // BatchMode: never sit at a password prompt. ConnectTimeout: a black-holed host has to
     // fail rather than park the scan thread in a read that no cancel can reach.
     let mut args = vec![
@@ -468,6 +488,12 @@ pub(crate) fn ssh_args(source: &SshSource) -> Vec<String> {
     // destination cannot smuggle in ssh options.
     args.push("--".to_owned());
     args.push(source.destination.clone());
+
+    args
+}
+
+pub(crate) fn ssh_args(source: &SshSource) -> Vec<String> {
+    let mut args = ssh_prefix_args(source);
     // No -type filter: the parser drops non-f/d records, which keeps `\(` out of the
     // remote command line.
     args.push(format!(
@@ -614,6 +640,27 @@ f\t200\t1.0\t1.0\t1.0\t/srv/sub/b.txt\0";
     fn shell_quotes_remote_root() {
         assert_eq!(sh_quote("/srv/data"), "'/srv/data'");
         assert_eq!(sh_quote("/srv/it's"), r"'/srv/it'\''s'");
+    }
+
+    #[test]
+    fn ssh_prefix_stops_at_the_destination() {
+        // The prefix is shared with the remote hasher: everything up to the
+        // destination, and nothing of the scanner's own remote command.
+        let s = SshSource {
+            destination: "anubhav@localhost".into(),
+            port: Some(2222),
+            root: "/home/anubhav".into(),
+        };
+        let prefix = ssh_prefix_args(&s);
+        assert_eq!(prefix.last().unwrap(), "anubhav@localhost");
+        assert!(!prefix.iter().any(|a| a.starts_with("find ")));
+        // ssh_args is the prefix plus exactly one remote command
+        let args = ssh_args(&s);
+        assert_eq!(args[..prefix.len()], prefix[..]);
+        assert_eq!(args.len(), prefix.len() + 1);
+
+        let no_port = SshSource { port: None, ..s };
+        assert!(!ssh_prefix_args(&no_port).iter().any(|a| a == "-p"));
     }
 
     #[test]

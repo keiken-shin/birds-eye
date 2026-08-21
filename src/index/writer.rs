@@ -1309,7 +1309,7 @@ impl IndexWriter {
         Ok(())
     }
 
-    fn rebuild_duplicate_size_groups(&mut self) -> Result<(), IndexError> {
+    pub(crate) fn rebuild_duplicate_size_groups(&mut self) -> Result<(), IndexError> {
         let tx = self.connection.transaction()?;
         tx.execute("DELETE FROM duplicate_group_files", [])?;
         tx.execute("DELETE FROM duplicate_groups", [])?;
