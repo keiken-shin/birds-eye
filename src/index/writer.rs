@@ -61,6 +61,9 @@ pub struct IndexWriter {
     active_scan_mode: ScanMode,
     /// Source JSON stamped on the sessions this writer starts; `None` = local.
     source_json: Option<String>,
+    /// Test seam only: run remote hashing through this transport instead of
+    /// reaching for ssh. Always `None` outside tests.
+    remote_transport_override: Option<crate::index::algorithms::HashTransport>,
     scan_transaction_open: bool,
     folder_ids: HashMap<PathBuf, i64>,
     files_since_commit: u64,
@@ -200,6 +203,7 @@ impl IndexWriter {
             active_scan_started_at: None,
             active_scan_mode: ScanMode::default(),
             source_json: None,
+            remote_transport_override: None,
             scan_transaction_open: false,
             folder_ids: HashMap::new(),
             files_since_commit: 0,
@@ -217,6 +221,7 @@ impl IndexWriter {
             active_scan_started_at: None,
             active_scan_mode: ScanMode::default(),
             source_json: None,
+            remote_transport_override: None,
             scan_transaction_open: false,
             folder_ids: HashMap::new(),
             files_since_commit: 0,
@@ -296,6 +301,15 @@ impl IndexWriter {
         self.source_json = Some(source_json.to_owned());
     }
 
+    /// Test seam: hash through `transport` rather than probing/dialling ssh.
+    #[cfg(test)]
+    pub(crate) fn set_remote_transport_override(
+        &mut self,
+        transport: crate::index::algorithms::HashTransport,
+    ) {
+        self.remote_transport_override = Some(transport);
+    }
+
     /// Source of the most recent session — `"local"` for a filesystem walk, and
     /// for indexes written before the column existed.
     pub fn latest_source(&self) -> Result<String, IndexError> {
@@ -323,18 +337,31 @@ impl IndexWriter {
             return Ok(());
         }
 
-        // A remote catalog's paths live on the other machine. Hashing them means opening them
-        // here, where every one of them fails — a scan full of phantom issues, and still no
-        // groups at the end, since grouping needs a hash that was never computed.
-        if self.source_json.is_some() {
-            progress_stage(
-                &mut progress,
-                "Skipping duplicate analysis — the files are on another machine",
-                1,
-                1,
-            );
-            return Ok(());
-        }
+        // A remote catalog's paths live on the other machine, so the digests are
+        // computed there by a helper over ssh. Everything else below — jobs,
+        // marks, group rebuilding — is the same work as a local scan.
+        let remote_transport: Option<crate::index::algorithms::HashTransport> =
+            match self.source_json.as_deref() {
+                None => None,
+                Some(json) => match crate::scanner::SshSource::from_source_json(json) {
+                    Some(source) => Some(
+                        self.remote_transport_override
+                            .clone()
+                            .unwrap_or(crate::index::algorithms::HashTransport::Ssh(source)),
+                    ),
+                    // A source we cannot reach out to is the old story: hashing its
+                    // paths here would only invent issues and still build no groups.
+                    None => {
+                        progress_stage(
+                            &mut progress,
+                            "Skipping duplicate analysis — unknown source type",
+                            1,
+                            1,
+                        );
+                        return Ok(());
+                    }
+                },
+            };
 
         let scan_id = self.current_scan_session_id()?;
 
@@ -351,12 +378,21 @@ impl IndexWriter {
             "DELETE FROM scan_issues WHERE scan_id = ?1 AND phase = 'hash'",
             params![scan_id],
         )?;
-        crate::index::algorithms::update_hashes_for_duplicate_candidates(
-            &mut self.connection,
-            scan_id,
-            cancel,
-            &mut progress,
-        )?;
+        match &remote_transport {
+            Some(transport) => crate::index::algorithms::update_hashes_with_transport(
+                &mut self.connection,
+                scan_id,
+                transport,
+                cancel,
+                &mut progress,
+            )?,
+            None => crate::index::algorithms::update_hashes_for_duplicate_candidates(
+                &mut self.connection,
+                scan_id,
+                cancel,
+                &mut progress,
+            )?,
+        }
         // Cancelled mid-hash: skip group rebuilding, keep the jobs/candidates
         // rows as-is so the next scan re-hashes whatever was left unfinished.
         if cancel() {
@@ -2512,8 +2548,35 @@ mod tests {
         cleanup(&root);
     }
 
+    /// The real Python helper, run locally through the `Local` transport, so
+    /// the dispatch is exercised end to end without a network. Mirrors the
+    /// probe/interpreter pair the remote host would use.
+    fn local_python_transport() -> Option<crate::index::algorithms::HashTransport> {
+        let program = ["python3", "python"].into_iter().find(|p| {
+            std::process::Command::new(p)
+                .arg("--version")
+                .output()
+                .map(|out| out.status.success())
+                .unwrap_or(false)
+        })?;
+        Some(crate::index::algorithms::HashTransport::Local {
+            program: program.to_owned(),
+            args: vec![
+                "-c".to_owned(),
+                format!(
+                    "import base64,sys;exec(base64.b64decode('{}'))",
+                    crate::index::algorithms::base64_std(crate::index::algorithms::PYTHON_HELPER)
+                ),
+            ],
+        })
+    }
+
     #[test]
-    fn remote_scan_skips_duplicate_refinement() {
+    fn remote_scan_hashes_on_the_remote_host() {
+        let Some(transport) = local_python_transport() else {
+            eprintln!("SKIP: no python");
+            return;
+        };
         let root = test_root("remote-refinement");
         fs::create_dir_all(&root).expect("failed to create folder");
         write_file(&root.join("one.bin"), &[1; 32]);
@@ -2521,42 +2584,87 @@ mod tests {
 
         let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
         writer.set_source(r#"{"type":"ssh","destination":"a@h","port":null,"root":"/d"}"#);
+        writer.set_remote_transport_override(transport);
         scan_into_index(&root, &mut writer);
-        // A remote catalog's paths are on the other machine and cannot be opened here.
-        // Deleting the local files is the closest stand-in for that.
-        cleanup(&root);
 
         writer
-            .refine_duplicates_with_progress(&|| false, |_| {})
+            .refine_duplicates()
             .expect("failed to refine duplicates");
 
+        let duplicate_groups: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
+            .expect("failed to count duplicate groups");
+        let mut statement = writer
+            .connection()
+            .prepare("SELECT hash_algorithm, hash_state FROM files ORDER BY path")
+            .expect("prepare hash query");
+        let hashes: Vec<(Option<String>, i64)> = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("query hashes")
+            .map(|row| row.expect("read hash row"))
+            .collect();
+        drop(statement);
         let hash_issues = writer
             .scan_issues(SCAN_ISSUES_CAP as usize)
             .expect("scan issues")
             .into_iter()
             .filter(|issue| issue.phase == "hash")
             .count();
+
+        assert_eq!(duplicate_groups, 1, "identical remote files still group");
+        assert_eq!(hashes.len(), 2);
+        for (algorithm, state) in &hashes {
+            assert!(
+                algorithm
+                    .as_deref()
+                    .is_some_and(|tag| tag.starts_with("remote-sha256-")),
+                "expected a remote sha256 tag, got {algorithm:?}"
+            );
+            assert_eq!(*state, 4, "small files finish verified");
+        }
+        assert_eq!(hash_issues, 0, "a clean remote run records no issues");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn unknown_source_type_still_skips_refinement() {
+        let root = test_root("unknown-source");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("one.bin"), &[1; 32]);
+        write_file(&root.join("two.bin"), &[1; 32]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        writer.set_source(r#"{"type":"s3"}"#);
+        scan_into_index(&root, &mut writer);
+
+        let mut messages: Vec<String> = Vec::new();
+        writer
+            .refine_duplicates_with_progress(&|| false, |progress| messages.push(progress.message))
+            .expect("failed to refine duplicates");
+
         let candidates: i64 = writer
             .connection()
             .query_row("SELECT COUNT(*) FROM duplicate_candidates", [], |row| {
                 row.get(0)
             })
             .expect("failed to count duplicate candidates");
-        let running_hash_jobs: i64 = writer
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM hash_jobs WHERE status != 'pending'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("failed to count hash jobs");
+        let issues = writer
+            .scan_issues(SCAN_ISSUES_CAP as usize)
+            .expect("scan issues")
+            .len();
 
-        assert_eq!(
-            hash_issues, 0,
-            "hashing a remote path against this PC's disk only invents issues"
+        assert_eq!(candidates, 0, "an unreachable source hashes nothing");
+        assert_eq!(issues, 0);
+        assert!(
+            messages.iter().any(|m| m.contains("unknown source")),
+            "the skip must say why: {messages:?}"
         );
-        assert_eq!(candidates, 0, "no local hashing means no candidates to hash");
-        assert_eq!(running_hash_jobs, 0);
+
+        cleanup(&root);
     }
 
     #[test]

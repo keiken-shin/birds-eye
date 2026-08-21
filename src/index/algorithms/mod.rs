@@ -50,3 +50,7 @@ where
 /// Test seam: the same two stages against any transport, so the protocol can be
 /// exercised with the real helper run locally instead of over a network.
 pub(crate) use remote_sha256::{update_hashes_with_transport, HashTransport};
+/// Test-only: lets `writer.rs` build a `Local` transport that runs the real
+/// helper, instead of duplicating the encoder or the script.
+#[cfg(test)]
+pub(crate) use remote_sha256::{base64_std, PYTHON_HELPER};
