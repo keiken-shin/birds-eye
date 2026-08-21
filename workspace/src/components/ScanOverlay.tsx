@@ -28,7 +28,7 @@ const STRATEGIES: Array<{
   icon: LucideIcon;
   title: string;
   note: string;
-  /** Finding duplicates means reading the files, which only works on this PC. */
+  /** Remote scans hash files over on the far end, not here — worth saying explicitly. */
   remoteNote?: string;
 }> = [
   {
@@ -36,7 +36,7 @@ const STRATEGIES: Array<{
     icon: Sparkles,
     title: "Smart",
     note: "sizes, types and duplicate detection",
-    remoteNote: "sizes and types — duplicate detection needs files on this PC",
+    remoteNote: "sizes, types and duplicates — hashing runs on the remote host, only hashes travel",
   },
   { id: "metadata", icon: Zap, title: "Metadata only", note: "fastest — sizes and dates" },
 ];

@@ -63,8 +63,11 @@ get a connection through.
 Because Bird's Eye never copies the remote files, actions that touch a file directly —
 **Reveal in Explorer**, preview, cleanup, **Move to folder…** — are only available for scans of
 this machine. You can still stage what you find, so the list survives; the tray just won't act
-on it. Duplicate detection isn't available for remote scans either: telling two files apart
-means reading both, and Bird's Eye only reads files on this PC.
+on it. Duplicate detection still works: Bird's Eye runs a small, temporary script over that same
+SSH session to hash files on the remote host, so only the hashes travel back — nothing is
+installed and no file contents leave the host. Files over 64 MiB are matched by sampling, exactly
+as on this PC. It needs Python 3 or Perl already on the remote host, which almost every host has;
+one with neither gets a note in **Scans** instead.
 
 ## Read the Overview
 
