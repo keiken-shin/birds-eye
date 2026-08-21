@@ -180,6 +180,7 @@ impl ScanJobManager {
             let mut writer = match IndexWriter::open(&request.index_path) {
                 Ok(writer) => writer,
                 Err(error) => {
+                    worker_controller.cancel();
                     push_event(
                         &jobs,
                         job_id,
@@ -197,6 +198,7 @@ impl ScanJobManager {
                     .latest_source()
                     .is_ok_and(|source| source != "local")
             {
+                worker_controller.cancel();
                 drop(writer);
                 log_file.borrow_mut().take();
                 push_event(
@@ -1457,6 +1459,18 @@ mod tests {
                     && event.message.contains("SSH")),
             "expected a failure naming SSH, got {:?}",
             events.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+        let cancelled = manager
+            .jobs
+            .lock()
+            .expect("job lock poisoned")
+            .get(&response.job_id)
+            .expect("missing job state")
+            .controller
+            .is_cancelled();
+        assert!(
+            cancelled,
+            "expected the walker's controller to be cancelled so the local walk stops"
         );
         cleanup(&root);
     }
