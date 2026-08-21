@@ -1,7 +1,8 @@
 use birds_eye::index::IndexWriter;
-use birds_eye::scanner::{ScanEvent, ScanOptions, Scanner};
+use birds_eye::scanner::{RemoteScanner, ScanEvent, ScanOptions, Scanner, SshSource};
 use std::env;
 use std::path::PathBuf;
+use std::sync::mpsc::Receiver;
 
 fn main() {
     let args = Args::parse();
@@ -16,9 +17,19 @@ fn main() {
         .as_ref()
         .map(|path| IndexWriter::open(path).expect("failed to open sqlite index"));
 
-    let scanner = Scanner::new(ScanOptions::new(args.root));
-    let events = scanner.scan();
+    let events = if let Some(source) = &args.ssh {
+        if let Some(writer) = index_writer.as_mut() {
+            writer.set_source(&source.to_source_json());
+        }
+        RemoteScanner::new(source.clone()).scan()
+    } else {
+        Scanner::new(ScanOptions::new(args.root.clone())).scan()
+    };
 
+    run_scan(events, &mut index_writer, &args);
+}
+
+fn run_scan(events: Receiver<ScanEvent>, index_writer: &mut Option<IndexWriter>, args: &Args) {
     for event in events {
         if let Some(writer) = index_writer.as_mut() {
             writer.handle_event(&event).expect("failed to write index event");
@@ -50,6 +61,16 @@ fn main() {
                     report.stats.bytes_scanned,
                     report.stats.elapsed.as_millis()
                 );
+                if args.refine {
+                    if let Some(writer) = index_writer.as_mut() {
+                        println!("refining duplicates…");
+                        writer.refine_duplicates().expect("failed to refine duplicates");
+                        let groups = writer
+                            .duplicate_groups(usize::MAX)
+                            .expect("failed to query duplicate groups");
+                        println!("duplicate groups={}", groups.len());
+                    }
+                }
                 break;
             }
             ScanEvent::Cancelled(stats) => {
@@ -72,6 +93,8 @@ struct Args {
     command: Command,
     root: PathBuf,
     index_path: Option<PathBuf>,
+    ssh: Option<SshSource>,
+    refine: bool,
 }
 
 #[derive(Debug)]
@@ -82,13 +105,21 @@ enum Command {
 
 impl Args {
     fn parse() -> Self {
-        let mut raw_args = env::args().skip(1);
-        if matches!(raw_args.next().as_deref(), Some("query")) {
-            let index_path = raw_args
+        Self::parse_from(env::args().skip(1))
+    }
+
+    /// `impl Iterator<Item = String>` (rather than reading `env::args()` directly) so tests
+    /// can drive parsing without touching the process's real argv.
+    fn parse_from(args: impl Iterator<Item = String>) -> Self {
+        let mut args = args.peekable();
+
+        if matches!(args.peek().map(String::as_str), Some("query")) {
+            args.next();
+            let index_path = args
                 .next()
                 .map(PathBuf::from)
                 .expect("usage: birds-eye-scan query <index.sqlite> [limit]");
-            let limit = raw_args
+            let limit = args
                 .next()
                 .and_then(|value| value.parse::<usize>().ok())
                 .unwrap_or(10);
@@ -97,28 +128,63 @@ impl Args {
                 command: Command::Query { index_path, limit },
                 root: env::current_dir().expect("failed to resolve current directory"),
                 index_path: None,
+                ssh: None,
+                refine: false,
             };
         }
 
-        let mut root = None;
+        let mut root: Option<String> = None;
         let mut index_path = None;
-        let mut args = env::args().skip(1);
+        let mut ssh_destination = None;
+        let mut ssh_port = None;
+        let mut refine = false;
 
         while let Some(arg) = args.next() {
-            if arg == "--index" {
-                index_path = args.next().map(PathBuf::from);
-                continue;
-            }
-
-            if root.is_none() {
-                root = Some(PathBuf::from(arg));
+            match arg.as_str() {
+                "--index" => index_path = args.next().map(PathBuf::from),
+                "--ssh" => ssh_destination = args.next(),
+                "--ssh-port" => {
+                    ssh_port = Some(
+                        args.next()
+                            .expect("--ssh-port requires a value")
+                            .parse::<u16>()
+                            .expect("--ssh-port requires a number"),
+                    );
+                }
+                "--refine" => refine = true,
+                _ => {
+                    if root.is_none() {
+                        root = Some(arg);
+                    }
+                }
             }
         }
 
+        if refine && index_path.is_none() {
+            panic!("usage: --refine requires --index <path>");
+        }
+
+        // The remote root is a POSIX string, kept verbatim for `SshSource` — it never goes
+        // through `PathBuf` parsing, only `PathBuf::from` for the *local* scan path below.
+        let root = root.unwrap_or_else(|| {
+            env::current_dir()
+                .expect("failed to resolve current directory")
+                .to_string_lossy()
+                .into_owned()
+        });
+
+        let ssh = ssh_destination.map(|destination| SshSource {
+            destination,
+            port: ssh_port,
+            root: root.clone(),
+        });
+
         Self {
             command: Command::Scan,
-            root: root.unwrap_or_else(|| env::current_dir().expect("failed to resolve current directory")),
+            root: PathBuf::from(&root),
             index_path,
+            ssh,
+            refine,
         }
     }
 }
@@ -159,5 +225,58 @@ fn print_index_overview(index_path: &PathBuf, limit: usize) {
             "  reclaimable={} files={} size={} confidence={:.2}",
             group.reclaimable_bytes, group.file_count, group.size, group.confidence
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Args {
+        Args::parse_from(values.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn parses_ssh_flags_and_refine() {
+        let a = args(&[
+            "--ssh",
+            "u@h",
+            "--ssh-port",
+            "2222",
+            "--index",
+            "x.sqlite",
+            "--refine",
+            "/srv",
+        ]);
+        assert_eq!(
+            a.ssh,
+            Some(SshSource {
+                destination: "u@h".to_string(),
+                port: Some(2222),
+                root: "/srv".to_string(),
+            })
+        );
+        assert!(a.refine);
+        assert_eq!(a.index_path, Some(PathBuf::from("x.sqlite")));
+    }
+
+    #[test]
+    fn plain_root_has_no_ssh_source() {
+        let a = args(&["D:\\data"]);
+        assert_eq!(a.ssh, None);
+        assert!(!a.refine);
+        assert_eq!(a.root, PathBuf::from("D:\\data"));
+    }
+
+    #[test]
+    fn refine_without_index_is_an_error() {
+        let result = std::panic::catch_unwind(|| args(&["--refine", "/srv"]));
+        let err = result.expect_err("--refine without --index should fail");
+        let message = err
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default();
+        assert!(message.contains("--index"), "message was: {message}");
     }
 }
