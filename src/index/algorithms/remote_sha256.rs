@@ -40,9 +40,6 @@ pub(crate) const PROBE_COMMAND: &str = "command -v python3 >/dev/null 2>&1 && ec
 /// noise against the hashing.
 const REQUEST_BATCH: usize = 5_000;
 
-/// Stage B never full-hashes anything bigger than this, exactly as `xxh3.rs`.
-const EAGER_FULL_HASH_MAX_BYTES: i64 = 64 * 1024 * 1024;
-
 /// Longest helper/ssh diagnostic echoed into a scan issue.
 const MAX_ISSUE_CHARS: usize = 500;
 
@@ -255,15 +252,7 @@ pub(crate) fn probe(
     source: &SshSource,
     cancel: &dyn Fn() -> bool,
 ) -> Result<Option<RemoteExecutor>, String> {
-    // ConnectTimeout only covers the TCP connect. Keepalives are what notice a
-    // session that came up and then stopped answering.
-    let mut args = vec![
-        "-o".to_owned(),
-        "ServerAliveInterval=10".to_owned(),
-        "-o".to_owned(),
-        "ServerAliveCountMax=3".to_owned(),
-    ];
-    args.extend(ssh_prefix_args(source));
+    let mut args = ssh_prefix_args(source);
     args.push(PROBE_COMMAND.to_owned());
 
     let mut child = Command::new("ssh")
@@ -312,10 +301,16 @@ pub(crate) fn probe(
             tail
         });
     }
-    match answer.trim() {
-        "python3" => Ok(Some(RemoteExecutor::Python3)),
-        "perl" => Ok(Some(RemoteExecutor::Perl)),
-        _ => Ok(None),
+    Ok(parse_probe_answer(&answer))
+}
+
+/// The answer is the LAST non-empty line: a login shell that prints a banner, a
+/// motd or an rc-file warning would otherwise turn "python3" into "neither found".
+fn parse_probe_answer(stdout: &str) -> Option<RemoteExecutor> {
+    match stdout.lines().map(str::trim).rfind(|line| !line.is_empty()) {
+        Some("python3") => Some(RemoteExecutor::Python3),
+        Some("perl") => Some(RemoteExecutor::Perl),
+        _ => None,
     }
 }
 
@@ -325,10 +320,11 @@ pub(crate) enum StreamOutcome {
     Cancelled,
 }
 
-/// Streams requests into the child while draining its responses. The write side
-/// runs on its own thread: a child that answers as it reads would otherwise
-/// deadlock against a full stdin pipe.
-pub(crate) fn drive_stream<R: Read, W: Write + Send + 'static>(
+/// Streams requests into the child while draining its responses. Both pipes get
+/// their own thread: a child that answers as it reads would deadlock against a
+/// full stdin pipe, and `read_until` has no timeout, so a link that goes silent
+/// would park the cancel check until the child dies with the app.
+pub(crate) fn drive_stream<R: Read + Send + 'static, W: Write + Send + 'static>(
     reader: R,
     writer: W,
     requests: Vec<Request>,
@@ -346,34 +342,51 @@ pub(crate) fn drive_stream<R: Read, W: Write + Send + 'static>(
         // Dropping the writer closes the child's stdin, which is its EOF signal.
     });
 
-    let mut reader = BufReader::new(reader);
-    let mut record = Vec::new();
-    // ponytail: cancel is polled per record; a child that has gone silent blocks
-    // this read until it dies with the app — add a watchdog kill if that bites.
+    let (records_tx, records_rx) = std::sync::mpsc::channel();
+    let drain = std::thread::spawn(move || {
+        let mut reader = BufReader::new(reader);
+        let mut record = Vec::new();
+        loop {
+            record.clear();
+            match reader.read_until(0, &mut record) {
+                Ok(0) | Err(_) => return,
+                Ok(_) => {}
+            }
+            if record.last() == Some(&0) {
+                record.pop();
+            }
+            if record.is_empty() {
+                continue;
+            }
+            if let Some(response) = parse_response(&record) {
+                if records_tx.send(response).is_err() {
+                    return;
+                }
+            }
+        }
+    });
+
+    // Nothing here blocks longer than one poll, so a cancel is always at most
+    // PROBE_POLL away from the caller's kill — silent child or not.
     let outcome = loop {
         if cancel() {
             break StreamOutcome::Cancelled;
         }
-        record.clear();
-        match reader.read_until(0, &mut record) {
-            Ok(0) | Err(_) => break StreamOutcome::Completed,
-            Ok(_) => {}
-        }
-        if record.last() == Some(&0) {
-            record.pop();
-        }
-        if record.is_empty() {
-            continue;
-        }
-        if let Some(response) = parse_response(&record) {
-            on_response(response);
+        match records_rx.recv_timeout(PROBE_POLL) {
+            Ok(response) => on_response(response),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            // The drain thread dropped its sender: end of stream.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                break StreamOutcome::Completed
+            }
         }
     };
 
-    // A cancelled run leaves the pump blocked on a child that stopped reading;
-    // the caller kills the child, which frees it. Joining here would hang.
+    // A cancelled run leaves both threads blocked on a child that stopped talking;
+    // the caller kills the child, which frees them. Joining here would hang.
     if outcome == StreamOutcome::Completed {
         let _ = pump.join();
+        let _ = drain.join();
     }
     outcome
 }
@@ -586,7 +599,14 @@ where
             if cancel() {
                 return Ok(false);
             }
-            insert_scan_issue(connection, scan_id, "hash", scope, &message)?;
+            // The stage never started, so every candidate is unchecked — say how many.
+            insert_scan_issue(
+                connection,
+                scan_id,
+                "hash",
+                scope,
+                &format!("{message} ({total} files unchecked)"),
+            )?;
             return Ok(true);
         }
     };
@@ -609,7 +629,7 @@ where
         let responses = match run_requests(transport, requests, cancel) {
             Ok(responses) => responses,
             Err(message) => {
-                record_transport_failure(connection, scan_id, scope, &message)?;
+                record_transport_failure(connection, scan_id, scope, total - done, &message)?;
                 return Ok(true);
             }
         };
@@ -681,7 +701,13 @@ fn apply_stage_a(
                 )?;
             }
             Some(Response::Err { message, .. }) => {
-                insert_scan_issue(tx, scan_id, "hash", &candidate.path, &message)?;
+                insert_scan_issue(
+                    tx,
+                    scan_id,
+                    "hash",
+                    &candidate.path,
+                    &tail_chars(&message, MAX_ISSUE_CHARS),
+                )?;
             }
             None => return Ok(false),
         }
@@ -711,7 +737,13 @@ fn apply_stage_a(
                     Response::Ok { .. } => None,
                 }) {
                 Some(message) => {
-                    insert_scan_issue(tx, scan_id, "hash", &candidate.path, &message)?;
+                    insert_scan_issue(
+                        tx,
+                        scan_id,
+                        "hash",
+                        &candidate.path,
+                        &tail_chars(&message, MAX_ISSUE_CHARS),
+                    )?;
                 }
                 // One half arrived and it was fine, or neither did: nothing was
                 // written and nothing explains why.
@@ -753,7 +785,7 @@ where
                  HAVING COUNT(*) > 1
                )",
         )?;
-        let rows = statement.query_map(params![EAGER_FULL_HASH_MAX_BYTES], |row| {
+        let rows = statement.query_map(params![xxh3::EAGER_FULL_HASH_MAX_BYTES], |row| {
             Ok(Candidate {
                 id: row.get(0)?,
                 path: row.get(1)?,
@@ -777,7 +809,13 @@ where
             if cancel() {
                 return Ok(());
             }
-            insert_scan_issue(connection, scan_id, "hash", scope, &message)?;
+            insert_scan_issue(
+                connection,
+                scan_id,
+                "hash",
+                scope,
+                &format!("{message} ({total} files unchecked)"),
+            )?;
             return Ok(());
         }
     };
@@ -801,7 +839,7 @@ where
         let responses = match run_requests(transport, requests, cancel) {
             Ok(responses) => responses,
             Err(message) => {
-                record_transport_failure(connection, scan_id, scope, &message)?;
+                record_transport_failure(connection, scan_id, scope, total - done, &message)?;
                 return Ok(());
             }
         };
@@ -843,10 +881,13 @@ fn index_by_key(responses: Vec<Response>) -> HashMap<(i64, Kind), Response> {
         .collect()
 }
 
+/// One row stands in for every candidate the stage never reached, so it has to
+/// carry that count: at 700k candidates "1 file couldn't be verified" is a lie.
 fn record_transport_failure(
     connection: &Connection,
     scan_id: i64,
     scope: &str,
+    unchecked: u64,
     message: &str,
 ) -> Result<(), IndexError> {
     insert_scan_issue(
@@ -854,7 +895,7 @@ fn record_transport_failure(
         scan_id,
         "hash",
         scope,
-        &format!("remote hashing stopped: {message}"),
+        &format!("remote hashing stopped before {unchecked} files could be checked: {message}"),
     )
 }
 
@@ -960,6 +1001,20 @@ mod tests {
         assert!(pl.starts_with("perl -MMIME::Base64 -e 'eval decode_base64(shift); die $@ if $@' "));
         assert!(!pl.contains('\n'));
 
+        // Both helpers ride on the ssh command line, so their length is spent
+        // against the remote host's ARG_MAX. Linux allows 128 KiB per single
+        // argument; stay well under it or the command never starts.
+        assert!(
+            helper_command(RemoteExecutor::Python3).len() < 64 * 1024,
+            "python helper command is {} bytes",
+            py.len()
+        );
+        assert!(
+            helper_command(RemoteExecutor::Perl).len() < 64 * 1024,
+            "perl helper command is {} bytes",
+            pl.len()
+        );
+
         // the base64 the two commands carry has to be real base64, not a lookalike
         assert_eq!(base64_std(""), "");
         assert_eq!(base64_std("f"), "Zg==");
@@ -972,6 +1027,24 @@ mod tests {
         assert!(PERL_HELPER.is_ascii(), "perl helper must be ASCII-only");
         assert!(!PYTHON_HELPER.contains('\r'), "python helper must use LF");
         assert!(!PERL_HELPER.contains('\r'), "perl helper must use LF");
+    }
+
+    #[test]
+    fn probe_answer_is_the_last_non_empty_line() {
+        // A login shell that prints a banner, a motd or an rc-file warning must not
+        // turn a host that has python3 into a host with neither interpreter.
+        assert_eq!(
+            parse_probe_answer("motd line\npython3\n"),
+            Some(RemoteExecutor::Python3)
+        );
+        assert_eq!(
+            parse_probe_answer("Welcome!\n\n  perl  \n\n"),
+            Some(RemoteExecutor::Perl)
+        );
+        assert_eq!(parse_probe_answer("banner\nnone\n"), None);
+        assert_eq!(parse_probe_answer(""), None);
+        // the answer is the LAST line, not any line
+        assert_eq!(parse_probe_answer("python3\nnone\n"), None);
     }
 
     #[test]
@@ -1009,7 +1082,7 @@ mod tests {
 
         let mut seen = Vec::new();
         let outcome = drive_stream(
-            &responses[..],
+            std::io::Cursor::new(responses),
             std::io::sink(),
             vec![
                 Request {
@@ -1039,7 +1112,13 @@ mod tests {
         let mut responses = b"1:f\t".to_vec();
         responses.extend_from_slice("cd".repeat(32).as_bytes());
         responses.push(0);
-        let outcome = drive_stream(&responses[..], std::io::sink(), vec![], &|| true, |_| {});
+        let outcome = drive_stream(
+            std::io::Cursor::new(responses),
+            std::io::sink(),
+            vec![],
+            &|| true,
+            |_| {},
+        );
         assert_eq!(outcome, StreamOutcome::Cancelled);
     }
 
@@ -1069,6 +1148,43 @@ mod tests {
         );
         assert_eq!(outcome, StreamOutcome::Completed);
         assert_eq!(sink.take(), b"1:f\t3\tfull\t/a\x002:s\t9\t0:4\t/b\x00".to_vec());
+    }
+
+    #[test]
+    fn cancel_reaches_a_child_that_has_gone_silent() {
+        // A dead link answers nothing at all. The reader must not be what holds
+        // the cancel check hostage, or a stalled multi-hour hashing session can
+        // only be ended by killing the app.
+        let Some(py) = local_python() else {
+            eprintln!("SKIP: no python");
+            return;
+        };
+        let silent = HashTransport::Local {
+            program: py,
+            args: vec!["-c".into(), "import time; time.sleep(30)".into()],
+        };
+        let polls = std::sync::atomic::AtomicUsize::new(0);
+        let cancel = || polls.fetch_add(1, std::sync::atomic::Ordering::Relaxed) > 0;
+
+        let started = std::time::Instant::now();
+        let responses = run_requests(
+            &silent,
+            vec![Request {
+                key: "1:f".into(),
+                size: 3,
+                spec: Spec::Full,
+                path: "/a".into(),
+            }],
+            &cancel,
+        )
+        .expect("a cancelled run is not a transport failure");
+        let elapsed = started.elapsed();
+
+        assert!(responses.is_empty(), "a silent child answers nothing");
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "cancel waited on the silent child for {elapsed:?}"
+        );
     }
 
     // ---- conformance: the real helper, run locally ----
@@ -1414,8 +1530,12 @@ mod tests {
         };
         assert_eq!(issues.len(), 1, "one issue for the whole stopped stage");
         assert_eq!(issues[0].0, "hash");
+        // One row stands for every candidate the stage never reached, so it has to
+        // say how many that was — "1 file couldn't be verified" is a lie at scale.
         assert!(
-            issues[0].1.contains("remote hashing stopped"),
+            issues[0]
+                .1
+                .contains("remote hashing stopped before 2 files could be checked"),
             "unexpected message: {}",
             issues[0].1
         );
@@ -1489,7 +1609,7 @@ mod tests {
         };
         assert_eq!(issues.len(), 1, "one issue for the one stage that stopped");
         assert!(
-            issues[0].contains("remote hashing stopped"),
+            issues[0].contains("remote hashing stopped before 2 files could be checked"),
             "unexpected message: {}",
             issues[0]
         );

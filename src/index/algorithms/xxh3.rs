@@ -35,7 +35,6 @@ where
     F: FnMut(FinalizationProgress),
     C: Fn() -> bool + Sync,
 {
-    const EAGER_FULL_HASH_MAX_BYTES: i64 = 64 * 1024 * 1024;
     let candidates = {
         let mut statement = connection.prepare(
             "SELECT id, path
@@ -202,6 +201,10 @@ where
     tx.commit()?;
     Ok(())
 }
+
+/// Stage B never full-hashes anything bigger than this. Exposed for the remote
+/// hasher, which mirrors this staging exactly.
+pub(super) const EAGER_FULL_HASH_MAX_BYTES: i64 = 64 * 1024 * 1024;
 
 // Shared with the remote hasher: the plan a remote file is sampled on has to be
 // the local plan, or the two catalogs disagree about what "sampled" means.

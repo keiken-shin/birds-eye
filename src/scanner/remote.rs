@@ -133,8 +133,9 @@ fn run_remote_scan(source: SshSource, controller: ScanController, events_tx: Sen
     });
 
     let stdout = child.stdout.take().expect("ssh stdout is piped");
-    // ponytail: cancel is checked per-record; a fully idle network read blocks until the
-    // child dies with the app — add a watchdog kill if that ever bites.
+    // ponytail: cancel is checked per-record, so a silent link is only unblocked when the
+    // keepalives in `ssh_prefix_args` tear the session down (~30s) — move this read onto a
+    // channel the way the hasher's `drive_stream` does if that ever needs to be instant.
     let (terminal, files_scanned) = read_stream(stdout, &events_tx, &controller, &root);
 
     let completed = matches!(terminal, ScanEvent::Finished(_));
@@ -471,12 +472,18 @@ fn normalized_root(root: &str) -> &str {
 /// that is left to push. Shared with the remote hasher so both reach a host the same way.
 pub(crate) fn ssh_prefix_args(source: &SshSource) -> Vec<String> {
     // BatchMode: never sit at a password prompt. ConnectTimeout: a black-holed host has to
-    // fail rather than park the scan thread in a read that no cancel can reach.
+    // fail rather than park the scan thread in a read that no cancel can reach — but it only
+    // covers the TCP connect, so ServerAlive* is what notices a session that came up and then
+    // stopped answering, which is the failure a multi-hour hashing run actually meets.
     let mut args = vec![
         "-o".to_owned(),
         "BatchMode=yes".to_owned(),
         "-o".to_owned(),
         "ConnectTimeout=10".to_owned(),
+        "-o".to_owned(),
+        "ServerAliveInterval=10".to_owned(),
+        "-o".to_owned(),
+        "ServerAliveCountMax=3".to_owned(),
     ];
 
     if let Some(port) = source.port {
@@ -675,6 +682,12 @@ f\t200\t1.0\t1.0\t1.0\t/srv/sub/b.txt\0";
         assert_eq!(args[1], "BatchMode=yes");
         assert_eq!(args[2], "-o");
         assert_eq!(args[3], "ConnectTimeout=10");
+        // Keepalives live in the shared prefix so the scan, the probe and the
+        // multi-hour hashing session all notice a link that stops answering.
+        assert_eq!(args[4], "-o");
+        assert_eq!(args[5], "ServerAliveInterval=10");
+        assert_eq!(args[6], "-o");
+        assert_eq!(args[7], "ServerAliveCountMax=3");
         assert!(args.contains(&"-p".to_string()) && args.contains(&"2222".to_string()));
         // destination comes after "--" so a hostile destination can't inject options
         let dd = args.iter().position(|a| a == "--").unwrap();

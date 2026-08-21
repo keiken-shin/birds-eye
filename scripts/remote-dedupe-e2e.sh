@@ -18,7 +18,7 @@ print("hash_state:", c.execute("SELECT hash_state, hash_algorithm, COUNT(*) FROM
 print("hash issues:", q("SELECT COUNT(*) FROM scan_issues WHERE phase=\"hash\""), c.execute("SELECT path, message FROM scan_issues WHERE phase=\"hash\" LIMIT 5").fetchall())
 PY
 echo "== 2. negative: unreachable port (expect cancelled, clean exit) =="
-$BIN --ssh "$BE_REMOTE" --ssh-port 1 --index "$OUT/bad.sqlite" --refine "$BE_ROOT" 2>&1 | grep -E "cancelled|error" | head -3; echo "exit=$?"
+$BIN --ssh "$BE_REMOTE" --ssh-port 1 --index "$OUT/bad.sqlite" --refine "$BE_ROOT" 2>&1 | grep -E "cancelled|error" | head -3; echo "exit=${PIPESTATUS[0]}"   # $? here is head's, not the binary's
 echo "== 3. negative: unreadable file (expect one hash issue, rest grouped) =="
 T=$(ssh -p "$BE_PORT" -o BatchMode=yes "$BE_REMOTE" "d=\$(mktemp -d); head -c 300000 /dev/urandom > \$d/a.bin; cp \$d/a.bin \$d/b.bin; cp \$d/a.bin \$d/locked.bin; chmod 000 \$d/locked.bin; echo \$d")
 $BIN --ssh "$BE_REMOTE" --ssh-port "$BE_PORT" --index "$OUT/unread.sqlite" --refine "$T" 2>&1 | grep -E "finished|cancelled|duplicate groups"

@@ -189,6 +189,28 @@ impl ScanJobManager {
                     return;
                 }
             };
+            // A generic rescan of an SSH-sourced index would stamp the new session
+            // "local", drop the source, and then run the LOCAL hasher over paths
+            // that live on another machine. Same gate as `retry_scan_issues`.
+            if request.ssh.is_none()
+                && writer
+                    .latest_source()
+                    .is_ok_and(|source| source != "local")
+            {
+                drop(writer);
+                log_file.borrow_mut().take();
+                push_event(
+                    &jobs,
+                    job_id,
+                    JobEventDto::failed(
+                        job_id,
+                        "this index was scanned over SSH — rescan it through the remote host entry"
+                            .to_owned(),
+                    ),
+                    listener.as_ref(),
+                );
+                return;
+            }
             writer.set_scan_mode(ScanMode::from_id(
                 request
                     .scan_strategy
@@ -1376,6 +1398,95 @@ mod tests {
         );
 
         drop(conn);
+        cleanup(&root);
+    }
+
+    /// An index whose most recent session came from a remote host, with no files
+    /// of its own — only the session row the source gate reads.
+    fn seed_remote_session(index_path: &std::path::Path) {
+        let source = SshSource {
+            destination: "a@h".into(),
+            port: None,
+            root: "/srv".into(),
+        };
+        let writer = IndexWriter::open(index_path).expect("open index");
+        writer
+            .connection()
+            .execute(
+                "INSERT INTO scan_sessions (root_path, started_at, finished_at, status, source)
+                 VALUES ('/srv', 1, 2, 'complete', ?1)",
+                rusqlite::params![source.to_source_json()],
+            )
+            .expect("seed remote session");
+    }
+
+    #[test]
+    fn rescanning_a_remote_index_without_ssh_fails() {
+        // Without the gate this stamps the new session "local", drops the source,
+        // and runs the local hasher over paths that live on another machine.
+        let root = test_root("remote-index-local-rescan");
+        let data_root = root.join("data");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(&data_root).expect("failed to create folder");
+        write_file(&data_root.join("one.bin"), &[1; 32]);
+        seed_remote_session(&index_path);
+
+        let manager = ScanJobManager::new();
+        let response = manager
+            .start_scan_job(StartScanJobRequest {
+                root: data_root,
+                index_path,
+                scan_strategy: None,
+                enable_intelligence: None,
+                ssh: None,
+            })
+            .expect("failed to start job");
+        wait_for_terminal(&manager, response.job_id);
+
+        assert_eq!(
+            manager.job_status(response.job_id).expect("missing status"),
+            JobStatusDto::Failed
+        );
+        let events = manager
+            .job_events_since(response.job_id, 0)
+            .expect("failed to fetch events");
+        assert!(
+            events
+                .iter()
+                .any(|event| event.status == JobStatusDto::Failed
+                    && event.message.contains("SSH")),
+            "expected a failure naming SSH, got {:?}",
+            events.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn fresh_index_without_ssh_still_scans() {
+        // No sessions at all: latest_source falls back to "local", so the remote
+        // gate must not fire on a brand-new index.
+        let root = test_root("fresh-index-local-scan");
+        let data_root = root.join("data");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(&data_root).expect("failed to create folder");
+        write_file(&data_root.join("one.bin"), &[1; 32]);
+
+        let manager = ScanJobManager::new();
+        let response = manager
+            .start_scan_job(StartScanJobRequest {
+                root: data_root,
+                index_path,
+                scan_strategy: None,
+                enable_intelligence: None,
+                ssh: None,
+            })
+            .expect("failed to start job");
+        wait_for_terminal(&manager, response.job_id);
+
+        assert_eq!(
+            manager.job_status(response.job_id).expect("missing status"),
+            JobStatusDto::Completed
+        );
         cleanup(&root);
     }
 

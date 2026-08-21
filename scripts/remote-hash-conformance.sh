@@ -17,7 +17,7 @@ E_THREE_S=$(frame three.bin $S3 0:$B $MID:$B $LAST3:$B)
 E_THREE_FULL=$(sha256sum three.bin | cut -d' ' -f1)
 # truncated-since-scan case: index claims 3 MiB but file is 2 MiB -> clamp rules must apply identically
 head -c 2097152 three.bin > trunc.bin
-E_TRUNC_S=$(frame trunc.bin $S3 0:$B $MID:$B $LAST3:$B)   # LAST3 >= actual size -> chunk skipped? no: offset < claimed size, read returns 0 bytes -> len 0 recorded
+E_TRUNC_S=$(frame trunc.bin $S3 0:$B $MID:$B $LAST3:$B)   # LAST3 is past this file's EOF: the chunk is still framed, with the actual read length of 0 and no bytes -- exactly what xxh3.rs records
 { printf '1:f\t3\tfull\t%s/abc.txt\0' "$D"; printf '2:p\t%s\t0:%s,%s:%s\t%s/one.bin\0' $S1 $B $LAST1 $B "$D"; printf '3:s\t%s\t0:%s,%s:%s,%s:%s\t%s/three.bin\0' $S3 $B $MID $B $LAST3 $B "$D"; printf '4:f\t%s\tfull\t%s/three.bin\0' $S3 "$D"; printf '5:f\t1\tfull\t%s/missing.bin\0' "$D"; printf '6:s\t%s\t0:%s,%s:%s,%s:%s\t%s/trunc.bin\0' $S3 $B $MID $B $LAST3 $B "$D"; } > req.bin
 OUT_PY=$(python3 "$PY" < req.bin | tr '\0' '\n'); OUT_PL=$(perl "$PL" < req.bin | tr '\0' '\n')
 echo "== python =="; echo "$OUT_PY"; echo "== perl =="; echo "$OUT_PL"
