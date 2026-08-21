@@ -241,26 +241,78 @@ pub(crate) fn helper_command(executor: RemoteExecutor) -> String {
     }
 }
 
+/// How often the probe looks up from waiting to see whether the scan was cancelled.
+const PROBE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
 /// Asks the host what it can run. `Ok(None)` is a host with neither interpreter
-/// — a real answer, not a failure; `Err` means ssh itself could not ask.
-pub(crate) fn probe(source: &SshSource) -> Result<Option<RemoteExecutor>, String> {
-    let mut args = ssh_prefix_args(source);
+/// — a real answer, not a failure; `Err` means ssh itself could not ask, and a
+/// cancelled scan is one of those (callers check `cancel()` before reporting).
+///
+/// Deliberately not `Command::output()`: that blocks with no way out, and a
+/// remote shell that authenticates and then wedges would park the finalization
+/// thread until the app dies, with the scan unable to cancel.
+pub(crate) fn probe(
+    source: &SshSource,
+    cancel: &dyn Fn() -> bool,
+) -> Result<Option<RemoteExecutor>, String> {
+    // ConnectTimeout only covers the TCP connect. Keepalives are what notice a
+    // session that came up and then stopped answering.
+    let mut args = vec![
+        "-o".to_owned(),
+        "ServerAliveInterval=10".to_owned(),
+        "-o".to_owned(),
+        "ServerAliveCountMax=3".to_owned(),
+    ];
+    args.extend(ssh_prefix_args(source));
     args.push(PROBE_COMMAND.to_owned());
-    let output = Command::new("ssh")
+
+    let mut child = Command::new("ssh")
         .args(&args)
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|error| format!("failed to run ssh — is the OpenSSH client installed? ({error})"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let tail = tail_chars(&stderr, MAX_ISSUE_CHARS);
+
+    // Both pipes drain on threads so this one stays free to poll cancel.
+    let mut stdout = child.stdout.take().expect("stdout is piped");
+    let mut stderr = child.stderr.take().expect("stderr is piped");
+    let answer = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stdout.read_to_string(&mut text);
+        text
+    });
+    let diagnostics = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stderr.read_to_string(&mut text);
+        text
+    });
+
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => return Err(format!("ssh could not be waited on ({error})")),
+        }
+        if cancel() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("cancelled".to_owned());
+        }
+        std::thread::sleep(PROBE_POLL);
+    };
+
+    let answer = answer.join().unwrap_or_default();
+    let diagnostics = diagnostics.join().unwrap_or_default();
+    if !status.success() {
+        let tail = tail_chars(&diagnostics, MAX_ISSUE_CHARS);
         return Err(if tail.is_empty() {
-            format!("ssh exited with {}", output.status)
+            format!("ssh exited with {status}")
         } else {
             tail
         });
     }
-    match String::from_utf8_lossy(&output.stdout).trim() {
+    match answer.trim() {
         "python3" => Ok(Some(RemoteExecutor::Python3)),
         "perl" => Ok(Some(RemoteExecutor::Perl)),
         _ => Ok(None),
@@ -334,7 +386,7 @@ pub(crate) fn run_requests(
     requests: Vec<Request>,
     cancel: &dyn Fn() -> bool,
 ) -> Result<Vec<Response>, String> {
-    let (program, args) = resolve_command(transport)?;
+    let (program, args) = resolve_command(transport, cancel)?;
     let mut child = Command::new(&program)
         .args(&args)
         .stdin(Stdio::piped())
@@ -380,14 +432,31 @@ pub(crate) fn run_requests(
     })
 }
 
-fn resolve_command(transport: &HashTransport) -> Result<(String, Vec<String>), String> {
+fn resolve_command(
+    transport: &HashTransport,
+    cancel: &dyn Fn() -> bool,
+) -> Result<(String, Vec<String>), String> {
     match transport {
         HashTransport::Local { program, args } => Ok((program.clone(), args.clone())),
         HashTransport::Ssh(source) => {
-            let executor = probe(source)?.ok_or_else(|| NO_INTERPRETER.to_owned())?;
+            let executor = probe(source, cancel)?.ok_or_else(|| NO_INTERPRETER.to_owned())?;
             Ok(("ssh".to_owned(), ssh_hash_args(source, executor)))
         }
     }
+}
+
+/// Probes on first use and remembers the answer: a finalization with nothing to
+/// hash never opens a connection at all, and the two stages share one probe.
+fn resolved_transport<'a>(
+    transport: &HashTransport,
+    slot: &'a mut Option<HashTransport>,
+    cancel: &dyn Fn() -> bool,
+) -> Result<&'a HashTransport, String> {
+    if slot.is_none() {
+        let (program, args) = resolve_command(transport, cancel)?;
+        *slot = Some(HashTransport::Local { program, args });
+    }
+    Ok(slot.as_ref().expect("just resolved"))
 }
 
 fn ssh_hash_args(source: &SshSource, executor: RemoteExecutor) -> Vec<String> {
@@ -425,40 +494,42 @@ where
     F: FnMut(FinalizationProgress),
     C: Fn() -> bool + Sync,
 {
+    if cancel() {
+        return Ok(());
+    }
+
     // What a transport failure is reported against; the files themselves are
     // fine, the connection to them is not.
     let scope = match transport {
         HashTransport::Ssh(source) => source.root.clone(),
         HashTransport::Local { program, .. } => program.clone(),
     };
+    // Filled by whichever stage first has work to do; see `resolved_transport`.
+    let mut resolved = None;
 
-    // One probe for the whole run: the answer resolves the transport into the
-    // concrete `ssh <prefix> <helper>` command every batch then reuses.
-    let resolved = match transport {
-        HashTransport::Ssh(source) => match probe(source) {
-            Ok(Some(executor)) => HashTransport::Local {
-                program: "ssh".to_owned(),
-                args: ssh_hash_args(source, executor),
-            },
-            Ok(None) => {
-                insert_scan_issue(connection, scan_id, "hash", &scope, NO_INTERPRETER)?;
-                return Ok(());
-            }
-            Err(message) => {
-                insert_scan_issue(connection, scan_id, "hash", &scope, &message)?;
-                return Ok(());
-            }
-        },
-        local => local.clone(),
-    };
-
-    if stage_a(connection, scan_id, &resolved, &scope, cancel, progress)? {
+    if stage_a(
+        connection,
+        scan_id,
+        transport,
+        &mut resolved,
+        &scope,
+        cancel,
+        progress,
+    )? {
         return Ok(());
     }
     if cancel() {
         return Ok(());
     }
-    stage_b(connection, scan_id, &resolved, &scope, cancel, progress)
+    stage_b(
+        connection,
+        scan_id,
+        transport,
+        &mut resolved,
+        &scope,
+        cancel,
+        progress,
+    )
 }
 
 /// Sample every duplicate candidate. Returns `true` when the transport stopped
@@ -468,6 +539,7 @@ fn stage_a<F, C>(
     connection: &mut Connection,
     scan_id: i64,
     transport: &HashTransport,
+    resolved: &mut Option<HashTransport>,
     scope: &str,
     cancel: &C,
     progress: &mut F,
@@ -501,8 +573,26 @@ where
 
     let total = candidates.len() as u64;
     progress_stage(progress, SAMPLING_STAGE, 0, total);
+    if candidates.is_empty() {
+        return Ok(false);
+    }
+    if cancel() {
+        return Ok(false);
+    }
+    let transport = match resolved_transport(transport, resolved, cancel) {
+        Ok(ready) => ready,
+        Err(message) => {
+            // A probe the user cancelled is not something to report.
+            if cancel() {
+                return Ok(false);
+            }
+            insert_scan_issue(connection, scan_id, "hash", scope, &message)?;
+            return Ok(true);
+        }
+    };
 
     let mut done = 0_u64;
+    let mut unanswered = 0_u64;
     let mut start = 0_usize;
     while start < candidates.len() {
         if cancel() {
@@ -530,24 +620,55 @@ where
             if cancel() {
                 break;
             }
-            apply_stage_a(&tx, scan_id, candidate, &mut by_key)?;
+            if !apply_stage_a(&tx, scan_id, candidate, &mut by_key)? {
+                unanswered += 1;
+            }
             done += 1;
             emit_counted_progress(progress, SAMPLING_STAGE, done, total);
         }
         tx.commit()?;
         start = end;
     }
+    record_unanswered(connection, scan_id, scope, unanswered, cancel)?;
     // No closing progress_stage: emit_counted_progress already fires on the last
     // applied file, and a cancelled stage must not report a total it never reached.
     Ok(false)
 }
 
+/// A helper that answers nothing, or answers with records this side cannot
+/// parse, would otherwise leave zero hashes, zero issues and zero signal. One
+/// summary row per stage says so without one row per file.
+fn record_unanswered<C>(
+    connection: &Connection,
+    scan_id: i64,
+    scope: &str,
+    unanswered: u64,
+    cancel: &C,
+) -> Result<(), IndexError>
+where
+    C: Fn() -> bool + Sync,
+{
+    if unanswered == 0 || cancel() {
+        return Ok(());
+    }
+    insert_scan_issue(
+        connection,
+        scan_id,
+        "hash",
+        scope,
+        &format!("remote hashing returned no result for {unanswered} files"),
+    )
+}
+
+/// `false` means the helper told this side nothing usable about the file — no
+/// hash written and no per-file issue recorded — which the stage counts and
+/// summarises rather than swallowing.
 fn apply_stage_a(
     tx: &Connection,
     scan_id: i64,
     candidate: &Candidate,
     by_key: &mut HashMap<(i64, Kind), Response>,
-) -> Result<(), IndexError> {
+) -> Result<bool, IndexError> {
     if xxh3::sample_chunk_plan(candidate.size).is_empty() {
         match by_key.remove(&(candidate.id, Kind::Full)) {
             Some(Response::Ok { hex, .. }) => {
@@ -562,9 +683,9 @@ fn apply_stage_a(
             Some(Response::Err { message, .. }) => {
                 insert_scan_issue(tx, scan_id, "hash", &candidate.path, &message)?;
             }
-            None => {}
+            None => return Ok(false),
         }
-        return Ok(());
+        return Ok(true);
     }
 
     let partial = by_key.remove(&(candidate.id, Kind::Partial));
@@ -582,20 +703,23 @@ fn apply_stage_a(
             )?;
         }
         (partial, sample) => {
-            if let Some(message) =
-                [partial, sample]
-                    .into_iter()
-                    .flatten()
-                    .find_map(|response| match response {
-                        Response::Err { message, .. } => Some(message),
-                        Response::Ok { .. } => None,
-                    })
-            {
-                insert_scan_issue(tx, scan_id, "hash", &candidate.path, &message)?;
+            match [partial, sample]
+                .into_iter()
+                .flatten()
+                .find_map(|response| match response {
+                    Response::Err { message, .. } => Some(message),
+                    Response::Ok { .. } => None,
+                }) {
+                Some(message) => {
+                    insert_scan_issue(tx, scan_id, "hash", &candidate.path, &message)?;
+                }
+                // One half arrived and it was fine, or neither did: nothing was
+                // written and nothing explains why.
+                None => return Ok(false),
             }
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Promote sampled matches to verified. A per-file failure here is not an issue:
@@ -605,6 +729,7 @@ fn stage_b<F, C>(
     connection: &mut Connection,
     scan_id: i64,
     transport: &HashTransport,
+    resolved: &mut Option<HashTransport>,
     scope: &str,
     cancel: &C,
     progress: &mut F,
@@ -640,8 +765,25 @@ where
 
     let total = candidates.len() as u64;
     progress_stage(progress, FULL_STAGE, 0, total);
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    if cancel() {
+        return Ok(());
+    }
+    let transport = match resolved_transport(transport, resolved, cancel) {
+        Ok(ready) => ready,
+        Err(message) => {
+            if cancel() {
+                return Ok(());
+            }
+            insert_scan_issue(connection, scan_id, "hash", scope, &message)?;
+            return Ok(());
+        }
+    };
 
     let mut done = 0_u64;
+    let mut unanswered = 0_u64;
     for batch in candidates.chunks(REQUEST_BATCH) {
         if cancel() {
             return Ok(());
@@ -670,17 +812,24 @@ where
             if cancel() {
                 break;
             }
-            if let Some(Response::Ok { hex, .. }) = by_key.remove(&(candidate.id, Kind::Full)) {
-                tx.execute(
-                    "UPDATE files SET full_hash = ?1, hash_algorithm = ?2, hash_state = 4 WHERE id = ?3",
-                    params![hex, FULL_TAG, candidate.id],
-                )?;
+            match by_key.remove(&(candidate.id, Kind::Full)) {
+                Some(Response::Ok { hex, .. }) => {
+                    tx.execute(
+                        "UPDATE files SET full_hash = ?1, hash_algorithm = ?2, hash_state = 4 WHERE id = ?3",
+                        params![hex, FULL_TAG, candidate.id],
+                    )?;
+                }
+                // A per-file failure is expected and harmless here — the file
+                // keeps its sample hash. Silence is not.
+                Some(Response::Err { .. }) => {}
+                None => unanswered += 1,
             }
             done += 1;
             emit_counted_progress(progress, FULL_STAGE, done, total);
         }
         tx.commit()?;
     }
+    record_unanswered(connection, scan_id, scope, unanswered, cancel)?;
     Ok(())
 }
 
@@ -852,7 +1001,7 @@ mod tests {
     // ---- stream driver ----
 
     #[test]
-    fn stream_driver_applies_responses_and_reports_child_failure() {
+    fn stream_driver_surfaces_ok_and_err_records_in_order() {
         let mut responses = b"1:f\t".to_vec();
         responses.extend_from_slice("cd".repeat(32).as_bytes());
         responses.push(0);
@@ -1279,6 +1428,159 @@ mod tests {
             )
             .unwrap();
         assert_eq!(hashed, 0, "nothing was hashed, and nothing was destroyed");
+    }
+
+    #[test]
+    fn transport_failure_keeps_the_hashes_stage_a_already_wrote() {
+        // The headline guarantee: a connection that dies partway through leaves
+        // every hash already committed exactly where it was. Stage A is allowed
+        // to finish, stage B's spawn is not — a marker file in the temp dir
+        // makes the same program succeed once and then fail.
+        let Some(py) = local_python() else {
+            eprintln!("SKIP: no python");
+            return;
+        };
+        let dir = tempdir("stage-b-failure");
+        let sampled = vec![4_u8; 512 * 1024]; // > SMALL_MAX, so stage A samples it
+        let files = [("s1.bin", &sampled), ("s2.bin", &sampled)];
+        let paths: Vec<String> = files
+            .iter()
+            .map(|(name, bytes)| {
+                let path = dir.join(name);
+                std::fs::write(&path, bytes.as_slice()).unwrap();
+                path.to_string_lossy().into_owned()
+            })
+            .collect();
+        let db = dir.join("index.sqlite");
+        let scan_id = seed_index(&db, &dir.to_string_lossy(), &paths, &files);
+
+        let marker = dir.join("spawned").to_string_lossy().into_owned();
+        let once = HashTransport::Local {
+            program: py,
+            args: vec![
+                "-c".into(),
+                format!(
+                    "import base64,os,sys\n\
+                     if os.path.exists(r'{marker}'): sys.exit(1)\n\
+                     open(r'{marker}','w').close()\n\
+                     exec(base64.b64decode('{helper}'))",
+                    marker = marker,
+                    helper = base64_std(PYTHON_HELPER)
+                ),
+            ],
+        };
+
+        let mut connection = crate::index::open_index_connection(&db).unwrap();
+        update_hashes_with_transport(
+            &mut connection,
+            scan_id,
+            &once,
+            &|| false,
+            &mut |_: crate::index::writer::FinalizationProgress| {},
+        )
+        .expect("a transport failure never errors out of refinement");
+
+        let issues: Vec<String> = {
+            let mut statement = connection
+                .prepare("SELECT message FROM scan_issues WHERE phase = 'hash'")
+                .unwrap();
+            let rows = statement.query_map([], |r| r.get(0)).unwrap();
+            rows.collect::<Result<Vec<_>, _>>().unwrap()
+        };
+        assert_eq!(issues.len(), 1, "one issue for the one stage that stopped");
+        assert!(
+            issues[0].contains("remote hashing stopped"),
+            "unexpected message: {}",
+            issues[0]
+        );
+
+        for path in &paths {
+            let (partial, sample, full, algorithm, state): (
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                i64,
+            ) = connection
+                .query_row(
+                    "SELECT partial_hash, sample_hash, full_hash, hash_algorithm, hash_state
+                     FROM files WHERE path = ?1",
+                    params![path],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                )
+                .unwrap();
+            assert!(partial.is_some(), "stage A's hash survived the failure");
+            assert!(sample.is_some(), "stage A's hash survived the failure");
+            assert_eq!(full, None, "stage B never got to run");
+            assert_eq!(algorithm.as_deref(), Some(SAMPLE_TAG));
+            assert_eq!(state, 2, "the pair stays at sampled confidence");
+        }
+    }
+
+    #[test]
+    fn unanswered_requests_are_summarised_in_one_issue() {
+        // A helper that answers with records this side cannot use is the quiet
+        // failure: no hashes, and without this, no issues either. The canned
+        // stream below covers both drop paths — a key that does not parse, and
+        // a digest that is not 64 lowercase hex — plus a request never answered.
+        let Some(py) = local_python() else {
+            eprintln!("SKIP: no python");
+            return;
+        };
+        let dir = tempdir("unanswered");
+        let small = vec![6_u8; 1024];
+        let files = [("a1.bin", &small), ("a2.bin", &small)];
+        let paths: Vec<String> = files
+            .iter()
+            .map(|(name, bytes)| {
+                let path = dir.join(name);
+                std::fs::write(&path, bytes.as_slice()).unwrap();
+                path.to_string_lossy().into_owned()
+            })
+            .collect();
+        let db = dir.join("index.sqlite");
+        let scan_id = seed_index(&db, &dir.to_string_lossy(), &paths, &files);
+
+        let babbling = HashTransport::Local {
+            program: py,
+            args: vec![
+                "-c".into(),
+                // exits 0, so this is not a transport failure — just nonsense
+                r"import sys; sys.stdin.buffer.read(); sys.stdout.buffer.write(b'x:p\t' + b'a'*64 + b'\0' + b'1:f\tnot-hex\0')".into(),
+            ],
+        };
+
+        let mut connection = crate::index::open_index_connection(&db).unwrap();
+        update_hashes_with_transport(
+            &mut connection,
+            scan_id,
+            &babbling,
+            &|| false,
+            &mut |_: crate::index::writer::FinalizationProgress| {},
+        )
+        .expect("nonsense from the helper is not an error");
+
+        let issues: Vec<String> = {
+            let mut statement = connection
+                .prepare("SELECT message FROM scan_issues WHERE phase = 'hash'")
+                .unwrap();
+            let rows = statement.query_map([], |r| r.get(0)).unwrap();
+            rows.collect::<Result<Vec<_>, _>>().unwrap()
+        };
+        assert_eq!(issues.len(), 1, "one summary row, not one row per file");
+        assert_eq!(
+            issues[0], "remote hashing returned no result for 2 files",
+            "the count has to be the real number of unanswered candidates"
+        );
+
+        let hashed: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE partial_hash IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hashed, 0, "nothing unusable was ever written");
     }
 
     // ---- helpers ----
