@@ -1,1 +1,2 @@
 src/index/algorithms/helpers/* text eol=lf
+scripts/*.sh text eol=lf
