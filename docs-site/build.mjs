@@ -41,6 +41,7 @@ const NAV = [
     children: [
       { title: "Getting started", page: "guide/getting-started.md" },
       { title: "The workspace", page: "guide/the-workspace.md" },
+      { title: "How the analysis works", page: "guide/how-analysis-works.md" },
       { title: "Stage, group, and review", page: "guide/stage-and-review.md" },
       { title: "Working safely", page: "guide/working-safely.md" },
     ],

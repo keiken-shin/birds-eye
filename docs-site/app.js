@@ -6,6 +6,60 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+  /* ---------------------------------------------- analysis walkthrough */
+  // The guide is deliberately static-first: these controls only reveal the
+  // explanation that is already in the document. No file is read by the site.
+  const walkthrough = $("[data-analysis-walkthrough]");
+  if (walkthrough) {
+    const scenarios = {
+      image: {
+        title: "JPEG + PNG",
+        verdict: "Possible near-duplicate — review it",
+        note: "The current perceptual pass reads bytes, not decoded pixels. It can surface similar-looking exports only as a coarse discovery; it does not prove that the pictures are the same.",
+        steps: ["Records extension and file facts", "Groups exact duplicates by size", "Samples bytes and compares aHash + dHash", "Leaves a near-duplicate discovery for you to confirm"]
+      },
+      source: {
+        title: "design.psd → design.png",
+        verdict: "Possible derivative — review it",
+        note: "A same-folder filename stem, different extension, later modified time, and plausible size ratio match the structural heuristic. The app does not open Photoshop or reconstruct the export graph.",
+        steps: ["Records both files and timestamps", "Rules label PSD as a likely source", "Sibling heuristic compares names, formats, time, and size", "Shows a proposed derivedFrom relationship; you decide"]
+      },
+      binary: {
+        title: "model.blend + model.glb",
+        verdict: "Exact duplicate only if bytes match",
+        note: "Unknown binaries are still scanned and can be exact duplicates. There is no Blender/CAD parser in this pipeline, so a GLB exported from a .blend is not identified as a derivative by content.",
+        steps: ["Records path, extension, size, and times", "Groups only files with equal size", "Hashes candidate bytes with xxHash", "Reports exact matches; does not infer an application provenance"]
+      },
+      normal: {
+        title: "report.pdf + report.docx",
+        verdict: "Classified as documents; content comparison is limited",
+        note: "The extension supplies a coarse media kind. A bounded PDF header reader may extract a title, but Bird's Eye does not compare the meaning of two documents or convert one format into the other.",
+        steps: ["Records both files and timestamps", "Classifies both as documents", "Uses size + hashes for exact byte identity", "Uses path/name/age rules for separate recommendations"]
+      },
+      cache: {
+        title: "node_modules/",
+        verdict: "Safe to delete — rebuildable",
+        note: "This is a path rule, not duplicate detection. The recommendation comes from a known scratch location that can be recreated from project manifests.",
+        steps: ["Scans folder without following links", "Stores its size and hierarchy", "Path rule labels it scratch", "Cleanup still requires review and uses the Recycle Bin"]
+      }
+    };
+    const buttons = $$('[data-analysis-choice]', walkthrough);
+    const title = $("[data-analysis-title]", walkthrough);
+    const verdict = $("[data-analysis-verdict]", walkthrough);
+    const note = $("[data-analysis-note]", walkthrough);
+    const list = $("[data-analysis-steps]", walkthrough);
+    const render = (key) => {
+      const item = scenarios[key] || scenarios.image;
+      title.textContent = item.title;
+      verdict.textContent = item.verdict;
+      note.textContent = item.note;
+      list.innerHTML = item.steps.map((step, i) => `<li><span>${i + 1}</span>${step}</li>`).join("");
+      buttons.forEach((button) => button.classList.toggle("is-selected", button.dataset.analysisChoice === key));
+    };
+    buttons.forEach((button) => button.addEventListener("click", () => render(button.dataset.analysisChoice)));
+    render("image");
+  }
+
   /* ------------------------------------------------------- mobile nav */
   const toggle = $(".navtoggle");
   const sidebar = $("#sidebar");
