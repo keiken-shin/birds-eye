@@ -1,25 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { duplicateEvidence, readShareLabel, splitByEvidence } from "./evidence";
+import { readShareLabel, splitByEvidence } from "./evidence";
 
-describe("duplicateEvidence", () => {
-  it("names the three bands the index actually produces", () => {
-    // 1.0 / 0.80 / 0.60 are what rebuild_duplicate_size_groups assigns.
-    expect(duplicateEvidence(1.0)).toBe("exact");
-    expect(duplicateEvidence(0.8)).toBe("sampled");
-    expect(duplicateEvidence(0.6)).toBe("size-only");
-  });
-
-  it("does not round a sampled group up to exact", () => {
-    expect(duplicateEvidence(0.98)).toBe("sampled");
-  });
-});
+// The band itself is decided in the index and covered by its own tests there
+// (src/index/evidence.rs). What this file owns is what the workspace does with
+// the name once it arrives.
 
 describe("splitByEvidence", () => {
   it("keeps byte-identical bytes apart from sampled bytes", () => {
     const split = splitByEvidence([
-      { reclaimable_bytes: 4_000, confidence: 1.0 },
-      { reclaimable_bytes: 40_000_000_000, confidence: 0.8 },
-      { reclaimable_bytes: 900, confidence: 0.6 },
+      { reclaimable_bytes: 4_000, evidence: "exact" },
+      { reclaimable_bytes: 40_000_000_000, evidence: "sampled" },
+      { reclaimable_bytes: 900, evidence: "size-only" },
     ]);
     expect(split).toEqual({ exact: 4_000, sampled: 40_000_000_000, "size-only": 900 });
   });

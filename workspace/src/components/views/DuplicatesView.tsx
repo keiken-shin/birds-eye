@@ -9,7 +9,7 @@ import {
 import { useIndexData } from "../../state/indexData";
 import { useWorkspace } from "../../state/workspaceStore";
 import { baseName } from "../../lib/discoveries";
-import { duplicateEvidence, EVIDENCE_LABEL, splitByEvidence } from "../../lib/evidence";
+import { Evidence, EVIDENCE_LABEL, splitByEvidence } from "../../lib/evidence";
 import { FilePreview } from "../FilePreview";
 import { MoveDialog, type MoveTarget } from "../MoveDialog";
 import { Card, EmptyState, Meter, SectionLabel } from "../ui/Card";
@@ -39,8 +39,7 @@ const UNREAD_REASON: Record<string, string> = {
   failed: "COULD NOT READ",
 };
 
-function ConfidenceTag({ confidence }: { confidence: number }) {
-  const evidence = duplicateEvidence(confidence);
+function EvidenceTag({ evidence }: { evidence: Evidence }) {
   return <Tag tone={evidence === "exact" ? "green" : "neutral"}>{EVIDENCE_LABEL[evidence]}</Tag>;
 }
 
@@ -270,7 +269,7 @@ export function DuplicatesView() {
                       <span className={`mono text-12 font-semibold ${active ? "text-ink" : "text-ink-soft"}`}>
                         {g.file_count} × {formatBytes(g.size)}
                       </span>
-                      <ConfidenceTag confidence={g.confidence} />
+                      <EvidenceTag evidence={g.evidence} />
                     </div>
                     <div className="mt-2 flex items-center gap-2.5">
                       <Meter
@@ -299,14 +298,14 @@ export function DuplicatesView() {
                       has compared them; the others matched on sampled chunks or
                       on size, and saying identical there is simply untrue. */}
                   {selectedGroup.file_count}{" "}
-                  {duplicateEvidence(selectedGroup.confidence) === "exact"
+                  {selectedGroup.evidence === "exact"
                     ? "identical copies"
                     : "copies that look the same"}{" "}
                   · <span className="mono text-ink-soft">{formatBytes(selectedGroup.size)}</span>{" "}
                   each
                 </span>
                 <span className="ml-auto text-11 text-faint">
-                  {duplicateEvidence(selectedGroup.confidence) === "exact" ? "free " : "up to "}
+                  {selectedGroup.evidence === "exact" ? "free " : "up to "}
                   <span className="mono font-semibold text-primary-ink">
                     {formatBytes(selectedGroup.reclaimable_bytes)}
                   </span>{" "}

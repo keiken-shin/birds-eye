@@ -6,6 +6,8 @@
  * builds never touch this module at runtime.
  */
 
+import type { Evidence } from "../lib/evidence";
+
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
 const DAY = 86400;
@@ -312,7 +314,8 @@ const DUP_GROUPS: Array<{
   size: number;
   file_count: number;
   reclaimable_bytes: number;
-  confidence: number;
+  // The band the index sends. It never sends the score it came from.
+  evidence: Evidence;
   files: DupFileFix[];
 }> = [
   {
@@ -320,7 +323,7 @@ const DUP_GROUPS: Array<{
     size: Math.round(4.1 * GB),
     file_count: 2,
     reclaimable_bytes: Math.round(4.1 * GB),
-    confidence: 1,
+    evidence: "exact",
     files: [
       { path: j("Videos", "Family", "graduation-uncut.mp4"), size: Math.round(4.1 * GB), modified_at: NOW - 388 * DAY, hash_state: 4 },
       { path: j("Backups", "OldLaptop", "Videos", "graduation-uncut.mp4"), size: Math.round(4.1 * GB), modified_at: NOW - 660 * DAY, hash_state: 4 },
@@ -331,7 +334,7 @@ const DUP_GROUPS: Array<{
     size: Math.round(2.7 * GB),
     file_count: 3,
     reclaimable_bytes: Math.round(5.4 * GB),
-    confidence: 1,
+    evidence: "exact",
     files: [
       { path: j("Videos", "Exports", "yt-final-v12.mp4"), size: Math.round(2.7 * GB), modified_at: NOW - 96 * DAY, hash_state: 4 },
       { path: j("Downloads", "yt-final-v12.mp4"), size: Math.round(2.7 * GB), modified_at: NOW - 94 * DAY, hash_state: 4 },
@@ -345,7 +348,7 @@ const DUP_GROUPS: Array<{
     size: Math.round(1.4 * GB),
     file_count: 2,
     reclaimable_bytes: Math.round(1.4 * GB),
-    confidence: 0.92,
+    evidence: "sampled",
     files: [
       { path: j("Photos", "2023", "safari-trip-raw.7z"), size: Math.round(1.4 * GB), modified_at: NOW - 410 * DAY, hash_state: 2 },
       { path: j("Backups", "PhoneSync", "safari-trip-raw.7z"), size: Math.round(1.4 * GB), modified_at: NOW - 289 * DAY, hash_state: 2 },
@@ -356,7 +359,7 @@ const DUP_GROUPS: Array<{
     size: Math.round(0.96 * GB),
     file_count: 2,
     reclaimable_bytes: Math.round(0.96 * GB),
-    confidence: 1,
+    evidence: "exact",
     files: [
       { path: j("Downloads", "linux-distro-live.iso"), size: Math.round(0.92 * GB), modified_at: NOW - 610 * DAY, hash_state: 4 },
       { path: j("Downloads", "Installers", "linux-distro-live (1).iso"), size: Math.round(0.92 * GB), modified_at: NOW - 604 * DAY, hash_state: 4 },
@@ -367,7 +370,7 @@ const DUP_GROUPS: Array<{
     size: Math.round(0.64 * GB),
     file_count: 4,
     reclaimable_bytes: Math.round(1.92 * GB),
-    confidence: 0.86,
+    evidence: "sampled",
     files: [
       { path: j("Photos", "2024", "iceland-pano-08421.raw"), size: Math.round(0.64 * GB), modified_at: NOW - 158 * DAY, hash_state: 2 },
       { path: j("Photos", "2024", "iceland-pano-08421 - Copy.raw"), size: Math.round(0.64 * GB), modified_at: NOW - 158 * DAY, hash_state: 2 },
@@ -380,7 +383,7 @@ const DUP_GROUPS: Array<{
     size: Math.round(0.44 * GB),
     file_count: 2,
     reclaimable_bytes: Math.round(0.44 * GB),
-    confidence: 1,
+    evidence: "exact",
     files: [
       { path: j("Music", "flac-rips", "album-2019-remaster.flac"), size: Math.round(0.44 * GB), modified_at: NOW - 590 * DAY, hash_state: 4 },
       { path: j("Backups", "OldLaptop", "Music", "album-2019-remaster.flac"), size: Math.round(0.44 * GB), modified_at: NOW - 660 * DAY, hash_state: 4 },
@@ -391,7 +394,7 @@ const DUP_GROUPS: Array<{
     size: 320 * MB,
     file_count: 3,
     reclaimable_bytes: 640 * MB,
-    confidence: 0.78,
+    evidence: "size-only",
     files: [
       { path: j("Documents", "scans", "passport-scan-hires.pdf"), size: 320 * MB, modified_at: NOW - 220 * DAY, hash_state: 2 },
       { path: j("Documents", "passport-scan-hires (1).pdf"), size: 320 * MB, modified_at: NOW - 218 * DAY, hash_state: 2 },
@@ -403,7 +406,7 @@ const DUP_GROUPS: Array<{
     size: 180 * MB,
     file_count: 2,
     reclaimable_bytes: 180 * MB,
-    confidence: 1,
+    evidence: "exact",
     files: [
       { path: j("Projects", "webshop", "node_modules", "lodash", "lodash.min.js"), size: 180 * MB, modified_at: NOW - 12 * DAY, hash_state: 4 },
       { path: j("Projects", "forge", "vendor", "lodash.min.js"), size: 180 * MB, modified_at: NOW - 88 * DAY, hash_state: 4 },

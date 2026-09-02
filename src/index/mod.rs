@@ -1,6 +1,7 @@
 pub mod algorithms;
 pub mod analysis;
 pub mod coverage;
+pub mod evidence;
 pub mod schema;
 pub mod writer;
 

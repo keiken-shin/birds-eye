@@ -3,6 +3,7 @@ import { listen as tauriListen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ScanStrategy } from "./domain";
 import { mockInvoke, mockListen, mockPreviewSrc } from "../dev/mockBackend";
+import type { Evidence, Strength } from "../lib/evidence";
 
 /**
  * Outside the Tauri shell (plain `vite` in a browser) every command routes to
@@ -69,7 +70,8 @@ export type NativeIndexOverview = {
     size: number;
     file_count: number;
     reclaimable_bytes: number;
-    confidence: number;
+    /** What the group rests on, decided in the index. Never a score. */
+    evidence: Evidence;
     /** up to 8 member paths, largest first — relates groups to folders/findings */
     sample_paths: string[];
   }>;
@@ -457,6 +459,12 @@ export type NativeDiscovery = {
   kind: string;
   payload: string;
   status: "Pending" | "Confirmed" | "Rejected" | "Expired";
+  /**
+   * An ordering weight, and the one place a raw score is allowed to cross this
+   * boundary. `rankCards` in `lib/catalog.ts` multiplies it into a sort key and
+   * nothing renders it. If anything ever wants to *show* how sure Bird's Eye
+   * is, it asks for a band -- see `Strength` -- rather than printing this.
+   */
   confidence: number;
   potential_bytes_unlocked: number;
   created_at: number;
@@ -515,8 +523,8 @@ export type NativeFileProvenance = {
   file_id: number;
   path: string;
   is_pinned: boolean;
-  attrs: Array<{ key: string; value: string; source: string; confidence: number }>;
-  relations: Array<{ predicate: string; object_path: string | null; source: string; confidence: number }>;
+  attrs: Array<{ key: string; value: string; source: string; strength: Strength }>;
+  relations: Array<{ predicate: string; object_path: string | null; source: string; strength: Strength }>;
 };
 
 export async function fileProvenance(indexPath: string, fileId: number) {

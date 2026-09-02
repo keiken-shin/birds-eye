@@ -133,7 +133,10 @@ pub struct DuplicateGroupSummaryDto {
     pub size: i64,
     pub file_count: i64,
     pub reclaimable_bytes: i64,
-    pub confidence: f64,
+    /// What the group rests on, as a name. The score it comes from stays in
+    /// the database, where it is only ever an ordering key -- see
+    /// `src/index/evidence.rs`.
+    pub evidence: crate::index::evidence::Evidence,
     /// Up to a handful of member paths, largest first — lets the UI relate
     /// groups to folders and findings without a per-group fetch.
     pub sample_paths: Vec<String>,
@@ -1051,7 +1054,7 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
                 size: group.size,
                 file_count: group.file_count,
                 reclaimable_bytes: group.reclaimable_bytes,
-                confidence: group.confidence,
+                evidence: crate::index::evidence::Evidence::from_confidence(group.confidence),
                 sample_paths: group.sample_paths,
             })
             .collect(),
@@ -1379,7 +1382,8 @@ pub struct AttrFactDto {
     pub key: String,
     pub value: String,
     pub source: String,
-    pub confidence: f64,
+    /// How much is behind it, as a name rather than a score nobody calibrated.
+    pub strength: crate::index::evidence::Strength,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -1387,7 +1391,8 @@ pub struct RelationFactDto {
     pub predicate: String,
     pub object_path: Option<String>,
     pub source: String,
-    pub confidence: f64,
+    /// See [`AttrFactDto::strength`].
+    pub strength: crate::index::evidence::Strength,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -1421,10 +1426,13 @@ pub fn file_provenance(request: FileProvenanceRequest) -> Result<FileProvenanceD
         for key in PROVENANCE_KEYS {
             for a in get_attrs(&conn, entity.id, key).map_err(|e| e.to_string())? {
                 attrs.push(AttrFactDto {
+                    strength: crate::index::evidence::Strength::of(
+                        &a.source,
+                        a.confidence as f64,
+                    ),
                     key: a.key,
                     value: a.value,
                     source: a.source,
-                    confidence: a.confidence as f64,
                 });
             }
         }
@@ -1442,10 +1450,13 @@ pub fn file_provenance(request: FileProvenanceRequest) -> Result<FileProvenanceD
                     .map_err(|e| e.to_string())?
                     .flatten();
                 relations.push(RelationFactDto {
+                    strength: crate::index::evidence::Strength::of(
+                        &r.source,
+                        r.confidence as f64,
+                    ),
                     predicate: r.predicate,
                     object_path,
                     source: r.source,
-                    confidence: r.confidence as f64,
                 });
             }
         }
