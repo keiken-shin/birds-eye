@@ -16,6 +16,7 @@ import { Button } from "../ui/Button";
 import { Chip, Tag } from "../ui/Chip";
 import { MoveDialog } from "../MoveDialog";
 import { ViewHeader } from "./ViewHeader";
+import { selectableProps } from "../../lib/selectable";
 
 const SEARCH_LIMIT = 500;
 const RENDER_CAP = 200;
@@ -456,7 +457,11 @@ export function FilesView() {
                     return (
                       <div
                         key={r.path}
-                        onClick={() => select({ kind: "file", path: r.path, name: r.name, bytes: r.size, fileId: r.fileId })}
+                        {...selectableProps(
+                          () =>
+                            select({ kind: "file", path: r.path, name: r.name, bytes: r.size, fileId: r.fileId }),
+                          `Inspect ${r.name}`
+                        )}
                         className={`flex cursor-pointer items-center gap-3 border-b border-line-soft px-3 py-2 transition-colors last:border-b-0 ${
                           sel
                             ? "bg-primary-wash shadow-[inset_2px_0_0_var(--color-primary)]"

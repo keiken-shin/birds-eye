@@ -21,6 +21,7 @@ import { Card, EmptyState, SectionLabel, StatCard, useCountUp } from "../ui/Card
 import { Button } from "../ui/Button";
 import { AreaChart, DistBars, type AreaPoint } from "../ui/charts";
 import { ViewHeader } from "./ViewHeader";
+import { selectableProps } from "../../lib/selectable";
 
 /* Same age constants as OverviewView — keep values identical. */
 const AGE_LABELS: Record<string, string> = {
@@ -335,7 +336,11 @@ export function TimelineView() {
                     <div
                       key={f.path}
                       className="group flex cursor-pointer items-center gap-3 rounded-[10px] px-2 py-1.5 transition-colors hover:bg-window"
-                      onClick={() => select({ kind: "file", path: f.path, name, bytes: f.size, fileId: f.file_id })}
+                      {...selectableProps(
+                        () =>
+                          select({ kind: "file", path: f.path, name, bytes: f.size, fileId: f.file_id }),
+                        `Inspect ${name}`
+                      )}
                     >
                       <span
                         className="flex h-8 w-8 flex-none items-center justify-center rounded-lg"

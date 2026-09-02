@@ -16,6 +16,7 @@ import { Card, EmptyState, Meter, SectionLabel } from "../ui/Card";
 import { Button, IconButton } from "../ui/Button";
 import { Tag } from "../ui/Chip";
 import { ViewHeader } from "./ViewHeader";
+import { selectableProps } from "../../lib/selectable";
 
 const GROUP_LIMIT = 100;
 const FILES_PER_GROUP = 50;
@@ -338,7 +339,11 @@ export function DuplicatesView() {
                     return (
                       <Card
                         key={f.path}
-                        onClick={() => select({ kind: "file", path: f.path, name, bytes: f.size, fileId: f.file_id })}
+                        {...selectableProps(
+                          () =>
+                            select({ kind: "file", path: f.path, name, bytes: f.size, fileId: f.file_id }),
+                          `Inspect ${name}`
+                        )}
                         className={`flex cursor-pointer flex-col p-3 transition-colors ${
                           staged ? "border-primary-edge" : "hover:border-line-strong"
                         }`}

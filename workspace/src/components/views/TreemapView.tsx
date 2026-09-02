@@ -9,6 +9,7 @@ import { NEUTRAL_STYLE, VERDICT_LEGEND, VERDICT_STYLES, verdictForFolder } from 
 import { CATEGORIES, categoryOf, type MediaKind } from "../../lib/categories";
 import { EmptyState } from "../ui/Card";
 import { Button } from "../ui/Button";
+import { selectableProps } from "../../lib/selectable";
 
 const GAP = 3;
 const MAX_TILES = 24;
@@ -215,7 +216,10 @@ export function TreemapView() {
           return (
             <div
               key={node.path}
-              onClick={() => select({ kind: "folder", path: node.path, name: node.name, bytes: node.bytes })}
+              {...selectableProps(
+                () => select({ kind: "folder", path: node.path, name: node.name, bytes: node.bytes }),
+                `Inspect ${node.name}`
+              )}
               onDoubleClick={() => void openTile(node)}
               onMouseEnter={() => setHover(node.path)}
               onMouseLeave={() => setHover((prev) => (prev === node.path ? null : prev))}
