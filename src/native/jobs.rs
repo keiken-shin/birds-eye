@@ -1352,8 +1352,12 @@ mod tests {
         cleanup(&root);
     }
 
+    /// Generous on purpose. These tests run alongside every other test in the
+    /// binary on a machine that may be doing real disk work, and a scan that
+    /// takes four seconds under that load is slow, not broken. A tight budget
+    /// here fails for the wrong reason and teaches people to re-run the suite.
     fn wait_for_terminal(manager: &ScanJobManager, job_id: u64) {
-        for _ in 0..80 {
+        for _ in 0..600 {
             let status = manager.job_status(job_id).expect("missing status");
             if !matches!(status, JobStatusDto::Running) {
                 if matches!(status, JobStatusDto::Completed) {
@@ -1367,7 +1371,7 @@ mod tests {
     }
 
     fn wait_for_duplicate_analysis_complete(manager: &ScanJobManager, job_id: u64) {
-        for _ in 0..80 {
+        for _ in 0..600 {
             let events = manager
                 .job_events_since(job_id, 0)
                 .expect("failed to fetch job events");

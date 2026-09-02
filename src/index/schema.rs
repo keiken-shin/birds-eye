@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 21;
+pub const CURRENT_SCHEMA_VERSION: u32 = 22;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -916,6 +916,31 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (21, strftime('%s', 'now'));
 "#;
 
+/// One fingerprint per file instead of two.
+///
+/// Every candidate was read twice: once for `sample_hash`, whose sampling plan
+/// scales with file size, and once for `partial_hash`, which always took the
+/// head and the tail regardless. Both were written together, so `partial_hash`
+/// never separated two files that `sample_hash` did not already separate -- it
+/// bought nothing and cost a second pass over every candidate on the volume.
+///
+/// The index on it goes too; `idx_files_sample_hash` from migration 002 already
+/// covers the same lookup. Existing groups are cleared rather than migrated:
+/// they were keyed partly on the dropped column, and the next scan rebuilds
+/// them from what is left.
+pub const MIGRATION_022: &str = r#"
+DROP INDEX IF EXISTS idx_files_hash;
+
+DELETE FROM duplicate_group_files;
+DELETE FROM duplicate_groups;
+
+ALTER TABLE files DROP COLUMN partial_hash;
+ALTER TABLE duplicate_groups DROP COLUMN partial_hash;
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (22, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -938,6 +963,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (19, MIGRATION_019),
     (20, MIGRATION_020),
     (21, MIGRATION_021),
+    (22, MIGRATION_022),
 ];
 
 #[cfg(test)]
@@ -1029,8 +1055,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 21);
-        assert_eq!(ALL_MIGRATIONS.len(), 21);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 22);
+        assert_eq!(ALL_MIGRATIONS.len(), 22);
     }
 
     #[test]

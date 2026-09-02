@@ -1324,7 +1324,6 @@ impl IndexWriter {
                 media_kind = r.media_kind,
                 indexed_at = r.indexed_at,
                 allocated_size = r.allocated_size,
-                partial_hash = CASE WHEN r.same_content THEN files.partial_hash END,
                 sample_hash = CASE WHEN r.same_content THEN files.sample_hash END,
                 full_hash = CASE WHEN r.same_content THEN files.full_hash END,
                 hash_algorithm = CASE WHEN r.same_content THEN files.hash_algorithm END,
@@ -1479,14 +1478,13 @@ impl IndexWriter {
         let groups = {
             let mut statement = tx.prepare(
                 "SELECT size,
-                        partial_hash,
                         sample_hash,
                         full_hash,
-                        CASE
-                          WHEN full_hash IS NOT NULL THEN 1.0
-                          WHEN sample_hash IS NOT NULL THEN 0.80
-                          ELSE 0.60
-                        END AS confidence,
+                        -- Only two answers are reachable: the guard below
+                        -- requires a sample hash, so a group never rests on
+                        -- size alone.
+                        CASE WHEN full_hash IS NOT NULL THEN 1.0 ELSE 0.80 END
+                          AS confidence,
                         COUNT(*) AS file_count,
                         -- What deleting the extra copies actually gives back.
                         -- A sparse or compressed file hands back the bytes it
@@ -1499,14 +1497,14 @@ impl IndexWriter {
                  -- Files whose hashing failed or was skipped (locked, permission
                  -- denied, cloud placeholders, vanished) keep NULL hashes; SQL
                  -- GROUP BY treats NULLs as equal, so without this filter every
-                 -- same-size unhashed file — a video and a document alike —
+                 -- same-size unhashed file -- a video and a document alike --
                  -- collapses into one phantom \"duplicate\" group.
                  -- A hard link is not a duplicate: it is one file with two
                  -- names, and deleting one of them frees nothing. Only the name
                  -- carrying the bytes takes part.
-                 WHERE deleted_at IS NULL AND size > 0 AND partial_hash IS NOT NULL
+                 WHERE deleted_at IS NULL AND size > 0 AND sample_hash IS NOT NULL
                    AND shares_bytes_with IS NULL
-                 GROUP BY size, partial_hash, sample_hash, full_hash
+                 GROUP BY size, sample_hash, full_hash
                  HAVING COUNT(*) > 1
                  ORDER BY reclaimable_bytes DESC",
             )?;
@@ -1515,54 +1513,44 @@ impl IndexWriter {
                     row.get::<_, i64>(0)?,
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, f64>(4)?,
+                    row.get::<_, f64>(3)?,
+                    row.get::<_, i64>(4)?,
                     row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
                 ))
             })?;
 
             rows.collect::<Result<Vec<_>, _>>()?
         };
 
-        for (
-            size,
-            partial_hash,
-            sample_hash,
-            full_hash,
-            confidence,
-            _file_count,
-            reclaimable_bytes,
-        ) in groups
-        {
+        for (size, sample_hash, full_hash, confidence, _file_count, reclaimable_bytes) in groups {
             tx.execute(
-                "INSERT INTO duplicate_groups (size, partial_hash, sample_hash, full_hash, confidence, reclaimable_bytes, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![size, partial_hash, sample_hash, full_hash, confidence, reclaimable_bytes, now_millis()],
+                "INSERT INTO duplicate_groups (size, sample_hash, full_hash, confidence, reclaimable_bytes, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![size, sample_hash, full_hash, confidence, reclaimable_bytes, now_millis()],
             )?;
             let group_id = tx.last_insert_rowid();
+            // Members are filtered the same way the group was: a hard link that
+            // matches the hash is still one file with another name, and putting
+            // it in the group would offer a deletion that frees nothing.
             if let Some(full_hash) = full_hash {
                 tx.execute(
                     "INSERT INTO duplicate_group_files (group_id, file_id)
                      SELECT ?1, id FROM files
-                     WHERE deleted_at IS NULL AND size = ?2 AND full_hash = ?3",
+                     WHERE deleted_at IS NULL AND size = ?2 AND full_hash = ?3
+                       AND shares_bytes_with IS NULL",
                     params![group_id, size, full_hash],
                 )?;
             } else if let Some(sample_hash) = sample_hash {
                 tx.execute(
                     "INSERT INTO duplicate_group_files (group_id, file_id)
-                     SELECT ?1, id FROM files WHERE deleted_at IS NULL AND size = ?2 AND sample_hash = ?3",
+                     SELECT ?1, id FROM files
+                     WHERE deleted_at IS NULL AND size = ?2 AND sample_hash = ?3
+                       AND shares_bytes_with IS NULL",
                     params![group_id, size, sample_hash],
-                )?;
-            } else if let Some(partial_hash) = partial_hash {
-                tx.execute(
-                    "INSERT INTO duplicate_group_files (group_id, file_id)
-                     SELECT ?1, id FROM files WHERE deleted_at IS NULL AND size = ?2 AND partial_hash = ?3",
-                    params![group_id, size, partial_hash],
                 )?;
             }
             // No hash at all never forms a group: the grouping query above
-            // requires partial_hash, so size-only coincidences are excluded.
+            // requires a sample hash, so size-only coincidences are excluded.
         }
 
         tx.commit()?;
@@ -1662,14 +1650,6 @@ impl IndexWriter {
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL)
              ON CONFLICT(path) DO UPDATE SET
-                partial_hash = CASE
-                    WHEN files.size IS NOT excluded.size
-                      OR files.modified_at IS NOT excluded.modified_at
-                      OR files.created_at IS NOT excluded.created_at
-                      OR (files.object_id IS NOT NULL
-                          AND excluded.object_id IS NOT NULL
-                          AND files.object_id IS NOT excluded.object_id)
-                    THEN NULL ELSE files.partial_hash END,
                 sample_hash = CASE
                     WHEN files.size IS NOT excluded.size
                       OR files.modified_at IS NOT excluded.modified_at
@@ -2321,7 +2301,7 @@ mod tests {
                 let mut stmt = tx
                     .prepare(
                         "INSERT INTO files (folder_id, path, name, extension, size, modified_at, media_kind,
-                                            partial_hash, sample_hash, full_hash, hash_state, indexed_at)
+                                            sample_hash, full_hash, hash_state, indexed_at)
                          VALUES (?1, ?2, ?3, 'dup', ?4, 0, 'other', ?5, ?5, ?5, 4, 0)",
                     )
                     .expect("prep dups");
@@ -2449,7 +2429,7 @@ mod tests {
     }
 
     #[test]
-    fn sample_hashing_filters_partial_hash_collisions_before_full_hashing() {
+    fn sample_hashing_filters_same_size_matches_before_full_hashing() {
         let root = test_root("full-hash");
         fs::create_dir_all(&root).expect("failed to create folder");
 
@@ -2597,7 +2577,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_hashing_filters_same_size_different_content() {
+    fn sample_hashing_filters_same_size_different_content() {
         let root = test_root("partial-hash");
         fs::create_dir_all(&root).expect("failed to create folder");
         write_file(&root.join("one.bin"), &[1; 32]);
@@ -2618,7 +2598,7 @@ mod tests {
         let hashed_files: i64 = writer
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM files WHERE partial_hash IS NOT NULL",
+                "SELECT COUNT(*) FROM files WHERE sample_hash IS NOT NULL",
                 [],
                 |row| row.get(0),
             )
@@ -2649,8 +2629,8 @@ mod tests {
                 .connection()
                 .execute(
                     "INSERT INTO files (id, folder_id, path, name, size, allocated_size,
-                                        partial_hash, sample_hash, full_hash, hash_state, indexed_at)
-                     VALUES (?1, 1, ?2, ?2, 42949672960, 2147483648, 'p', 's', 'f', 4, 0)",
+                                        sample_hash, full_hash, hash_state, indexed_at)
+                     VALUES (?1, 1, ?2, ?2, 42949672960, 2147483648, 's', 'f', 4, 0)",
                     params![id, name],
                 )
                 .expect("seed file");
@@ -2862,7 +2842,7 @@ mod tests {
         let hashed_files: i64 = writer
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM files WHERE partial_hash IS NOT NULL OR sample_hash IS NOT NULL OR full_hash IS NOT NULL",
+                "SELECT COUNT(*) FROM files WHERE sample_hash IS NOT NULL OR full_hash IS NOT NULL",
                 [],
                 |row| row.get(0),
             )

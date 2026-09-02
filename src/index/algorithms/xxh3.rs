@@ -19,7 +19,7 @@ where
     F: FnMut(FinalizationProgress),
     C: Fn() -> bool + Sync,
 {
-    update_partial_hashes_for_duplicate_candidates(connection, scan_id, cancel, progress)?;
+    update_sample_hashes_for_duplicate_candidates(connection, scan_id, cancel, progress)?;
     if cancel() {
         return Ok(());
     }
@@ -122,7 +122,6 @@ where
 
 enum SampleResult {
     Sampled {
-        partial_hash: String,
         sample_hash: String,
     },
     Full {
@@ -190,7 +189,7 @@ fn skipped(error: &std::io::Error) -> SampleResult {
     }
 }
 
-fn update_partial_hashes_for_duplicate_candidates<F, C>(
+fn update_sample_hashes_for_duplicate_candidates<F, C>(
     connection: &mut Connection,
     scan_id: i64,
     cancel: &C,
@@ -275,17 +274,7 @@ where
                     }
                 } else {
                     match with_lock_retry(|| sample_file_hash(Path::new(&path), size as u64)) {
-                        Ok(sample_hash) => {
-                            match with_lock_retry(|| {
-                                partial_file_hash(Path::new(&path), size as u64)
-                            }) {
-                                Ok(partial_hash) => SampleResult::Sampled {
-                                    partial_hash,
-                                    sample_hash,
-                                },
-                                Err(error) => skipped(&error),
-                            }
-                        }
+                        Ok(sample_hash) => SampleResult::Sampled { sample_hash },
                         Err(error) => skipped(&error),
                     }
                 };
@@ -296,22 +285,19 @@ where
         let tx = connection.transaction()?;
         for (id, path, result) in results {
             match result {
-                SampleResult::Sampled {
-                    partial_hash,
-                    sample_hash,
-                } => {
+                SampleResult::Sampled { sample_hash } => {
                     tx.execute(
                         "UPDATE files
-                     SET partial_hash = ?1, sample_hash = ?2, full_hash = NULL,
-                         hash_algorithm = ?3, hash_state = 2
-                     WHERE id = ?4",
-                        params![partial_hash, sample_hash, "xxh3-sample-v1", id],
+                     SET sample_hash = ?1, full_hash = NULL,
+                         hash_algorithm = ?2, hash_state = 2
+                     WHERE id = ?3",
+                        params![sample_hash, "xxh3-sample-v1", id],
                     )?;
                 }
                 SampleResult::Full { full_hash } => {
                     tx.execute(
                         "UPDATE files
-                     SET partial_hash = ?1, sample_hash = ?1, full_hash = ?1,
+                     SET sample_hash = ?1, full_hash = ?1,
                          hash_algorithm = ?2, hash_state = 4
                      WHERE id = ?3",
                         params![full_hash, "xxh3-full-v1", id],
@@ -414,20 +400,6 @@ fn sample_chunk_plan(size: u64) -> Vec<(u64, usize)> {
         (q(3), block),
         (last, block),
     ]
-}
-
-fn partial_file_hash(path: &Path, size: u64) -> std::io::Result<String> {
-    const BLOCK_SIZE: usize = 64 * 1024;
-
-    if size == 0 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "empty file",
-        ));
-    }
-
-    let last_offset = size.saturating_sub(BLOCK_SIZE as u64);
-    hash_file_chunks(path, size, &[(0, BLOCK_SIZE), (last_offset, BLOCK_SIZE)])
 }
 
 /// Sampled hash for files with a non-empty chunk plan (> 256 KiB); callers
