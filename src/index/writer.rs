@@ -1231,6 +1231,97 @@ impl IndexWriter {
         Ok(())
     }
 
+    /// A renamed or moved file is the same file, so its row must move with it.
+    ///
+    /// Without this, a rescan sees a path that is gone and a path that is new,
+    /// and records a death and a birth. Everything the ontology learned about
+    /// the file -- what it is derived from, what it backs up, that the user
+    /// pinned it, that they dismissed a suggestion about it -- stays attached
+    /// to the dead row, and the live row starts from nothing.
+    ///
+    /// The object id is what makes this decidable. A stale row and a fresh row
+    /// naming the same object are the same file at a new path, so the stale row
+    /// is carried forward onto that path and the fresh row is discarded. The
+    /// stale row keeps its id, which is the point: every edge pointing at it
+    /// stays correct.
+    ///
+    /// Only one-to-one matches are carried. One object at several paths is a
+    /// hard link, not a move, and merging those would fabricate a rename out of
+    /// two files that both still exist.
+    fn carry_renamed_files_forward(
+        &self,
+        started_at: i64,
+        root_text: &str,
+        root_prefix: &str,
+    ) -> Result<(), IndexError> {
+        let like = format!("{root_prefix}%");
+        // The pair, its new location, and whether the contents look untouched.
+        // Built first because the new row has to go before the old row can take
+        // its path: `files.path` is unique.
+        self.connection.execute(
+            "CREATE TEMP TABLE _renames AS
+             WITH stale AS (
+                 SELECT id, object_id, size, modified_at, created_at
+                 FROM files
+                 WHERE deleted_at IS NULL AND indexed_at < ?1 AND object_id IS NOT NULL
+                   AND (path = ?2 OR path LIKE ?3)
+             ),
+             fresh AS (
+                 SELECT id, object_id, folder_id, path, name, extension, size,
+                        modified_at, accessed_at, created_at, media_kind, indexed_at
+                 FROM files
+                 WHERE deleted_at IS NULL AND indexed_at >= ?1 AND object_id IS NOT NULL
+                   AND (path = ?2 OR path LIKE ?3)
+             )
+             SELECT s.id AS old_id, f.id AS new_id, f.folder_id, f.path, f.name,
+                    f.extension, f.size, f.modified_at, f.accessed_at, f.created_at,
+                    f.media_kind, f.indexed_at,
+                    (s.size IS f.size
+                     AND s.modified_at IS f.modified_at
+                     AND s.created_at IS f.created_at) AS same_content
+             FROM stale s
+             JOIN fresh f ON f.object_id = s.object_id
+             WHERE s.object_id IN (
+                 SELECT object_id FROM stale GROUP BY object_id HAVING COUNT(*) = 1
+             )
+             AND s.object_id IN (
+                 SELECT object_id FROM fresh GROUP BY object_id HAVING COUNT(*) = 1
+             )",
+            params![started_at, root_text, like],
+        )?;
+
+        self.connection
+            .execute("DELETE FROM files WHERE id IN (SELECT new_id FROM _renames)", [])?;
+
+        // The digests describe contents, not a location, so a pure move keeps
+        // them. Anything that suggests the bytes also changed clears them, the
+        // same rule the upsert applies to a file found at its old path.
+        self.connection.execute(
+            "UPDATE files SET
+                folder_id = r.folder_id,
+                path = r.path,
+                name = r.name,
+                extension = r.extension,
+                size = r.size,
+                modified_at = r.modified_at,
+                accessed_at = r.accessed_at,
+                created_at = r.created_at,
+                media_kind = r.media_kind,
+                indexed_at = r.indexed_at,
+                partial_hash = CASE WHEN r.same_content THEN files.partial_hash END,
+                sample_hash = CASE WHEN r.same_content THEN files.sample_hash END,
+                full_hash = CASE WHEN r.same_content THEN files.full_hash END,
+                hash_algorithm = CASE WHEN r.same_content THEN files.hash_algorithm END,
+                hash_state = CASE WHEN r.same_content THEN files.hash_state ELSE 0 END
+             FROM _renames r
+             WHERE files.id = r.old_id",
+            [],
+        )?;
+
+        self.connection.execute("DROP TABLE _renames", [])?;
+        Ok(())
+    }
+
     fn mark_missing_files_deleted(&self) -> Result<(), IndexError> {
         let Some(root) = &self.active_root else {
             return Ok(());
@@ -1241,6 +1332,10 @@ impl IndexWriter {
 
         let root_text = path_to_string(root);
         let root_prefix = path_prefix(root);
+
+        // Before deciding anything is gone: a file that moved is not gone.
+        self.carry_renamed_files_forward(started_at, &root_text, &root_prefix)?;
+
         self.connection.execute(
             "UPDATE files
              SET deleted_at = ?1
@@ -2414,6 +2509,88 @@ mod tests {
 
         assert_eq!(duplicate_group_count, 0);
         assert_eq!(hashed_files, 2);
+        cleanup(&root);
+    }
+
+    /// A rename is not a death and a birth. The row must survive it, with the
+    /// same id, so everything the ontology attached to that file survives too.
+    #[test]
+    fn a_renamed_file_keeps_its_row_instead_of_dying_and_being_reborn() {
+        let root = test_root("renamed");
+        fs::create_dir_all(&root).expect("create folder");
+        let before = root.join("before.bin");
+        write_file(&before, &[7; 64]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("open index");
+        scan_into_index(&root, &mut writer);
+
+        let original_id: i64 = writer
+            .connection()
+            .query_row("SELECT id FROM files", [], |row| row.get(0))
+            .expect("read the file row");
+        // Something only the row knows, standing in for every ontology edge
+        // that would be orphaned by a delete-and-insert.
+        writer
+            .connection()
+            .execute(
+                "UPDATE files SET full_hash = 'kept', hash_state = 4 WHERE id = ?1",
+                params![original_id],
+            )
+            .expect("record a digest");
+
+        let after = root.join("after.bin");
+        fs::rename(&before, &after).expect("rename the file");
+        scan_into_index(&root, &mut writer);
+
+        let rows: Vec<(i64, String, Option<i64>, Option<String>)> = writer
+            .connection()
+            .prepare("SELECT id, path, deleted_at, full_hash FROM files")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+
+        assert_eq!(rows.len(), 1, "a rename must not create a second row: {rows:?}");
+        assert_eq!(rows[0].0, original_id, "the row must keep its identity");
+        assert_eq!(rows[0].1, path_to_string(&after));
+        assert_eq!(rows[0].2, None, "the file did not go anywhere");
+        assert_eq!(
+            rows[0].3.as_deref(),
+            Some("kept"),
+            "a move does not change the contents, so the digest stands"
+        );
+        cleanup(&root);
+    }
+
+    /// Two paths for one object are a hard link, not a move. Merging them would
+    /// invent a rename out of two files that both still exist.
+    #[test]
+    fn one_object_at_two_live_paths_is_not_treated_as_a_rename() {
+        let root = test_root("not-a-rename");
+        fs::create_dir_all(&root).expect("create folder");
+        let a = root.join("a.bin");
+        write_file(&a, &[3; 32]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("open index");
+        scan_into_index(&root, &mut writer);
+
+        // A second name for the same object, alongside the first.
+        let b = root.join("b.bin");
+        fs::hard_link(&a, &b).expect("NTFS and every Linux filesystem here support hard links");
+        scan_into_index(&root, &mut writer);
+
+        let live: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count live files");
+        assert_eq!(live, 2, "both names still exist, so both rows must");
         cleanup(&root);
     }
 
