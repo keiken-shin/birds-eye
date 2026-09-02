@@ -19,8 +19,10 @@ use birds_eye::native::api::{
     cleanup_plan, execute_cleanup_plan, list_cleanup_candidates, recently_cleaned_log,
     restore_from_cleanup_log, run_ontology_enrichment, scan_coverage, CleanupPlanRequest,
     ExecuteCleanupPlanRequest, RecentlyCleanedRequest, RestoreCleanupRequest,
-    RunOntologyEnrichmentRequest, ScanCoverageRequest,
+    stage_item, staged_items, RunOntologyEnrichmentRequest, ScanCoverageRequest, StageItemRequest,
+    StagedItemsRequest,
 };
+use birds_eye::ontology::staging::NewStagedItem;
 use birds_eye::native::jobs::{JobStatusDto, ScanJobManager, StartScanJobRequest};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
@@ -311,5 +313,47 @@ fn a_file_keeps_its_identity_and_its_evidence_across_the_whole_lifecycle() {
         entities.len(),
         1,
         "one file must have one entity, not one per path it has ever had: {entities:#?}"
+    );
+}
+
+/// Staging remembers a path. A rename after staging leaves the basket pointing
+/// at a name that no longer exists, and nothing reconciles it.
+#[test]
+fn a_staged_file_survives_being_renamed_underneath_the_basket() {
+    let rig = Rig::new("staged-rename");
+    let target = rig.write("photos/keep.jpg", &vec![1u8; 50_000]);
+    rig.write("photos/other.jpg", &vec![2u8; 50_000]);
+    rig.scan();
+
+    let row = rig.row(&target).expect("indexed");
+    stage_item(StageItemRequest {
+        index_path: rig.index.clone(),
+        item: NewStagedItem {
+            kind: "file".to_string(),
+            path: target.to_string_lossy().replace('/', "\\"),
+            file_id: Some(row.0),
+            name: "keep.jpg".to_string(),
+            bytes: 50_000,
+            verdict: None,
+            reason: None,
+            group_name: None,
+            note: None,
+        },
+    })
+    .expect("stage");
+
+    let renamed = rig.root.join("photos/keep-2026.jpg");
+    std::fs::rename(&target, &renamed).expect("rename");
+    rig.scan();
+
+    let staged = staged_items(StagedItemsRequest {
+        index_path: rig.index.clone(),
+    })
+    .expect("staged");
+    assert_eq!(staged.len(), 1, "the basket still holds one thing");
+    assert_eq!(
+        staged[0].path,
+        renamed.to_string_lossy().replace('/', "\\"),
+        "the basket must follow the file, not keep pointing at a name that is gone"
     );
 }

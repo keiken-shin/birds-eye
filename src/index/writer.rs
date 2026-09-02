@@ -1339,6 +1339,18 @@ impl IndexWriter {
             [],
         )?;
 
+        // The staging basket remembers a path too, so a file renamed after it was
+        // staged left the basket pointing at a name that no longer exists.
+        // Same OR IGNORE reasoning: `path` is unique, and a collision means
+        // something else is already staged there.
+        self.connection.execute(
+            "UPDATE OR IGNORE ontology_staged_items
+             SET path = (SELECT path FROM _renames WHERE old_id = ontology_staged_items.file_id),
+                 name = (SELECT name FROM _renames WHERE old_id = ontology_staged_items.file_id)
+             WHERE file_id IN (SELECT old_id FROM _renames)",
+            [],
+        )?;
+
         self.connection.execute("DROP TABLE _renames", [])?;
         Ok(())
     }
