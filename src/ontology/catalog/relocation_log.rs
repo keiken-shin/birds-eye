@@ -12,6 +12,7 @@
 //! out loud rather than guessing.
 
 use crate::ontology::catalog::executor::Mover;
+use crate::ontology::fs_identity::modified_secs;
 use crate::ontology::OntologyError;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -248,14 +249,6 @@ fn identity_of(path: &Path) -> (i64, Option<i64>) {
         Ok(meta) => (meta.len() as i64, modified_secs(&meta)),
         Err(_) => (0, None),
     }
-}
-
-fn modified_secs(meta: &std::fs::Metadata) -> Option<i64> {
-    meta.modified()
-        .ok()?
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_secs() as i64)
 }
 
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<RelocationLogEntry> {

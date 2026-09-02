@@ -12,6 +12,7 @@ pub mod discoveries_resolve;
 pub mod enabled;
 pub mod entities;
 pub mod errors;
+pub mod fs_identity;
 pub mod negative;
 pub mod orchestrator;
 pub mod pinning;

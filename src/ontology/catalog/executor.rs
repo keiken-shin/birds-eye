@@ -2,6 +2,7 @@
 
 use crate::ontology::catalog::plans::{plan_items, set_item_status, set_plan_status};
 use crate::ontology::catalog::relocation_log::{abandon_move, complete_move, log_move_pending};
+use crate::ontology::fs_identity::unchanged_at;
 use crate::ontology::OntologyError;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
@@ -95,20 +96,31 @@ pub fn execute_plan_with(
         // this same session marks sources deleted without inserting destinations.
         // `Option<Option<i64>>` — outer None means no row, inner Some means the
         // row is already soft-deleted. Both disqualify the item.
-        let row: Option<Option<i64>> = conn
+        let row: Option<(Option<i64>, i64, Option<i64>)> = conn
             .query_row(
-                "SELECT deleted_at FROM files WHERE id = ?1",
+                "SELECT deleted_at, size, modified_at FROM files WHERE id = ?1",
                 params![item.file_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
 
-        if !matches!(row, Some(None)) {
+        let Some((None, reviewed_size, reviewed_modified)) = row else {
             set_item_status(conn, item.id, "skipped", Some("source no longer in the index"))?;
             continue;
-        }
-        if !std::path::Path::new(&item.from_path).exists() {
-            set_item_status(conn, item.id, "skipped", Some("source no longer on disk"))?;
+        };
+
+        // Existence is not identity. If the reviewed file was replaced between
+        // plan and execute, moving the replacement files something the user
+        // never chose to file, and writes an undo row naming the wrong object.
+        // The reason is passed through rather than flattened to "no longer on
+        // disk", because "it vanished" and "it changed" need different actions
+        // from the person reading it.
+        if let Err(reason) = unchanged_at(
+            std::path::Path::new(&item.from_path),
+            reviewed_size,
+            reviewed_modified,
+        ) {
+            set_item_status(conn, item.id, "skipped", Some(&reason))?;
             continue;
         }
 
@@ -241,15 +253,19 @@ mod tests {
         conn
     }
 
-    /// Writes a REAL file and indexes it. `execute_plan_with` stats the disk at
-    /// execute time, so a row pointing at a path that does not exist is skipped —
-    /// these fixtures must be real.
+    /// Writes a REAL file and indexes it with the size and last-modified it
+    /// actually has. `execute_plan_with` re-checks the file's identity at
+    /// execute time, so a row pointing at a path that does not exist -- or at a
+    /// different object than the one reviewed -- is skipped. These fixtures must
+    /// be real, and their recorded identity must be the real one.
     fn seed_file(conn: &Connection, id: i64, path: &std::path::Path) {
         std::fs::write(path, [7u8; 10]).expect("write fixture file");
+        let meta = std::fs::metadata(path).expect("stat fixture file");
+        let modified = crate::ontology::fs_identity::modified_secs(&meta);
         conn.execute(
-            "INSERT INTO files (id, folder_id, path, name, size, media_kind, indexed_at)
-             VALUES (?1, 1, ?2, 'f.exe', 10, 'installer', 0)",
-            rusqlite::params![id, path.to_string_lossy()],
+            "INSERT INTO files (id, folder_id, path, name, size, modified_at, media_kind, indexed_at)
+             VALUES (?1, 1, ?2, 'f.exe', 10, ?3, 'installer', 0)",
+            rusqlite::params![id, path.to_string_lossy(), modified],
         )
         .expect("index fixture file");
     }
@@ -423,6 +439,49 @@ mod tests {
         assert_eq!(result.moved, 0);
         assert!(mover.calls.borrow().is_empty());
         assert_eq!(plan_items(&conn, plan_id).unwrap()[0].status, "skipped");
+        cleanup(&root);
+    }
+
+    /// Same-path, same-size, different file. Existence would wave this through
+    /// and file a document the user never chose to file.
+    #[test]
+    fn skips_an_item_whose_file_was_replaced_since_review() {
+        let root = test_root("skips-replaced");
+        let from = root.join("swapped.exe");
+        let mut conn = migrated_conn();
+        seed_file(&conn, 1, &from);
+
+        // Rewrite with the same byte count, then age the indexed stamp so the
+        // recorded identity and the file on disk disagree without the test
+        // depending on filesystem timestamp resolution.
+        std::fs::write(&from, [9u8; 10]).expect("rewrite fixture");
+        conn.execute("UPDATE files SET modified_at = modified_at - 120 WHERE id = 1", [])
+            .unwrap();
+
+        let plan_id = create_plan(
+            &conn,
+            &[PlanItem {
+                file_id: 1,
+                from_path: from.to_string_lossy().to_string(),
+                to_path: root.join("dest").join("swapped.exe").to_string_lossy().to_string(),
+                size: 10,
+                discovery_id: None,
+            }],
+        )
+        .unwrap();
+
+        let mover = FakeMover { fail: vec![], calls: RefCell::new(vec![]) };
+        let result = execute_plan_with(&mut conn, plan_id, &mover).unwrap();
+
+        assert_eq!(result.moved, 0);
+        assert!(mover.calls.borrow().is_empty(), "the replacement must never be moved");
+        let item = &plan_items(&conn, plan_id).unwrap()[0];
+        assert_eq!(item.status, "skipped");
+        assert!(
+            item.note.as_deref().unwrap_or("").contains("changed since it was reviewed"),
+            "the note must say why: {:?}",
+            item.note
+        );
         cleanup(&root);
     }
 

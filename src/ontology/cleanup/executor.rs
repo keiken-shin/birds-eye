@@ -8,6 +8,7 @@
 use crate::ontology::attrs::resolve_attr;
 use crate::ontology::cleanup::plans::{candidates_for_plan, get_plan, set_plan_status};
 use crate::ontology::cleanup::{unix_now, CleanupCandidate, GatingFacts};
+use crate::ontology::fs_identity::unchanged_at;
 use crate::ontology::vocabulary::keys;
 use crate::ontology::OntologyError;
 use rusqlite::{params, Connection};
@@ -76,6 +77,21 @@ pub fn execute_plan_with(
     let mut failed = Vec::new();
 
     for cand in &candidates {
+        // The predicate above re-decided whether this *row* still qualifies. It
+        // says nothing about the object currently sitting at that path, and the
+        // path is all the recycle-bin call gets. Between review and execute the
+        // file can be replaced by a different one with the same name, and
+        // trashing that is unrecoverable from the user's point of view because
+        // they never saw it.
+        if let Err(reason) = unchanged_at(Path::new(&cand.path), cand.size, cand.modified_at) {
+            failed.push(CleanupFailure {
+                file_id: cand.file_id,
+                path: cand.path.clone(),
+                reason,
+            });
+            continue;
+        }
+
         let gating = gating_facts_for(conn, cand)?;
         let gating_json = serde_json::to_string(&gating)?;
 
@@ -204,11 +220,78 @@ mod tests {
         conn
     }
 
-    fn add_scratch_file(conn: &Connection, id: i64, path: &str, size: i64) {
+    /// Fixtures are real files on disk, not rows invented in SQLite.
+    ///
+    /// The executor now refuses to trash a path whose object no longer matches
+    /// the reviewed row, so a fixture that exists only in the database would
+    /// fail every test for the wrong reason -- and, worse, a fixture that
+    /// exists only in the database can never catch the swap this guard is for.
+    struct Fixture {
+        root: std::path::PathBuf,
+    }
+
+    impl Fixture {
+        fn new(name: &str) -> Self {
+            let root = std::env::temp_dir()
+                .join("birdseye-cleanup-exec")
+                .join(format!(
+                    "{name}-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                ));
+            std::fs::create_dir_all(&root).expect("create fixture root");
+            Self { root }
+        }
+
+        /// Writes `size` bytes and indexes the file with the size and
+        /// last-modified it actually has on disk.
+        fn add_scratch(&self, conn: &Connection, id: i64, name: &str, size: usize) -> String {
+            let path = self.root.join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("create fixture dir");
+            }
+            std::fs::write(&path, vec![b'x'; size]).expect("write fixture");
+            let meta = std::fs::metadata(&path).expect("stat fixture");
+            let modified = crate::ontology::fs_identity::modified_secs(&meta);
+            let path = path.display().to_string();
+            add_scratch_file(conn, id, &path, meta.len() as i64, modified);
+            path
+        }
+
+        /// Rewrites a fixture with the same byte count, leaving the indexed
+        /// last-modified stale. This is the swap the guard exists to catch.
+        fn rewrite_same_size(&self, conn: &Connection, id: i64, name: &str, size: usize) {
+            let path = self.root.join(name);
+            std::fs::write(&path, vec![b'y'; size]).expect("rewrite fixture");
+            // Do not depend on filesystem timestamp resolution or on sleeping:
+            // age the indexed stamp instead, which is the same disagreement.
+            conn.execute(
+                "UPDATE files SET modified_at = modified_at - 120 WHERE id = ?1",
+                rusqlite::params![id],
+            )
+            .unwrap();
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn add_scratch_file(
+        conn: &Connection,
+        id: i64,
+        path: &str,
+        size: i64,
+        modified_at: Option<i64>,
+    ) {
         conn.execute(
-            "INSERT INTO files (id, folder_id, path, name, size, indexed_at)
-             VALUES (?1, 1, ?2, ?2, ?3, 0)",
-            rusqlite::params![id, path, size],
+            "INSERT INTO files (id, folder_id, path, name, size, modified_at, indexed_at)
+             VALUES (?1, 1, ?2, ?2, ?3, ?4, 0)",
+            rusqlite::params![id, path, size, modified_at],
         )
         .unwrap();
         let eid = upsert_entity(conn, EntityKind::File, path, Some(id), None, None)
@@ -261,8 +344,9 @@ mod tests {
     #[test]
     fn execute_trashes_candidates_and_logs_them() {
         let mut conn = migrated_conn();
-        add_scratch_file(&conn, 1, "/root/dist/a.js", 100);
-        add_scratch_file(&conn, 2, "/root/dist/b.js", 200);
+        let fx = Fixture::new("logs");
+        fx.add_scratch(&conn, 1, "a.js", 100);
+        fx.add_scratch(&conn, 2, "b.js", 200);
         let plan_id = create_plan(&conn, &CleanupScope::default()).unwrap();
 
         let trasher = RecordingTrasher::new();
@@ -301,11 +385,12 @@ mod tests {
     fn per_file_failure_is_isolated() {
         // Constitutional Defense #11.
         let mut conn = migrated_conn();
-        add_scratch_file(&conn, 1, "/root/dist/a.js", 100);
-        add_scratch_file(&conn, 2, "/root/dist/b.js", 200);
+        let fx = Fixture::new("isolated");
+        let a = fx.add_scratch(&conn, 1, "a.js", 100);
+        fx.add_scratch(&conn, 2, "b.js", 200);
         let plan_id = create_plan(&conn, &CleanupScope::default()).unwrap();
 
-        let trasher = FlakyTrasher { fail_path: "/root/dist/a.js".to_string() };
+        let trasher = FlakyTrasher { fail_path: a };
         let result = execute_plan_with(&mut conn, plan_id, &trasher, 90).unwrap();
 
         assert_eq!(result.cleaned, 1, "the good file still gets cleaned");
@@ -326,7 +411,8 @@ mod tests {
     #[test]
     fn gating_facts_snapshot_captures_reason_and_role() {
         let mut conn = migrated_conn();
-        add_scratch_file(&conn, 1, "/root/dist/a.js", 100);
+        let fx = Fixture::new("gating");
+        fx.add_scratch(&conn, 1, "a.js", 100);
         let plan_id = create_plan(&conn, &CleanupScope::default()).unwrap();
 
         let trasher = RecordingTrasher::new();
@@ -338,6 +424,67 @@ mod tests {
         let gating: GatingFacts = serde_json::from_str(&gating_json).unwrap();
         assert_eq!(gating.reason, "scratch");
         assert_eq!(gating.role.as_deref(), Some("scratch"));
+    }
+
+    /// The whole point of the guard: same path, same byte count, different
+    /// file. Path equality is not object equality and the recycle bin only
+    /// gets the path.
+    #[test]
+    fn a_file_replaced_since_review_is_not_trashed() {
+        let mut conn = migrated_conn();
+        let fx = Fixture::new("swapped");
+        let a = fx.add_scratch(&conn, 1, "a.js", 100);
+        fx.add_scratch(&conn, 2, "b.js", 200);
+        let plan_id = create_plan(&conn, &CleanupScope::default()).unwrap();
+
+        fx.rewrite_same_size(&conn, 1, "a.js", 100);
+
+        let trasher = RecordingTrasher::new();
+        let result = execute_plan_with(&mut conn, plan_id, &trasher, 90).unwrap();
+
+        let seen = trasher.seen.lock().unwrap().clone();
+        assert!(!seen.contains(&a), "the replaced file must never reach the recycle bin");
+        assert_eq!(result.cleaned, 1, "the untouched file is still cleaned");
+        assert_eq!(result.failed.len(), 1);
+        assert_eq!(result.failed[0].file_id, 1);
+        assert!(
+            result.failed[0].reason.contains("changed since it was reviewed"),
+            "the user must be told why: {}",
+            result.failed[0].reason
+        );
+
+        // A refused file is not marked deleted and leaves no log row -- nothing
+        // happened to it, so nothing may claim it did.
+        let deleted: i64 = conn
+            .query_row("SELECT COUNT(*) FROM files WHERE id=1 AND deleted_at IS NOT NULL", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(deleted, 0);
+        let logged: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_cleanup_log WHERE file_id=1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(logged, 0);
+    }
+
+    /// A file that vanished between review and execute is reported, not
+    /// silently counted as cleaned.
+    #[test]
+    fn a_file_that_vanished_since_review_is_reported() {
+        let mut conn = migrated_conn();
+        let fx = Fixture::new("vanished");
+        let a = fx.add_scratch(&conn, 1, "a.js", 100);
+        let plan_id = create_plan(&conn, &CleanupScope::default()).unwrap();
+        std::fs::remove_file(&a).expect("delete the fixture out from under the plan");
+
+        let trasher = RecordingTrasher::new();
+        let result = execute_plan_with(&mut conn, plan_id, &trasher, 90).unwrap();
+
+        assert_eq!(result.cleaned, 0);
+        assert_eq!(result.failed.len(), 1);
+        assert!(
+            result.failed[0].reason.contains("no longer at this path"),
+            "{}",
+            result.failed[0].reason
+        );
     }
 
     #[test]
