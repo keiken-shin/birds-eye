@@ -262,8 +262,36 @@ pub struct TreemapLensFolderDto {
 pub fn trash_files(request: TrashFilesRequest) -> TrashFilesResponse {
     let mut failed = Vec::new();
     let mut trashed = Vec::new();
+
+    // This is the path a duplicate takes to the recycle bin: the person picked it
+    // from a list Bird's Eye told them was redundant. For anything above the
+    // eager hashing cap that claim rests on a few hundred kilobytes of sampling,
+    // so the complete comparison happens here, before the bytes move, on just
+    // the files they selected. Refusals are reported per file, exactly like a
+    // recycle-bin failure -- the rest of the batch still goes through.
+    //
+    // Paths the index has no row for are untouched by this: pointing at a file
+    // directly is not a claim Bird's Eye made.
+    let refused: std::collections::HashMap<String, String> = request
+        .index_path
+        .as_ref()
+        .and_then(|index_path| crate::index::open_index_connection(index_path).ok())
+        .map(|conn| {
+            crate::ontology::duplicate_guard::refusals(&conn, &request.paths)
+                .into_iter()
+                .collect()
+        })
+        .unwrap_or_default();
+
     // We call delete() per path (not delete_all) so one failure does not abort the rest.
     for path in &request.paths {
+        if let Some(reason) = refused.get(path) {
+            failed.push(TrashFailure {
+                path: path.clone(),
+                reason: reason.clone(),
+            });
+            continue;
+        }
         if let Err(error) = trash::delete(path) {
             failed.push(TrashFailure {
                 path: path.clone(),
@@ -2113,6 +2141,84 @@ mod tests {
         });
         assert_eq!(response.failed.len(), 1);
         assert_eq!(response.failed[0].path, "/this/path/does/not/exist/xyz.bin");
+    }
+
+    /// A duplicate that only ever matched on sampled parts of the file must not
+    /// reach the recycle bin. Nothing here touches the real bin: the refusal
+    /// happens before `trash::delete` is ever called, which is exactly the
+    /// property under test.
+    #[test]
+    fn trash_files_refuses_a_duplicate_that_is_not_really_a_duplicate() {
+        use crate::index::schema::ALL_MIGRATIONS;
+
+        let root = test_root("trash-sampled-lie");
+        fs::create_dir_all(&root).expect("create root");
+        let index_path = root.join("index.sqlite");
+
+        // Same length, same head/middle/tail, different in between -- a sampled
+        // hash cannot tell these apart, and above the eager cap it never gets to
+        // try anything stronger.
+        let size = 2 * 1024 * 1024;
+        let mut left = vec![0_u8; size];
+        for (i, byte) in left.iter_mut().enumerate() {
+            *byte = (i % 251) as u8;
+        }
+        let mut right = left.clone();
+        right[size / 8] ^= 0xFF;
+
+        let a = root.join("a.bin");
+        let b = root.join("b.bin");
+        write_file(&a, &left);
+        write_file(&b, &right);
+
+        {
+            let conn = rusqlite::Connection::open(&index_path).expect("open index");
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).expect("migrate");
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, ?1, 'root', 0, 0)",
+                rusqlite::params![root.to_string_lossy()],
+            )
+            .unwrap();
+            for (id, path) in [(1_i64, &a), (2_i64, &b)] {
+                let meta = fs::metadata(path).unwrap();
+                let modified = crate::ontology::fs_identity::modified_secs(&meta);
+                conn.execute(
+                    "INSERT INTO files (id, folder_id, path, name, size, modified_at, indexed_at)
+                     VALUES (?1, 1, ?2, 'f.bin', ?3, ?4, 0)",
+                    rusqlite::params![id, path.to_string_lossy(), size as i64, modified],
+                )
+                .unwrap();
+            }
+            // 0.80 is what the group builder assigns to a sampled-only match.
+            conn.execute(
+                "INSERT INTO duplicate_groups (id, size, confidence, reclaimable_bytes, created_at)
+                 VALUES (1, ?1, 0.80, ?1, 0)",
+                rusqlite::params![size as i64],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO duplicate_group_files (group_id, file_id) VALUES (1, 1), (1, 2)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let response = trash_files(TrashFilesRequest {
+            paths: vec![a.to_string_lossy().into_owned()],
+            index_path: Some(index_path),
+        });
+
+        assert_eq!(response.failed.len(), 1, "the file must be refused");
+        assert!(
+            response.failed[0].reason.contains("not identical"),
+            "the person must be told why: {}",
+            response.failed[0].reason
+        );
+        assert!(a.exists(), "a refused file must still be on disk");
+        cleanup(&root);
     }
 
     #[test]

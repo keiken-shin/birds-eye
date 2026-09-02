@@ -4,6 +4,8 @@ use crate::index::writer::{FinalizationProgress, IndexError};
 
 mod xxh3;
 
+pub use xxh3::full_file_hash;
+
 /// Compute progressive XXH3 sample and full hashes for duplicate candidates,
 /// then leave duplicate-group rebuilding to the caller. `cancel` is polled per
 /// file so a cancelled scan stops hashing promptly. Files whose hashing fails

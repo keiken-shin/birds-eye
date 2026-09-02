@@ -303,7 +303,9 @@ fn sample_file_hash(path: &Path, size: u64) -> std::io::Result<String> {
     hash_file_chunks(path, size, &plan)
 }
 
-fn full_file_hash(path: &Path) -> std::io::Result<String> {
+/// Complete-content digest. Public because verification before a destructive
+/// action needs it on demand, for files far above the eager hashing cap.
+pub fn full_file_hash(path: &Path) -> std::io::Result<String> {
     const BLOCK_SIZE: usize = 128 * 1024;
 
     let mut file = File::open(path)?;

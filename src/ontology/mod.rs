@@ -8,6 +8,7 @@ pub mod attrs;
 pub mod catalog;
 pub mod cleanup;
 pub mod discoveries;
+pub mod duplicate_guard;
 pub mod discoveries_resolve;
 pub mod enabled;
 pub mod entities;
