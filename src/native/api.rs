@@ -950,6 +950,16 @@ pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse,
             .map_err(|error| format!("{error:?}"))?;
 
         if let ScanEvent::Finished(report) = event {
+            // The walk only records what a file claims about itself. Until the
+            // candidates are hashed and grouped, every file in this index has a
+            // null sample hash and there are no duplicate groups at all -- an
+            // index that answers "nothing here is a copy of anything" to every
+            // question. A function called `scan_to_index` has to hand back an
+            // index that has been asked the question, not one that was never
+            // asked it.
+            writer
+                .refine_duplicates()
+                .map_err(|error| format!("{error:?}"))?;
             return Ok(ScanToIndexResponse {
                 files_scanned: report.stats.files_scanned,
                 folders_scanned: report.stats.folders_scanned,
@@ -957,6 +967,9 @@ pub fn scan_to_index(request: ScanToIndexRequest) -> Result<ScanToIndexResponse,
             });
         }
 
+        // A cancelled scan is deliberately left unrefined. Grouping a partial
+        // walk would name duplicates from a tree that was never finished
+        // reading, which is worse than naming none.
         if let ScanEvent::Cancelled(stats) = event {
             return Ok(ScanToIndexResponse {
                 files_scanned: stats.files_scanned,
@@ -1840,6 +1853,39 @@ mod tests {
     use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// The name promises an index. An index with no sample hashes and no
+    /// duplicate groups answers "nothing here is a copy" to every question a
+    /// caller can ask it, which is a wrong answer dressed as a finished one.
+    #[test]
+    fn the_index_it_returns_has_actually_been_asked_about_duplicates() {
+        let root = test_root("scan-to-index-refines");
+        let index_path = root.join("index.sqlite");
+        fs::create_dir_all(root.join("data")).expect("failed to create folders");
+        write_file(&root.join("data").join("left.bin"), &[9; 4096]);
+        write_file(&root.join("data").join("right.bin"), &[9; 4096]);
+
+        scan_to_index(ScanToIndexRequest {
+            root: root.join("data"),
+            index_path: index_path.clone(),
+            scan_strategy: None,
+        })
+        .expect("scan command failed");
+
+        let conn = crate::index::open_index_connection(&index_path).expect("open index");
+        let unhashed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE sample_hash IS NULL AND deleted_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count unhashed");
+        let groups: i64 = conn
+            .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |r| r.get(0))
+            .expect("count groups");
+        assert_eq!(unhashed, 0, "every candidate must have been hashed");
+        assert_eq!(groups, 1, "two identical files are one duplicate group");
+    }
+
     #[test]
     fn command_shaped_scan_and_query_round_trip() {
         let root = test_root("native");
@@ -1854,10 +1900,6 @@ mod tests {
             scan_strategy: Some("smart".to_owned()),
         })
         .expect("scan command failed");
-        IndexWriter::open(index_path.clone())
-            .expect("failed to open index")
-            .refine_duplicates()
-            .expect("failed to refine duplicates");
         let overview = query_index_overview(IndexQueryRequest {
             index_path,
             limit: 5,
@@ -1929,10 +1971,6 @@ mod tests {
             scan_strategy: None,
         })
         .expect("scan command failed");
-        IndexWriter::open(index_path.clone())
-            .expect("failed to open index")
-            .refine_duplicates()
-            .expect("failed to refine duplicates");
         let overview = query_index_overview(IndexQueryRequest {
             index_path: index_path.clone(),
             limit: 5,
