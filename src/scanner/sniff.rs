@@ -65,8 +65,9 @@ const CLAIMS_IMAGE: &[&str] = &[
 /// Is this file worth opening to find out what it is?
 pub fn worth_sniffing(extension: Option<&str>) -> bool {
     match extension {
-        None => true,
-        Some(ext) if ext.is_empty() => true,
+        // No extension, or an empty one: the file makes no claim, so it is
+        // invisible to everything that keys on one until the bytes are read.
+        None | Some("") => true,
         Some(ext) => CLAIMS_IMAGE.contains(&ext.to_ascii_lowercase().as_str()),
     }
 }
