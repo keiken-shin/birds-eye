@@ -7,9 +7,17 @@
 //! afford to collect.
 //!
 //! Windows will answer the same question for a whole folder at once. One handle
-//! on the folder, then `FileIdBothDirectoryInfo` returns the id of every child
+//! on the folder, then `FileIdExtdDirectoryInfo` returns the id of every child
 //! alongside its name. Measured on the same tree: 2.1 microseconds per entry,
 //! about a seventh of the walk. Identity stops being a luxury.
+//!
+//! There are two listing classes and only one of them tells the whole truth.
+//! `FileIdBothDirectoryInfo` carries a 64-bit id, which is the entire id on
+//! NTFS but a truncation on ReFS, where two different objects can then land on
+//! the same recorded value. `FileIdExtdDirectoryInfo` carries the full 128 bits
+//! and is what the per-file call returns, so it is asked for first. The older
+//! class is kept as the fallback for anything that refuses the newer one, such
+//! as some network redirectors.
 //!
 //! The same record carries the allocated size, which is the number of bytes the
 //! object actually occupies. For a sparse or compressed file that is nothing
@@ -42,12 +50,28 @@ pub type DirFacts = HashMap<OsString, DirFact>;
 
 #[cfg(windows)]
 pub fn dir_facts(dir: &Path) -> DirFacts {
+    // The wide listing is Windows 8 and later, and a network redirector or an
+    // older filesystem may not implement it. Asking for it first costs one
+    // failed call on the machines that cannot answer it.
+    facts_via(dir, true)
+        .or_else(|| facts_via(dir, false))
+        .unwrap_or_default()
+}
+
+/// One pass over a folder using one of the two listing classes.
+///
+/// `None` means the class itself was refused, which is the caller's cue to try
+/// the other one. `Some(map)` means the folder answered, and an empty map then
+/// means an empty folder.
+#[cfg(windows)]
+fn facts_via(dir: &Path, wide: bool) -> Option<DirFacts> {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FileIdBothDirectoryInfo, GetFileInformationByHandleEx,
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_BOTH_DIR_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ,
-        FILE_SHARE_WRITE, OPEN_EXISTING,
+        CreateFileW, FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo,
+        FileIdExtdDirectoryInfo, FileIdExtdDirectoryRestartInfo, GetFileInformationByHandleEx,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_BOTH_DIR_INFO, FILE_ID_EXTD_DIR_INFO,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
 
     /// Listing a directory's entries needs more than the "tell me what you are"
@@ -57,12 +81,10 @@ pub fn dir_facts(dir: &Path) -> DirFacts {
     /// Large folders simply take more calls.
     const BUFFER_BYTES: usize = 64 * 1024;
 
-    let mut out = DirFacts::new();
-    let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
-
+    let wide_path: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
     let handle = unsafe {
         CreateFileW(
-            wide.as_ptr(),
+            wide_path.as_ptr(),
             FILE_LIST_DIRECTORY,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             std::ptr::null(),
@@ -72,7 +94,7 @@ pub fn dir_facts(dir: &Path) -> DirFacts {
         )
     };
     if handle == INVALID_HANDLE_VALUE {
-        return out;
+        return None;
     }
 
     // The volume serial is not in the per-entry record, so it is asked once for
@@ -82,60 +104,91 @@ pub fn dir_facts(dir: &Path) -> DirFacts {
         Ok(id) => id.volume,
         Err(_) => {
             unsafe { CloseHandle(handle) };
-            return out;
+            return None;
         }
     };
 
+    let mut out = DirFacts::new();
     let mut buffer = vec![0_u8; BUFFER_BYTES];
+    let mut first = true;
     loop {
-        let more = unsafe {
+        // The restart class starts the enumeration; the plain one continues it.
+        // Being explicit about the first call means a fallback attempt never
+        // resumes a position left behind by the class that was refused.
+        let class = match (wide, first) {
+            (true, true) => FileIdExtdDirectoryRestartInfo,
+            (true, false) => FileIdExtdDirectoryInfo,
+            (false, true) => FileIdBothDirectoryRestartInfo,
+            (false, false) => FileIdBothDirectoryInfo,
+        };
+        let answered = unsafe {
             GetFileInformationByHandleEx(
                 handle,
-                FileIdBothDirectoryInfo,
+                class,
                 buffer.as_mut_ptr().cast(),
                 buffer.len() as u32,
             ) != 0
         };
-        // No more entries, or a folder that stopped answering part-way. Either
-        // way what has been collected so far is true.
-        if !more {
-            break;
+        if !answered {
+            unsafe { CloseHandle(handle) };
+            // Refused on the very first call: the class is not available here,
+            // and the caller should try the other one. Refused later means the
+            // listing simply ended, and what was collected is true.
+            return if first { None } else { Some(out) };
         }
+        first = false;
 
         let mut offset = 0_usize;
         loop {
+            let base = unsafe { buffer.as_ptr().add(offset) };
             // SAFETY: the buffer holds a chain of variable-length records
             // written by the call above; NextEntryOffset walks it and is zero on
-            // the last one.
-            let entry = unsafe { &*(buffer.as_ptr().add(offset) as *const FILE_ID_BOTH_DIR_INFO) };
-            let name_units = entry.FileNameLength as usize / std::mem::size_of::<u16>();
-            let name = unsafe { std::slice::from_raw_parts(entry.FileName.as_ptr(), name_units) };
-            let name = OsString::from_wide(name);
-            if name != "." && name != ".." {
-                out.insert(
-                    name,
+            // the last one. `wide` decides which layout was written, and it is
+            // the same value that chose the class.
+            let (next, name_units, name_ptr, fact) = if wide {
+                let entry = unsafe { &*(base as *const FILE_ID_EXTD_DIR_INFO) };
+                (
+                    entry.NextEntryOffset,
+                    entry.FileNameLength as usize / std::mem::size_of::<u16>(),
+                    entry.FileName.as_ptr(),
                     DirFact {
                         object_id: ObjectId {
                             volume,
-                            // FileId here is the 64-bit index. A ReFS volume
-                            // needs the 128-bit form, which only the per-file
-                            // call gives, so callers on ReFS should expect the
-                            // narrow id. Tracked as #63.
+                            // The whole id, which is what ReFS actually uses.
+                            id: u128::from_le_bytes(entry.FileId.Identifier),
+                        },
+                        allocated: entry.AllocationSize.max(0) as u64,
+                    },
+                )
+            } else {
+                let entry = unsafe { &*(base as *const FILE_ID_BOTH_DIR_INFO) };
+                (
+                    entry.NextEntryOffset,
+                    entry.FileNameLength as usize / std::mem::size_of::<u16>(),
+                    entry.FileName.as_ptr(),
+                    DirFact {
+                        object_id: ObjectId {
+                            volume,
+                            // Only 64 bits are on offer in this record. On NTFS
+                            // that is the whole id; on ReFS it is a truncation,
+                            // which is why this class is the fallback.
                             id: entry.FileId as u64 as u128,
                         },
                         allocated: entry.AllocationSize.max(0) as u64,
                     },
-                );
+                )
+            };
+            let name =
+                OsString::from_wide(unsafe { std::slice::from_raw_parts(name_ptr, name_units) });
+            if name != "." && name != ".." {
+                out.insert(name, fact);
             }
-            if entry.NextEntryOffset == 0 {
+            if next == 0 {
                 break;
             }
-            offset += entry.NextEntryOffset as usize;
+            offset += next as usize;
         }
     }
-
-    unsafe { CloseHandle(handle) };
-    out
 }
 
 /// Everywhere else, one `lstat` per file is already cheap, so there is nothing
@@ -204,6 +257,41 @@ mod tests {
             fact.allocated < logical / 100,
             "allocated {} should be a fraction of logical {logical}",
             fact.allocated
+        );
+    }
+
+    /// The two listing classes read different record layouts. On NTFS the id is
+    /// only 64 bits wide, so both must produce exactly the same map -- which is
+    /// the only place the wide parse can be checked without a ReFS volume. If
+    /// the wide offsets were wrong, the names or the sizes would disagree here.
+    #[cfg(windows)]
+    #[test]
+    fn the_wide_and_narrow_listings_describe_the_same_folder() {
+        let dir = fixture("both-classes");
+        for name in ["a.bin", "b.bin", "a much longer name.bin"] {
+            std::fs::write(dir.join(name), name.as_bytes()).unwrap();
+        }
+        std::fs::create_dir(dir.join("sub")).unwrap();
+
+        let wide = facts_via(&dir, true).expect("the extended class must answer on NTFS");
+        let narrow = facts_via(&dir, false).expect("the older class must answer");
+        assert_eq!(wide.len(), 4, "three files and one folder");
+        assert_eq!(
+            wide, narrow,
+            "on a 64-bit-id volume the two classes must agree exactly"
+        );
+    }
+
+    /// Proof that the wide class is the one actually used, rather than the
+    /// fallback quietly carrying every scan on this machine.
+    #[cfg(windows)]
+    #[test]
+    fn the_wide_class_is_the_one_that_answers_here() {
+        let dir = fixture("wide-first");
+        std::fs::write(dir.join("a.bin"), b"a").unwrap();
+        assert!(
+            facts_via(&dir, true).is_some(),
+            "if this fails the app is silently running on truncated ids"
         );
     }
 
