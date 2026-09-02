@@ -540,3 +540,47 @@ fn a_file_is_typed_by_its_bytes_not_by_the_name_someone_gave_it() {
         "a name that makes no image claim is not worth opening"
     );
 }
+
+/// Pull the drive out mid-life and the index must not conclude that every file
+/// on it was deleted. This reproduces the shape of that: the scan root itself
+/// becomes unreachable between one scan and the next.
+#[test]
+fn a_root_that_has_gone_away_does_not_mark_everything_on_it_deleted() {
+    let rig = Rig::new("root-gone");
+    for i in 0..5 {
+        rig.write(&format!("data/f{i}.bin"), &vec![(i + 1) as u8; 1000]);
+    }
+    rig.scan();
+
+    let live_before: i64 = rig
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(live_before, 5);
+
+    // The whole tree becomes unreachable, the way a removable drive does.
+    let stashed = rig.root.parent().unwrap().join("unplugged");
+    std::fs::rename(&rig.root, &stashed).expect("stash the tree");
+    rig.scan();
+
+    let live_after: i64 = rig
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    // Put it back so the rig can clean up either way.
+    let _ = std::fs::rename(&stashed, &rig.root);
+
+    assert_eq!(
+        live_after, 5,
+        "an unreachable root means unknown, not deleted: {live_after} of 5 files survived"
+    );
+}

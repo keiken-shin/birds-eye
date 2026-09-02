@@ -1381,17 +1381,45 @@ impl IndexWriter {
         // Before deciding anything is gone: a file that moved is not gone.
         self.carry_renamed_files_forward(started_at, &root_text, &root_prefix)?;
 
+        // And before deciding anything is gone: a drive that is not there is
+        // not a drive whose files were deleted.
+        //
+        // Without this, unplugging a removable drive and rescanning marks every
+        // file on it deleted -- the walk finds nothing, so every row looks
+        // stale. The app then reports that hundreds of thousands of files
+        // vanished, drops them from every total, and is confidently wrong until
+        // the drive comes back. "I cannot see it" and "it is gone" are
+        // different facts and only one of them is safe to act on.
+        if std::fs::read_dir(root).is_err() {
+            return Ok(());
+        }
+
+        // The same argument one folder at a time. A subtree that could not be
+        // read during this scan recorded a walk issue; its files were never
+        // looked for, so they cannot be reported as missing. Compared as an
+        // exact prefix ending in a separator, so `C:\photos` does not silently
+        // protect `C:\photos-old`.
+        let scan_id = self.current_scan_session_id()?;
         self.connection.execute(
             "UPDATE files
              SET deleted_at = ?1
              WHERE deleted_at IS NULL
                AND indexed_at < ?2
-               AND (path = ?3 OR path LIKE ?4)",
+               AND (path = ?3 OR path LIKE ?4)
+               AND NOT EXISTS (
+                 SELECT 1 FROM scan_issues si
+                 WHERE si.scan_id = ?5
+                   AND si.phase = 'walk'
+                   AND (files.path = si.path
+                        OR substr(files.path, 1, length(si.path) + 1) = si.path || ?6)
+               )",
             params![
                 now_millis(),
                 started_at,
                 root_text,
-                format!("{root_prefix}%")
+                format!("{root_prefix}%"),
+                scan_id,
+                std::path::MAIN_SEPARATOR.to_string()
             ],
         )?;
         Ok(())
@@ -2648,6 +2676,63 @@ mod tests {
             reclaimable, 2_147_483_648,
             "deleting one copy frees what it occupies, not what it claims"
         );
+    }
+
+    /// A subtree nobody could read during a scan was never looked in, so
+    /// nothing inside it may be reported as gone -- while a file that really
+    /// did go, from a folder that read fine, still is.
+    ///
+    /// Driven directly rather than through a real scan: making a folder
+    /// genuinely unreadable means changing ACLs, which is a worse thing to do
+    /// in a test than losing one layer of realism. The end-to-end case, a whole
+    /// root going away, is covered in tests/lifecycle_trace.rs.
+    #[test]
+    fn files_under_a_folder_that_could_not_be_read_are_not_marked_deleted() {
+        let root = test_root("unreadable-subtree");
+        fs::create_dir_all(root.join("open")).expect("create open");
+        fs::create_dir_all(root.join("closed")).expect("create closed");
+        write_file(&root.join("open/kept.bin"), &[1; 32]);
+        write_file(&root.join("open/removed.bin"), &[2; 32]);
+        write_file(&root.join("closed/hidden.bin"), &[3; 32]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("open index");
+        scan_into_index(&root, &mut writer);
+
+        fs::remove_file(root.join("open/removed.bin")).expect("remove");
+
+        // The second scan records that `closed` could not be walked. Its files
+        // are still on disk but the walk never reached them, which is exactly
+        // the state a permission error or a disconnect leaves behind.
+        writer.start_session(&root).expect("start session");
+        let scan_id = writer.current_scan_session_id().expect("scan id");
+        crate::index::writer::insert_scan_issue(
+            writer.connection(),
+            scan_id,
+            "walk",
+            "denied",
+            &path_to_string(&root.join("closed")),
+            "access is denied",
+        )
+        .expect("record the walk issue");
+        writer
+            .probe_directory(&root.join("open"))
+            .expect("walk the readable half");
+        writer.mark_missing_files_deleted().expect("mark missing");
+
+        let gone: Vec<String> = writer
+            .connection()
+            .prepare("SELECT name FROM files WHERE deleted_at IS NOT NULL ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(
+            gone,
+            vec!["removed.bin".to_string()],
+            "only the file that really went may be reported gone"
+        );
+        cleanup(&root);
     }
 
     #[test]
