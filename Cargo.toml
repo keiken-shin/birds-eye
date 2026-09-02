@@ -13,6 +13,7 @@ regex = "1"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 rayon = "1"
 trash = "3"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "bmp", "webp", "tiff"] }
 
 [target.'cfg(windows)'.dependencies]
 # Restart Manager: name the processes holding a locked file.

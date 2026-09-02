@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 15;
+pub const CURRENT_SCHEMA_VERSION: u32 = 16;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -781,6 +781,33 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (15, strftime('%s', 'now'));
 "#;
 
+/// Discard every perceptual hash computed by the old byte-bucket implementation.
+///
+/// Those rows are not weak hashes of the picture -- they are hashes of the
+/// compressed bytes, so they carry no information about what the image looks
+/// like, and the near-duplicate discoveries drawn from them are noise. Keeping
+/// them would mean the new decoded-pixel hashes are compared against garbage
+/// until every image happens to be revisited.
+///
+/// The populator cursor is dropped alongside them so the next run re-hashes from
+/// the beginning rather than resuming past the files it already "did".
+///
+/// Pending discoveries go too. A resolved one is left alone deliberately: it
+/// records a decision a person made, and rewriting someone's history to match a
+/// later opinion of the evidence is worse than leaving the record honest.
+pub const MIGRATION_016: &str = r#"
+DELETE FROM ontology_perceptual_hashes;
+
+DELETE FROM ontology_populator_state
+WHERE populator_name = 'PerceptualHashPopulator';
+
+DELETE FROM ontology_discoveries
+WHERE kind = 'near-duplicate-cluster' AND status = 'pending';
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (16, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -797,16 +824,100 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (13, MIGRATION_013),
     (14, MIGRATION_014),
     (15, MIGRATION_015),
+    (16, MIGRATION_016),
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Migration 016 must actually drop the byte-bucket hashes and the pending
+    /// discoveries drawn from them, and must leave a resolved discovery alone.
+    #[test]
+    fn migration_016_discards_the_old_perceptual_hashes_but_not_resolved_history() {
+        use rusqlite::Connection;
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        for (version, sql) in ALL_MIGRATIONS {
+            if *version == 16 {
+                conn.execute(
+                    "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                     VALUES (1, NULL, '/root', 'root', 0, 0)",
+                    [],
+                )
+                .expect("seed a folder");
+                conn.execute(
+                    "INSERT INTO files (id, folder_id, path, name, size, indexed_at)
+                     VALUES (1, 1, '/root/a.jpg', 'a.jpg', 10, 0)",
+                    [],
+                )
+                .expect("seed a file");
+                conn.execute(
+                    "INSERT INTO ontology_perceptual_hashes (file_id, phash, dhash, computed_at)
+                     VALUES (1, x'0102030405060708', x'0807060504030201', 0)",
+                    [],
+                )
+                .expect("seed a stale hash");
+                conn.execute(
+                    "INSERT INTO ontology_populator_state (populator_name, status, cursor)
+                     VALUES ('PerceptualHashPopulator', 'completed', '9999')",
+                    [],
+                )
+                .expect("seed populator state");
+                conn.execute(
+                    "INSERT INTO ontology_discoveries (kind, payload, confidence, potential_bytes_unlocked, status, created_at)
+                     VALUES ('near-duplicate-cluster', '{}', 0.9, 0, 'pending', 0)",
+                    [],
+                )
+                .expect("seed a pending discovery");
+                conn.execute(
+                    "INSERT INTO ontology_discoveries (kind, payload, confidence, potential_bytes_unlocked, status, created_at)
+                     VALUES ('near-duplicate-cluster', '{\"kept\":true}', 0.9, 0, 'confirmed', 0)",
+                    [],
+                )
+                .expect("seed a resolved discovery");
+            }
+            conn.execute_batch(sql).expect("migration applies");
+        }
+
+        let hashes: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_perceptual_hashes", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(hashes, 0, "stale byte-bucket hashes must not survive");
+
+        let cursor: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ontology_populator_state WHERE populator_name = 'PerceptualHashPopulator'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cursor, 0, "the resume cursor must be dropped so files are re-hashed");
+
+        let pending: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ontology_discoveries WHERE status = 'pending'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending, 0, "discoveries drawn from the old hashes must go");
+
+        let resolved: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ontology_discoveries WHERE status = 'confirmed'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(resolved, 1, "a decision a person made is not ours to erase");
+    }
+
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 15);
-        assert_eq!(ALL_MIGRATIONS.len(), 15);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 16);
+        assert_eq!(ALL_MIGRATIONS.len(), 16);
     }
 
     #[test]
