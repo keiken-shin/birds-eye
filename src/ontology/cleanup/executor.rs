@@ -83,7 +83,23 @@ pub fn execute_plan_with(
         // file can be replaced by a different one with the same name, and
         // trashing that is unrecoverable from the user's point of view because
         // they never saw it.
-        if let Err(reason) = unchanged_at(Path::new(&cand.path), cand.size, cand.modified_at) {
+        // The candidate view predates object ids, so the id is fetched here
+        // rather than widening a view every caller shares. A plan holds a
+        // handful of files, not a volume's worth.
+        let reviewed_object: Option<String> = conn
+            .query_row(
+                "SELECT object_id FROM files WHERE id = ?1",
+                rusqlite::params![cand.file_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten();
+        if let Err(reason) = unchanged_at(
+            Path::new(&cand.path),
+            cand.size,
+            cand.modified_at,
+            reviewed_object.as_deref(),
+        ) {
             failed.push(CleanupFailure {
                 file_id: cand.file_id,
                 path: cand.path.clone(),
@@ -429,6 +445,41 @@ mod tests {
     /// The whole point of the guard: same path, same byte count, different
     /// file. Path equality is not object equality and the recycle bin only
     /// gets the path.
+    /// The same protection, driven by the filesystem's own answer rather than
+    /// by size and timestamp. The row names an object that is not the one now
+    /// at that path, which is what a delete-and-recreate leaves behind.
+    #[test]
+    fn a_file_that_is_a_different_object_than_the_one_reviewed_is_not_trashed() {
+        let mut conn = migrated_conn();
+        let fx = Fixture::new("other-object");
+        let a = fx.add_scratch(&conn, 1, "a.js", 100);
+        fx.add_scratch(&conn, 2, "b.js", 200);
+        conn.execute(
+            "UPDATE files SET object_id = 'ffffffffffffffff:             ffffffffffffffffffffffffffffffff' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        let plan_id = create_plan(&conn, &CleanupScope::default()).unwrap();
+
+        let trasher = RecordingTrasher::new();
+        let result = execute_plan_with(&mut conn, plan_id, &trasher, 90).unwrap();
+
+        let seen = trasher.seen.lock().unwrap().clone();
+        assert!(
+            !seen.contains(&a),
+            "a different object must never reach the recycle bin"
+        );
+        assert_eq!(result.cleaned, 1, "the untouched file is still cleaned");
+        assert_eq!(result.failed.len(), 1);
+        assert!(
+            result.failed[0]
+                .reason
+                .contains("a different file is at this path"),
+            "the user must be told why: {}",
+            result.failed[0].reason
+        );
+    }
+
     #[test]
     fn a_file_replaced_since_review_is_not_trashed() {
         let mut conn = migrated_conn();

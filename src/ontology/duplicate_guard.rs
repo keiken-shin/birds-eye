@@ -41,6 +41,7 @@ struct FileRow {
     id: i64,
     size: i64,
     modified_at: Option<i64>,
+    object_id: Option<String>,
 }
 
 /// Decides, for one batch of paths, which may be sent to the recycle bin.
@@ -60,7 +61,12 @@ pub fn refusals(conn: &Connection, paths: &[String]) -> Vec<(String, String)> {
 
         // Same check the cleanup and relocation executors make: the path must
         // still hold the object the index describes.
-        if let Err(reason) = unchanged_at(Path::new(path), row.size, row.modified_at) {
+        if let Err(reason) = unchanged_at(
+            Path::new(path),
+            row.size,
+            row.modified_at,
+            row.object_id.as_deref(),
+        ) {
             out.push((path.clone(), reason));
             continue;
         }
@@ -75,13 +81,15 @@ pub fn refusals(conn: &Connection, paths: &[String]) -> Vec<(String, String)> {
 
 fn file_row(conn: &Connection, path: &str) -> Option<FileRow> {
     conn.query_row(
-        "SELECT id, size, modified_at FROM files WHERE path = ?1 AND deleted_at IS NULL",
+        "SELECT id, size, modified_at, object_id
+         FROM files WHERE path = ?1 AND deleted_at IS NULL",
         params![path],
         |row| {
             Ok(FileRow {
                 id: row.get(0)?,
                 size: row.get(1)?,
                 modified_at: row.get(2)?,
+                object_id: row.get(3)?,
             })
         },
     )
@@ -362,6 +370,29 @@ mod tests {
         assert_eq!(refused.len(), 1);
         assert!(
             refused[0].1.contains("changed since it was reviewed"),
+            "{}",
+            refused[0].1
+        );
+    }
+
+    /// Proves the recorded object id actually reaches the guard. The row names
+    /// an object that is not the one at this path, and no size or timestamp
+    /// check could tell.
+    #[test]
+    fn a_file_that_is_a_different_object_than_the_one_indexed_is_refused() {
+        let conn = migrated_conn();
+        let fx = Fixture::new("other-object");
+        let a = fx.add(&conn, 1, "a.bin", b"identical bytes");
+        conn.execute(
+            "UPDATE files SET object_id = 'ffffffffffffffff:             ffffffffffffffffffffffffffffffff' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+
+        let refused = refusals(&conn, &[a]);
+        assert_eq!(refused.len(), 1);
+        assert!(
+            refused[0].1.contains("a different file is at this path"),
             "{}",
             refused[0].1
         );

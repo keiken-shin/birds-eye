@@ -96,15 +96,15 @@ pub fn execute_plan_with(
         // this same session marks sources deleted without inserting destinations.
         // `Option<Option<i64>>` — outer None means no row, inner Some means the
         // row is already soft-deleted. Both disqualify the item.
-        let row: Option<(Option<i64>, i64, Option<i64>)> = conn
+        let row: Option<(Option<i64>, i64, Option<i64>, Option<String>)> = conn
             .query_row(
-                "SELECT deleted_at, size, modified_at FROM files WHERE id = ?1",
+                "SELECT deleted_at, size, modified_at, object_id FROM files WHERE id = ?1",
                 params![item.file_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()?;
 
-        let Some((None, reviewed_size, reviewed_modified)) = row else {
+        let Some((None, reviewed_size, reviewed_modified, reviewed_object)) = row else {
             set_item_status(conn, item.id, "skipped", Some("source no longer in the index"))?;
             continue;
         };
@@ -119,6 +119,7 @@ pub fn execute_plan_with(
             std::path::Path::new(&item.from_path),
             reviewed_size,
             reviewed_modified,
+            reviewed_object.as_deref(),
         ) {
             set_item_status(conn, item.id, "skipped", Some(&reason))?;
             continue;
@@ -444,6 +445,60 @@ mod tests {
 
     /// Same-path, same-size, different file. Existence would wave this through
     /// and file a document the user never chose to file.
+    /// Same protection, from the filesystem's own answer: the row names an
+    /// object that is not the one at that path any more.
+    #[test]
+    fn skips_an_item_whose_file_is_now_a_different_object() {
+        let root = test_root("skips-other-object");
+        let from = root.join("swapped.exe");
+        let mut conn = migrated_conn();
+        seed_file(&conn, 1, &from);
+        conn.execute(
+            "UPDATE files SET object_id = 'ffffffffffffffff:             ffffffffffffffffffffffffffffffff' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+
+        let plan_id = create_plan(
+            &conn,
+            &[PlanItem {
+                file_id: 1,
+                from_path: from.to_string_lossy().to_string(),
+                to_path: root
+                    .join("dest")
+                    .join("swapped.exe")
+                    .to_string_lossy()
+                    .to_string(),
+                size: 10,
+                discovery_id: None,
+            }],
+        )
+        .unwrap();
+
+        let mover = FakeMover {
+            fail: vec![],
+            calls: RefCell::new(vec![]),
+        };
+        let result = execute_plan_with(&mut conn, plan_id, &mover).unwrap();
+
+        assert_eq!(result.moved, 0);
+        assert!(
+            mover.calls.borrow().is_empty(),
+            "a different object must never be moved"
+        );
+        let item = &plan_items(&conn, plan_id).unwrap()[0];
+        assert_eq!(item.status, "skipped");
+        assert!(
+            item.note
+                .as_deref()
+                .unwrap_or("")
+                .contains("a different file is at this path"),
+            "the note must say why: {:?}",
+            item.note
+        );
+        cleanup(&root);
+    }
+
     #[test]
     fn skips_an_item_whose_file_was_replaced_since_review() {
         let root = test_root("skips-replaced");
