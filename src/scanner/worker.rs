@@ -10,31 +10,133 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// The queue, and the count of directories the scan still owes an answer for.
+///
+/// The two live under one lock on purpose. "Is the scan finished" is a question
+/// about both of them at once, and any arrangement that lets them be read
+/// separately reintroduces the window this exists to close.
+#[derive(Debug)]
+struct QueueState {
+    waiting: VecDeque<PathBuf>,
+    /// Directories discovered and not yet completed. This is the whole
+    /// termination condition: zero means every directory that was ever found
+    /// has been walked, and no worker can produce another one, because only
+    /// walking a directory produces directories.
+    ///
+    /// It starts at one for the root, rises before a child is queued, and falls
+    /// only after a directory has been walked and its children counted. So it
+    /// is never zero while work remains, which is the property the old
+    /// "is the queue empty and is everyone idle" check could only observe and
+    /// not guarantee.
+    outstanding: usize,
+}
+
 #[derive(Debug)]
 struct SharedQueue {
-    inner: Mutex<VecDeque<PathBuf>>,
+    inner: Mutex<QueueState>,
     ready: Condvar,
 }
 
 impl SharedQueue {
     fn new(root: PathBuf) -> Self {
-        let mut queue = VecDeque::new();
-        queue.push_back(root);
+        let mut waiting = VecDeque::new();
+        waiting.push_back(root);
 
         Self {
-            inner: Mutex::new(queue),
+            inner: Mutex::new(QueueState {
+                waiting,
+                outstanding: 1,
+            }),
             ready: Condvar::new(),
         }
     }
 
+    /// A newly discovered directory. Counted and queued under the same lock, so
+    /// it exists to the termination check from the moment it exists at all.
     fn push(&self, path: PathBuf) {
-        let mut queue = self.inner.lock().expect("queue lock poisoned");
-        queue.push_back(path);
+        let mut state = self.inner.lock().expect("queue lock poisoned");
+        state.outstanding += 1;
+        state.waiting.push_back(path);
         self.ready.notify_one();
     }
 
+    /// The next directory to walk, or `None` when there will never be another.
+    ///
+    /// `None` is returned only at `outstanding == 0`, which is a fact about the
+    /// whole scan rather than a guess from one worker's point of view. A worker
+    /// that finds the queue momentarily empty while others are still walking
+    /// waits instead of deciding the scan is over -- that decision, made wrong,
+    /// truncates the scan silently, which is the worst shape of failure for a
+    /// tool whose answer is "here is everything on your disk".
+    ///
+    /// The directory comes back inside a [`DirTask`], which is what marks it
+    /// complete when it is dropped. Handing back a bare path would leave the
+    /// "count the children before you decrement" rule to whoever writes the
+    /// loop, and that rule cannot be enforced by a test -- getting it wrong
+    /// only opens a window a poll has to happen to land in.
+    fn next(&self, cancelled: &AtomicBool) -> Option<DirTask<'_>> {
+        let mut state = self.inner.lock().expect("queue lock poisoned");
+        loop {
+            if let Some(path) = state.waiting.pop_front() {
+                return Some(DirTask { queue: self, path });
+            }
+            if state.outstanding == 0 || cancelled.load(Ordering::Relaxed) {
+                return None;
+            }
+            // Timed, so a cancel between the check above and the wait is picked
+            // up rather than slept through.
+            let (next, _) = self
+                .ready
+                .wait_timeout(state, Duration::from_millis(50))
+                .expect("queue lock poisoned");
+            state = next;
+        }
+    }
+
+    /// One directory walked, and every child it found already counted. Wakes
+    /// everyone when this was the last one, so no worker is left waiting on a
+    /// queue that will never fill again.
+    ///
+    /// Private, and reached only through dropping a [`DirTask`]: the count must
+    /// fall exactly once per directory, and exactly when the walk of it ends.
+    fn complete_one(&self) {
+        let mut state = self.inner.lock().expect("queue lock poisoned");
+        state.outstanding = state.outstanding.saturating_sub(1);
+        if state.outstanding == 0 {
+            self.ready.notify_all();
+        }
+    }
+
     fn len(&self) -> usize {
-        self.inner.lock().expect("queue lock poisoned").len()
+        self.inner.lock().expect("queue lock poisoned").waiting.len()
+    }
+
+    /// Directories still owed. Zero means the walk is provably complete.
+    fn outstanding(&self) -> usize {
+        self.inner.lock().expect("queue lock poisoned").outstanding
+    }
+}
+
+/// One directory, checked out of the queue and owed back.
+///
+/// Dropping it is what says the walk of that directory is over, so the count
+/// cannot fall while the walk is still finding children -- the ordering is a
+/// property of the scope rather than of the order two statements happen to be
+/// written in.
+struct DirTask<'q> {
+    queue: &'q SharedQueue,
+    path: PathBuf,
+}
+
+impl DirTask<'_> {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for DirTask<'_> {
+    fn drop(&mut self) {
+        self.queue.complete_one();
     }
 }
 
@@ -192,7 +294,9 @@ fn run_scan(options: ScanOptions, controller: ScanController, events_tx: Sender<
             break;
         }
 
-        if snapshot.queue_depth == 0 && snapshot.active_workers == 0 {
+        // One question, one answer, and it does not depend on catching every
+        // worker idle at the same instant.
+        if queue.outstanding() == 0 {
             let finished_at = Instant::now();
             let report = ScanReport {
                 root: options.root.clone(),
@@ -233,29 +337,21 @@ impl WorkerContext {
                 thread::sleep(Duration::from_millis(100));
             }
 
-            self.stats.active_workers.fetch_add(1, Ordering::Relaxed);
-            let next_dir = self.next_directory();
-
-            let Some(dir) = next_dir else {
-                self.stats.active_workers.fetch_sub(1, Ordering::Relaxed);
-                if self.queue.len() == 0 && self.stats.active_workers.load(Ordering::Relaxed) == 0 {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(25));
-                continue;
+            // `None` means the scan is over as a fact, not as an inference.
+            // The task marks the directory complete when it goes out of scope
+            // at the end of this iteration, which is after every child it found
+            // has been queued and counted.
+            let Some(task) = self.queue.next(&self.cancelled) else {
+                break;
             };
 
+            self.stats.active_workers.fetch_add(1, Ordering::Relaxed);
             if let Ok(mut current) = self.stats.current_path.lock() {
-                *current = Some(dir.clone());
+                *current = Some(task.path().to_path_buf());
             }
-            self.scan_directory(&dir);
+            self.scan_directory(task.path());
             self.stats.active_workers.fetch_sub(1, Ordering::Relaxed);
         }
-    }
-
-    fn next_directory(&self) -> Option<PathBuf> {
-        let mut queue = self.queue.inner.lock().expect("queue lock poisoned");
-        queue.pop_front()
     }
 
     fn scan_directory(&self, dir: &Path) {
@@ -427,6 +523,128 @@ mod tests {
     use super::*;
     use std::fs::{self, File};
     use std::io::Write;
+
+    /// The termination contract, tested directly rather than through a scan,
+    /// because a race is only sometimes visible from the outside.
+    #[test]
+    fn a_directory_in_flight_still_counts_as_outstanding() {
+        let cancelled = AtomicBool::new(false);
+        let queue = SharedQueue::new(PathBuf::from("root"));
+        assert_eq!(queue.outstanding(), 1, "the root is owed from the start");
+
+        let task = queue.next(&cancelled).expect("the root is there to take");
+        assert_eq!(
+            queue.outstanding(),
+            1,
+            "taking a directory out of the queue does not discharge it -- this is              the window that would let the scan be declared over mid-walk"
+        );
+        assert_eq!(queue.len(), 0, "and the queue really is empty meanwhile");
+
+        // What a walk does: find children, then end.
+        queue.push(PathBuf::from("root/a"));
+        queue.push(PathBuf::from("root/b"));
+        drop(task);
+        assert_eq!(queue.outstanding(), 2, "two children owed, the parent settled");
+    }
+
+    #[test]
+    fn the_last_directory_completing_ends_the_scan() {
+        let cancelled = AtomicBool::new(false);
+        let queue = SharedQueue::new(PathBuf::from("root"));
+        drop(queue.next(&cancelled).expect("the root"));
+        assert_eq!(queue.outstanding(), 0);
+        assert!(
+            queue.next(&cancelled).is_none(),
+            "nothing is owed, so there will never be another directory"
+        );
+    }
+
+    /// A worker must not be left waiting on a queue that will never fill.
+    #[test]
+    fn a_cancelled_scan_releases_a_waiting_worker() {
+        let cancelled = AtomicBool::new(false);
+        let queue = SharedQueue::new(PathBuf::from("root"));
+        let task = queue.next(&cancelled).expect("the root");
+        cancelled.store(true, Ordering::Relaxed);
+        assert!(
+            queue.next(&cancelled).is_none(),
+            "a cancel must let an idle worker out even with work outstanding"
+        );
+        drop(task);
+    }
+
+    /// A chain of folders one deep each, with far more workers than there is
+    /// ever work for. At almost every instant exactly one directory is queued
+    /// and every other worker is idle looking at an empty queue -- the shape
+    /// that tempts a worker into deciding the scan is over. It must find every
+    /// file, every time, and it must finish.
+    ///
+    /// Repeated, because a race that fires one run in twenty is not caught by
+    /// looking once.
+    #[test]
+    fn a_deep_chain_with_idle_workers_is_never_cut_short() {
+        const DEPTH: usize = 60;
+        const RUNS: usize = 20;
+
+        let root = test_root("deep-chain");
+        let mut dir = root.clone();
+        for level in 0..DEPTH {
+            dir = dir.join(format!("level-{level}"));
+            fs::create_dir_all(&dir).expect("failed to create the chain");
+            write_file(&dir.join("f.bin"), &[7; 16]);
+        }
+
+        for run in 0..RUNS {
+            let scanner = Scanner::new(ScanOptions {
+                root: root.clone(),
+                workers: 8,
+            });
+            let mut finished = None;
+            for event in scanner.scan() {
+                if let ScanEvent::Finished(report) = event {
+                    finished = Some(report);
+                    break;
+                }
+            }
+            let report = finished.expect("run {run}: the scan must reach Finished");
+            assert_eq!(
+                report.stats.files_scanned, DEPTH as u64,
+                "run {run}: a file went missing with no error to say so"
+            );
+        }
+        cleanup(&root);
+    }
+
+    /// The other half of the same guarantee: a wide folder, so many directories
+    /// are discovered at once and the count has to come back down to exactly
+    /// zero rather than merely near it.
+    #[test]
+    fn a_wide_tree_finishes_with_every_file_accounted_for() {
+        const WIDTH: usize = 40;
+
+        let root = test_root("wide-tree");
+        for branch in 0..WIDTH {
+            let dir = root.join(format!("branch-{branch}"));
+            fs::create_dir_all(&dir).expect("failed to create a branch");
+            write_file(&dir.join("a.bin"), &[1; 8]);
+            write_file(&dir.join("b.bin"), &[2; 8]);
+        }
+
+        let scanner = Scanner::new(ScanOptions {
+            root: root.clone(),
+            workers: 8,
+        });
+        let mut finished = None;
+        for event in scanner.scan() {
+            if let ScanEvent::Finished(report) = event {
+                finished = Some(report);
+                break;
+            }
+        }
+        let report = finished.expect("the scan must reach Finished");
+        assert_eq!(report.stats.files_scanned, (WIDTH * 2) as u64);
+        cleanup(&root);
+    }
 
     #[test]
     fn scanner_indexes_nested_files_and_folders() {
