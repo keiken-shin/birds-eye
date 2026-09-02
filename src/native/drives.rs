@@ -367,6 +367,51 @@ pub fn volume_kind(path: &std::path::Path) -> &'static str {
     }
 }
 
+/// Free bytes on the volume a path lives on, or `None` when the volume cannot
+/// be asked -- disconnected, unformatted, locked, or a platform that is not
+/// Windows.
+///
+/// `None` is not "zero free". A caller deciding whether a move fits has to
+/// treat it as "unknown", because refusing a move on an unanswered question is
+/// how a safety check becomes the thing that blocks the work.
+pub fn free_bytes(path: &std::path::Path) -> Option<u64> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+        let root = volume_root(path)?;
+        let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut available = 0_u64;
+        let mut total = 0_u64;
+        let mut free = 0_u64;
+        let ok = unsafe {
+            GetDiskFreeSpaceExW(wide.as_ptr(), &mut available, &mut total, &mut free) != 0
+        };
+        // The figure that matters is what this user may write, which quotas can
+        // put below the volume's own free space.
+        ok.then_some(available)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// The volume root a path lives on, for callers outside this module.
+pub fn volume_root_of(path: &std::path::Path) -> Option<String> {
+    volume_root(path)
+}
+
+/// Whether two paths are on the same volume, as far as the path text can say.
+///
+/// `None` when either path does not reduce to a root this can name. A move
+/// within one volume is a rename and consumes no space; across volumes it is a
+/// copy, and the destination needs room for every byte.
+pub fn same_volume(left: &std::path::Path, right: &std::path::Path) -> Option<bool> {
+    let (left, right) = (volume_root(left)?, volume_root(right)?);
+    Some(left.eq_ignore_ascii_case(&right))
+}
+
 /// The root Windows will answer about: `C:\` from a drive-letter path, or
 /// `\\server\share\` from a UNC path.
 #[cfg(any(windows, test))]

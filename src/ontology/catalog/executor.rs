@@ -81,6 +81,16 @@ pub fn execute_plan_with(
     mover: &dyn Mover,
 ) -> Result<RelocationResult, OntologyError> {
     let items = plan_items(conn, plan_id)?;
+
+    // Everything the plan needs from the destination side, asked once, before
+    // any bytes move. A trash is as safe to attempt as to ask about, so the
+    // cleanup path can just try. A move is not: it has a real half-done state,
+    // and a plan that fills a disk on its fortieth file has already scattered
+    // thirty-nine.
+    if let Err(reason) = preflight_destinations(&items) {
+        return Err(OntologyError::Populator(reason));
+    }
+
     let mut moved = 0_u64;
     let mut bytes_moved = 0_u64;
     let mut pairs = Vec::new();
@@ -179,6 +189,69 @@ pub fn execute_plan_with(
         entry_ids,
         failed,
     })
+}
+
+/// Ask the destination side the questions that are true of the whole plan,
+/// before the first byte moves. `Err(reason)` refuses the plan, leaving it
+/// untouched and retryable once the person has fixed what the reason names.
+///
+/// Only plan-wide facts belong here: whether the destination volume is there at
+/// all, and whether it has room. Anything that can be true of one item and
+/// false of the next -- a destination parent that is really a file, a name
+/// already taken -- stays per-item in the loop below, where it fails that item
+/// and leaves the other forty alone. Refusing forty moves because the
+/// forty-first has a bad name is not caution, it is a worse outcome.
+fn preflight_destinations(
+    items: &[crate::ontology::catalog::plans::PlannedItem],
+) -> Result<(), String> {
+    use std::collections::{HashMap, HashSet};
+    use std::path::Path;
+
+    let mut roots: HashSet<String> = HashSet::new();
+    // Bytes each destination volume has to find room for. A move within one
+    // volume is a rename and costs nothing, so only crossings are counted.
+    let mut needed: HashMap<String, u64> = HashMap::new();
+
+    for item in items.iter().filter(|item| item.status == "planned") {
+        let to = Path::new(&item.to_path);
+        let from = Path::new(&item.from_path);
+        let Some(root) = crate::native::drives::volume_root_of(to) else {
+            // A destination this cannot reduce to a named volume is not a
+            // finding about the plan. The per-item move will say what is wrong
+            // with it.
+            continue;
+        };
+        roots.insert(root.clone());
+        // `Some(false)` and nothing else: an unanswered question is not a
+        // reason to claim a crossing.
+        if crate::native::drives::same_volume(from, to) == Some(false) {
+            *needed.entry(root).or_default() += item.size.max(0) as u64;
+        }
+    }
+
+    for root in &roots {
+        if !Path::new(root).exists() {
+            return Err(format!(
+                "the destination drive {root} is not connected -- nothing has been moved"
+            ));
+        }
+    }
+
+    for (root, bytes) in needed {
+        // `None` is "the volume would not say", not "zero free". Refusing on an
+        // unanswered question would make the check the thing that blocks the
+        // work.
+        let Some(free) = crate::native::drives::free_bytes(Path::new(&root)) else {
+            continue;
+        };
+        if free < bytes {
+            return Err(format!(
+                "this needs {bytes} bytes on {root} and only {free} are free --                  nothing has been moved"
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 /// Marks an item `"moved"` and soft-deletes its source row in one
@@ -285,6 +358,139 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    /// A drive letter nothing is mounted on, so the destination is genuinely
+    /// unreachable rather than merely unusual.
+    #[cfg(windows)]
+    fn drive_root(letter: char) -> std::path::PathBuf {
+        std::path::PathBuf::from(format!("{letter}:{}", std::path::MAIN_SEPARATOR))
+    }
+
+    #[cfg(windows)]
+    fn an_unused_drive_letter() -> char {
+        ('D'..='Z')
+            .rev()
+            .find(|letter| !drive_root(*letter).exists())
+            .expect("no free drive letter on this machine")
+    }
+
+    /// A move has a real half-done state, so an unreachable destination has to
+    /// stop the plan before the first file rather than after the fortieth.
+    #[cfg(windows)]
+    #[test]
+    fn an_unreachable_destination_stops_the_plan_before_anything_moves() {
+        let root = test_root("dest-unreachable");
+        let from = root.join("a.exe");
+        let mut conn = migrated_conn();
+        seed_file(&conn, 1, &from);
+        let to = drive_root(an_unused_drive_letter())
+            .join("filed")
+            .join("a.exe")
+            .to_string_lossy()
+            .to_string();
+        let plan_id = create_plan(
+            &conn,
+            &[PlanItem {
+                file_id: 1,
+                from_path: from.to_string_lossy().to_string(),
+                to_path: to,
+                size: 10,
+                discovery_id: None,
+            }],
+        )
+        .unwrap();
+
+        let mover = FakeMover { fail: vec![], calls: RefCell::new(vec![]) };
+        let error = execute_plan_with(&mut conn, plan_id, &mover)
+            .expect_err("an unreachable destination must refuse the plan");
+        assert!(
+            error.to_string().contains("is not connected"),
+            "the message has to name the destination problem: {error}"
+        );
+        assert!(mover.calls.borrow().is_empty(), "nothing may be attempted");
+
+        // The plan is untouched, so it is still there to run once the drive is
+        // connected. Marking it executed would lose it.
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM ontology_relocation_plans WHERE id = ?1",
+                params![plan_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_ne!(status, "executed");
+        cleanup(&root);
+    }
+
+    /// The destination has to hold the bytes. Filling a disk on the fortieth
+    /// file has already scattered thirty-nine.
+    #[cfg(windows)]
+    #[test]
+    fn a_cross_volume_plan_that_cannot_fit_is_refused_before_anything_moves() {
+        let root = test_root("dest-too-small");
+        let from = root.join("huge.bin");
+        let mut conn = migrated_conn();
+        seed_file(&conn, 1, &from);
+        // std::env::temp_dir() and the build tree are on different volumes on
+        // this machine; if they ever are not, the crossing check will not fire
+        // and this test says so rather than passing quietly.
+        let to = std::env::temp_dir().join("birdseye-preflight").join("huge.bin");
+        assert_eq!(
+            crate::native::drives::same_volume(&from, &to),
+            Some(false),
+            "this test needs a genuine cross-volume pair"
+        );
+        let plan_id = create_plan(
+            &conn,
+            &[PlanItem {
+                file_id: 1,
+                from_path: from.to_string_lossy().to_string(),
+                to_path: to.to_string_lossy().to_string(),
+                size: i64::MAX,
+                discovery_id: None,
+            }],
+        )
+        .unwrap();
+
+        let mover = FakeMover { fail: vec![], calls: RefCell::new(vec![]) };
+        let error = execute_plan_with(&mut conn, plan_id, &mover)
+            .expect_err("no volume has i64::MAX bytes free");
+        assert!(
+            error.to_string().contains("nothing has been moved"),
+            "the message has to say the plan did not start: {error}"
+        );
+        assert!(mover.calls.borrow().is_empty(), "nothing may be attempted");
+        cleanup(&root);
+    }
+
+    /// The counterpart, and the reason the crossing test above is not just a
+    /// size check: a move within one volume is a rename and needs no space at
+    /// all, so an enormous same-volume plan must go straight through.
+    #[test]
+    fn a_same_volume_plan_is_never_refused_for_space() {
+        let root = test_root("same-volume-huge");
+        let from = root.join("huge.bin");
+        let to = root.join("filed").join("huge.bin");
+        let mut conn = migrated_conn();
+        seed_file(&conn, 1, &from);
+        let plan_id = create_plan(
+            &conn,
+            &[PlanItem {
+                file_id: 1,
+                from_path: from.to_string_lossy().to_string(),
+                to_path: to.to_string_lossy().to_string(),
+                size: i64::MAX,
+                discovery_id: None,
+            }],
+        )
+        .unwrap();
+
+        let mover = FakeMover { fail: vec![], calls: RefCell::new(vec![]) };
+        let result = execute_plan_with(&mut conn, plan_id, &mover)
+            .expect("a rename consumes no space, so this must not be refused");
+        assert_eq!(result.moved, 1);
+        cleanup(&root);
     }
 
     #[test]
