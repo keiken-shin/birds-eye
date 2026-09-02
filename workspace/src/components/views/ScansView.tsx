@@ -267,13 +267,30 @@ export function ScansView() {
 
           {indexes.length > 0 ? (
             <section className="be-rise be-d2">
-              <div className="mb-2 flex items-baseline gap-2">
+              <div className="mb-1 flex items-baseline gap-2">
                 <SectionLabel>Indexes</SectionLabel>
                 <span className="text-105 text-dim">
                   open switches the workspace — deleting removes only the local index, never your
                   files
                 </span>
               </div>
+              {/*
+                Written from the schema, not from memory. `files` holds the
+                path, name, size on disk and logical size, the three
+                timestamps, the media kind, the filesystem's own id and the
+                content digests; the intelligence layer adds what the
+                extractors read out of a file (PDF title, photo capture date,
+                archive entry count, music tags) and an 8-byte perceptual hash
+                per image. No file contents and no thumbnails are stored
+                anywhere -- the only BLOBs in the schema are those two hashes.
+              */}
+              <p className="mb-2 max-w-[70ch] text-105 leading-relaxed text-dim">
+                An index holds the full path, size and dates of every file it read, what kind of
+                file each one is, and a fingerprint of the contents. With intelligence on it also
+                holds what Bird's Eye read out of your files — a photo's date, a document's title,
+                a song's tags. It never holds the files themselves, and it never holds a picture of
+                them.
+              </p>
               <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                 {indexes.map((entry) => {
                   const active =
@@ -388,6 +405,16 @@ export function ScansView() {
                           )}
                         </div>
                       </div>
+
+                      {confirmingDelete ? (
+                        // Named because a person agreeing to a deletion is
+                        // entitled to know what is included. All three are
+                        // removed together by delete_index_and_sidecars.
+                        <p className="mt-2 border-t border-line-soft pt-2 text-105 leading-relaxed text-dim">
+                          This removes the index, its write-ahead file and the scan logs beside it.
+                          Your files stay where they are.
+                        </p>
+                      ) : null}
 
                       {issueCount > 0 ? (
                         <div className="mt-2 border-t border-line-soft pt-2">

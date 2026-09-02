@@ -162,7 +162,11 @@ fn delete_index(app: tauri::AppHandle, index_path: PathBuf) -> Result<(), String
         return Err("refusing to delete an index outside the app index directory".to_owned());
     }
 
-    fs::remove_file(canonical_index).map_err(|error| format!("failed to delete index: {error}"))
+    // Not just the .sqlite. The write-ahead log holds recently written rows
+    // verbatim and the scan logs beside it name the folder that was scanned, so
+    // removing one file leaves the answer to "what was on that drive" in the
+    // same directory.
+    birds_eye::index::removal::delete_index_and_sidecars(&canonical_index).map(|_| ())
 }
 
 #[tauri::command(async)]
