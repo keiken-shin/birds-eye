@@ -69,6 +69,11 @@ pub fn execute_plan_with(
     // Re-evaluate the predicate now — facts may have changed since the plan was drafted.
     let candidates = candidates_for_plan(conn, plan_id)?;
 
+    // A previous run may have died between writing the log row and trashing the
+    // file. Settle those before adding more, so the Library never carries a row
+    // nobody can act on.
+    reconcile_abandoned_entries(conn)?;
+
     let now = unix_now();
     let expires_at = now + retention_days.max(0) * SECONDS_PER_DAY;
 
@@ -162,6 +167,13 @@ pub fn execute_plan_with(
                 }
             }
             Err(reason) => {
+                // "Access is denied" tells the person nothing they can act on.
+                // The Restart Manager knows which programs hold the file open,
+                // and closing one of them is the actual fix.
+                let reason = match crate::native::lockinfo::file_lock_holders(&cand.path) {
+                    holders if holders.is_empty() => reason,
+                    holders => format!("{reason} -- open in {}", holders.join(", ")),
+                };
                 // Trash failed: drop the provisional row; per-file isolation.
                 let _ = conn.execute(
                     "DELETE FROM ontology_cleanup_log WHERE id = ?1",
@@ -194,6 +206,44 @@ pub fn execute_cleanup_plan(
 ) -> Result<CleanupResult, OntologyError> {
     let mut conn = crate::index::open_index_connection(index_path)?;
     execute_plan_with(&mut conn, plan_id, &SystemTrasher, DEFAULT_RETENTION_DAYS)
+}
+
+/// Settle log rows a crash left mid-flight.
+///
+/// The executor writes a `pending` row, trashes the file, then promotes the row
+/// to `in_recycle_bin`. A crash in between leaves `pending`, and `restore_with`
+/// refuses to touch that status -- so the file may well be in the recycle bin
+/// with the one record that could bring it back marked unusable.
+///
+/// The path settles it. Still there means the trash never happened, so the row
+/// describes nothing and is removed. Gone means it almost certainly happened,
+/// so the row is promoted and the undo becomes available again. Neither branch
+/// deletes a file or moves one; the worst case is offering an undo for a file
+/// the person removed themselves, which fails safely and says so.
+fn reconcile_abandoned_entries(conn: &Connection) -> Result<(), OntologyError> {
+    let stranded: Vec<(i64, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, original_path FROM ontology_cleanup_log WHERE restore_status = 'pending'",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.filter_map(Result::ok).collect()
+    };
+
+    for (id, path) in stranded {
+        if Path::new(&path).exists() {
+            conn.execute(
+                "DELETE FROM ontology_cleanup_log WHERE id = ?1 AND restore_status = 'pending'",
+                params![id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE ontology_cleanup_log SET restore_status = 'in_recycle_bin'
+                 WHERE id = ?1 AND restore_status = 'pending'",
+                params![id],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Build the provenance snapshot for a candidate (Constitutional Defense #7).
@@ -453,6 +503,73 @@ mod tests {
     /// The freed figure is what the file occupied, not what it claimed. A
     /// sparse image is the case that makes the two differ by orders of
     /// magnitude; the ratio is what matters, so the fixture stays small.
+    /// A crash between writing the log row and trashing the file used to leave
+    /// a row at `pending`, which the restore path refuses to touch. The file
+    /// could be sitting in the recycle bin with its only record unusable.
+    #[test]
+    fn a_stranded_log_row_for_a_vanished_file_becomes_restorable() {
+        let mut conn = migrated_conn();
+        let fx = Fixture::new("stranded-gone");
+        fx.add_scratch(&conn, 1, "a.js", 100);
+        let plan_id = create_plan(&conn, &CleanupScope::default()).unwrap();
+        conn.execute(
+            "INSERT INTO ontology_cleanup_log
+                (id, cleanup_plan_id, file_id, original_path, size, cleaned_at, reason,
+                 gating_facts, restore_status, expires_at)
+             VALUES (1, ?1, 1, ?2, 100, 0, 'scratch', '{}', 'pending', 0)",
+            rusqlite::params![plan_id, fx.root.join("crashed.js").display().to_string()],
+        )
+        .unwrap();
+
+        execute_plan_with(&mut conn, plan_id, &RecordingTrasher::new(), 90).unwrap();
+
+        let status: String = conn
+            .query_row(
+                "SELECT restore_status FROM ontology_cleanup_log WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            status, "in_recycle_bin",
+            "the file is gone, so the undo must be offered"
+        );
+    }
+
+    /// The other half: the file never left, so the row describes nothing and
+    /// must not offer an undo for something that did not happen.
+    #[test]
+    fn a_stranded_log_row_for_a_file_still_on_disk_is_discarded() {
+        let mut conn = migrated_conn();
+        let fx = Fixture::new("stranded-here");
+        fx.add_scratch(&conn, 1, "a.js", 100);
+        // A file the plan does not touch, so the assertion below cannot be
+        // confused by the row this run writes for its own work.
+        let untouched = fx.root.join("untouched.txt");
+        std::fs::write(&untouched, b"still here").unwrap();
+        let path = untouched.display().to_string();
+        let plan_id = create_plan(&conn, &CleanupScope::default()).unwrap();
+        conn.execute(
+            "INSERT INTO ontology_cleanup_log
+                (id, cleanup_plan_id, file_id, original_path, size, cleaned_at, reason,
+                 gating_facts, restore_status, expires_at)
+             VALUES (1, ?1, 1, ?2, 100, 0, 'scratch', '{}', 'pending', 0)",
+            rusqlite::params![plan_id, path],
+        )
+        .unwrap();
+
+        execute_plan_with(&mut conn, plan_id, &RecordingTrasher::new(), 90).unwrap();
+
+        let stale: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ontology_cleanup_log WHERE original_path = ?1",
+                rusqlite::params![path],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stale, 0, "nothing happened to it, so nothing may claim it did");
+    }
+
     #[test]
     fn bytes_cleaned_counts_what_the_file_occupied() {
         let mut conn = migrated_conn();
