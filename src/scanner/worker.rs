@@ -287,6 +287,13 @@ impl WorkerContext {
         let mut direct_files = 0;
         let mut direct_bytes = 0;
 
+        // One call for the whole folder. Asking per file costs about thirty
+        // times as much, which is the difference between collecting identity
+        // and not being able to afford it. An empty map is the honest answer
+        // for a folder that will not enumerate this way; each file is asked
+        // directly instead.
+        let folder_ids = crate::native::dir_ids::dir_ids(dir);
+
         for entry in read_dir {
             if self.cancelled.load(Ordering::Relaxed) {
                 break;
@@ -338,6 +345,11 @@ impl WorkerContext {
                     .bytes_scanned
                     .fetch_add(metadata.len(), Ordering::Relaxed);
 
+                let object_id = folder_ids
+                    .get(&entry.file_name())
+                    .copied()
+                    .or_else(|| crate::native::file_id::object_id(&path).ok());
+
                 let record = FileRecord {
                     parent: dir.to_path_buf(),
                     name: entry.file_name().to_string_lossy().into_owned(),
@@ -350,6 +362,7 @@ impl WorkerContext {
                     modified: metadata.modified().ok(),
                     accessed: metadata.accessed().ok(),
                     created: metadata.created().ok(),
+                    object_id,
                 };
 
                 let _ = self.events_tx.send(ScanEvent::FileIndexed(record));

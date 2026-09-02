@@ -29,6 +29,28 @@ pub struct ObjectId {
     pub id: u128,
 }
 
+impl ObjectId {
+    /// The form stored in the index: one text column, both halves, no loss.
+    ///
+    /// SQLite integers are 64-bit and a ReFS file id is 128, so a numeric column
+    /// would have to either truncate the id or split it across two columns that
+    /// nothing stops from disagreeing. Fixed-width hex sorts, compares and
+    /// indexes exactly like the number it came from.
+    pub fn key(&self) -> String {
+        format!("{:016x}:{:032x}", self.volume, self.id)
+    }
+
+    /// `None` for anything not written by [`ObjectId::key`]. An unreadable
+    /// stored id must never be silently treated as a match.
+    pub fn from_key(key: &str) -> Option<Self> {
+        let (volume, id) = key.split_once(':')?;
+        Some(Self {
+            volume: u64::from_str_radix(volume, 16).ok()?,
+            id: u128::from_str_radix(id, 16).ok()?,
+        })
+    }
+}
+
 #[cfg(windows)]
 pub fn object_id(path: &Path) -> std::io::Result<ObjectId> {
     use std::os::windows::ffi::OsStrExt;
@@ -146,6 +168,17 @@ mod tests {
         std::fs::write(&a, b"same bytes").unwrap();
         std::fs::write(&b, b"same bytes").unwrap();
         assert_ne!(object_id(&a).unwrap(), object_id(&b).unwrap());
+    }
+
+    #[test]
+    fn a_key_survives_the_round_trip_through_the_index() {
+        let id = ObjectId {
+            volume: 0xDEAD_BEEF,
+            id: 0x0123_4567_89AB_CDEF_0123_4567_89AB_CDEF,
+        };
+        assert_eq!(ObjectId::from_key(&id.key()), Some(id));
+        assert_eq!(ObjectId::from_key("not an id"), None);
+        assert_eq!(ObjectId::from_key(""), None);
     }
 
     #[test]

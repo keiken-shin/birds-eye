@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 17;
+pub const CURRENT_SCHEMA_VERSION: u32 = 18;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -833,6 +833,28 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (17, strftime('%s', 'now'));
 "#;
 
+/// What the filesystem calls each file, alongside where it was found.
+///
+/// Until now a row's only identity was its path, so a file that was renamed
+/// read as one file deleted and another created, and a file replaced in place
+/// read as the same file. `object_id` is the volume serial plus the filesystem's
+/// own file id, written as fixed-width hex because a ReFS id is 128 bits and a
+/// SQLite integer is 64.
+///
+/// Nullable on purpose: rows written before this migration have no id, and a
+/// volume that will not answer never gets one. Absent means "not known", which
+/// callers must treat as "fall back to size and last-modified", never as "no
+/// match".
+pub const MIGRATION_018: &str = r#"
+ALTER TABLE files ADD COLUMN object_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_files_object_id
+  ON files(object_id) WHERE object_id IS NOT NULL;
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (18, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -851,6 +873,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (15, MIGRATION_015),
     (16, MIGRATION_016),
     (17, MIGRATION_017),
+    (18, MIGRATION_018),
 ];
 
 #[cfg(test)]
@@ -942,8 +965,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 17);
-        assert_eq!(ALL_MIGRATIONS.len(), 17);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 18);
+        assert_eq!(ALL_MIGRATIONS.len(), 18);
     }
 
     #[test]

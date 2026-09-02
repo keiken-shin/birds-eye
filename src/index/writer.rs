@@ -460,6 +460,8 @@ impl IndexWriter {
         let mut direct_files = 0u64;
         let mut direct_bytes = 0u64;
         let mut subdirs = Vec::new();
+        // Same one-call-per-folder identity lookup the scanner worker uses.
+        let folder_ids = crate::native::dir_ids::dir_ids(dir);
         for entry in read_dir {
             let entry = match entry {
                 Ok(entry) => entry,
@@ -490,6 +492,10 @@ impl IndexWriter {
                 .map(|e| e.to_ascii_lowercase());
             direct_files += 1;
             direct_bytes += metadata.len();
+            let object_id = folder_ids
+                .get(&entry.file_name())
+                .copied()
+                .or_else(|| crate::native::file_id::object_id(&path).ok());
             self.index_file(&FileRecord {
                 parent: dir.to_path_buf(),
                 path,
@@ -499,6 +505,7 @@ impl IndexWriter {
                 modified: metadata.modified().ok(),
                 accessed: metadata.accessed().ok(),
                 created: metadata.created().ok(),
+                object_id,
             })?;
         }
         self.index_folder(&FolderRecord {
@@ -1445,34 +1452,49 @@ impl IndexWriter {
         let folder_id = self.ensure_folder(&file.parent)?;
         self.connection.execute(
             "INSERT INTO files (
-                folder_id, path, name, extension, size, modified_at, accessed_at, created_at, media_kind, indexed_at, deleted_at
+                folder_id, path, name, extension, size, modified_at, accessed_at, created_at, media_kind, indexed_at, object_id, deleted_at
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL)
              ON CONFLICT(path) DO UPDATE SET
                 partial_hash = CASE
                     WHEN files.size IS NOT excluded.size
                       OR files.modified_at IS NOT excluded.modified_at
                       OR files.created_at IS NOT excluded.created_at
+                      OR (files.object_id IS NOT NULL
+                          AND excluded.object_id IS NOT NULL
+                          AND files.object_id IS NOT excluded.object_id)
                     THEN NULL ELSE files.partial_hash END,
                 sample_hash = CASE
                     WHEN files.size IS NOT excluded.size
                       OR files.modified_at IS NOT excluded.modified_at
                       OR files.created_at IS NOT excluded.created_at
+                      OR (files.object_id IS NOT NULL
+                          AND excluded.object_id IS NOT NULL
+                          AND files.object_id IS NOT excluded.object_id)
                     THEN NULL ELSE files.sample_hash END,
                 full_hash = CASE
                     WHEN files.size IS NOT excluded.size
                       OR files.modified_at IS NOT excluded.modified_at
                       OR files.created_at IS NOT excluded.created_at
+                      OR (files.object_id IS NOT NULL
+                          AND excluded.object_id IS NOT NULL
+                          AND files.object_id IS NOT excluded.object_id)
                     THEN NULL ELSE files.full_hash END,
                 hash_algorithm = CASE
                     WHEN files.size IS NOT excluded.size
                       OR files.modified_at IS NOT excluded.modified_at
                       OR files.created_at IS NOT excluded.created_at
+                      OR (files.object_id IS NOT NULL
+                          AND excluded.object_id IS NOT NULL
+                          AND files.object_id IS NOT excluded.object_id)
                     THEN NULL ELSE files.hash_algorithm END,
                 hash_state = CASE
                     WHEN files.size IS NOT excluded.size
                       OR files.modified_at IS NOT excluded.modified_at
                       OR files.created_at IS NOT excluded.created_at
+                      OR (files.object_id IS NOT NULL
+                          AND excluded.object_id IS NOT NULL
+                          AND files.object_id IS NOT excluded.object_id)
                     THEN 0 ELSE files.hash_state END,
                 folder_id = excluded.folder_id,
                 name = excluded.name,
@@ -1483,6 +1505,7 @@ impl IndexWriter {
                 created_at = excluded.created_at,
                 media_kind = excluded.media_kind,
                 indexed_at = excluded.indexed_at,
+                object_id = COALESCE(excluded.object_id, files.object_id),
                 deleted_at = NULL",
             params![
                 folder_id,
@@ -1494,7 +1517,8 @@ impl IndexWriter {
                 system_time_to_unix(file.accessed),
                 system_time_to_unix(file.created),
                 classify_media_kind(file.extension.as_deref()),
-                self.active_scan_started_at.unwrap_or_else(now_millis)
+                self.active_scan_started_at.unwrap_or_else(now_millis),
+                file.object_id.map(|id| id.key())
             ],
         )?;
 
@@ -1690,6 +1714,86 @@ mod tests {
     use crate::scanner::{ScanEvent, ScanOptions, Scanner};
     use std::fs::{self, File};
     use std::io::Write;
+
+    /// The scan must record what the filesystem calls each file, not only where
+    /// it was found.
+    #[test]
+    fn a_scan_records_the_object_id_the_filesystem_reports() {
+        let root = std::env::temp_dir()
+            .join("birdseye-writer-object-id")
+            .join(format!("{}", now_millis()));
+        std::fs::create_dir_all(&root).expect("create root");
+        let file = root.join("one.bin");
+        std::fs::write(&file, b"contents").expect("write file");
+
+        let scanner = Scanner::new(ScanOptions {
+            root: root.clone(),
+            workers: 1,
+        });
+        let mut writer = IndexWriter::open_in_memory().expect("open writer");
+        for event in scanner.scan() {
+            writer.handle_event(&event).expect("index event");
+            if matches!(event, ScanEvent::Finished(_)) {
+                break;
+            }
+        }
+
+        let stored: Option<String> = writer
+            .connection()
+            .query_row("SELECT object_id FROM files LIMIT 1", [], |row| row.get(0))
+            .expect("read file row");
+        let expected = crate::native::file_id::object_id(&file)
+            .expect("the filesystem knows this file")
+            .key();
+        assert_eq!(stored.as_deref(), Some(expected.as_str()));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The case path, size and last-modified cannot see: a file replaced in
+    /// place by an identical-looking one. Windows filesystem tunneling can even
+    /// hand the replacement the original's creation time, so the object id is
+    /// the only thing left that tells the truth.
+    #[test]
+    fn a_new_object_at_a_known_path_throws_away_the_old_hash() {
+        let mut writer = IndexWriter::open_in_memory().expect("open writer");
+        let path = std::path::PathBuf::from("/somewhere/one.bin");
+        let record = |id: u128| FileRecord {
+            parent: std::path::PathBuf::from("/somewhere"),
+            path: path.clone(),
+            name: "one.bin".to_string(),
+            extension: Some("bin".to_string()),
+            size: 4096,
+            modified: Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000)),
+            accessed: None,
+            created: Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000)),
+            object_id: Some(crate::native::file_id::ObjectId { volume: 7, id }),
+        };
+
+        writer.index_file(&record(1)).expect("first scan");
+        writer
+            .connection()
+            .execute(
+                "UPDATE files SET full_hash = 'abc', hash_state = 4",
+                [],
+            )
+            .expect("pretend the file was hashed");
+
+        // Everything a path-based check can see is unchanged. Only the object
+        // the path names is different.
+        writer.index_file(&record(2)).expect("second scan");
+
+        let (hash, state): (Option<String>, i64) = writer
+            .connection()
+            .query_row(
+                "SELECT full_hash, hash_state FROM files WHERE path = ?1",
+                params![path_to_string(&path)],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read file row");
+        assert_eq!(hash, None, "the old file's digest must not survive it");
+        assert_eq!(state, 0, "the replacement has not been hashed at all");
+    }
 
     #[test]
     fn writes_scan_events_to_sqlite() {

@@ -31,6 +31,9 @@ pub struct FileRecord {
     pub modified: Option<SystemTime>,
     pub accessed: Option<SystemTime>,
     pub created: Option<SystemTime>,
+    /// What the filesystem calls this object, when it would say. `None` on a
+    /// volume that does not answer; callers fall back to size and last-modified.
+    pub object_id: Option<crate::native::file_id::ObjectId>,
 }
 
 #[derive(Debug, Clone)]
