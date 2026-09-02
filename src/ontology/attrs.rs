@@ -1,5 +1,6 @@
 //! Attribute (EAV) CRUD and resolution.
 
+use crate::ontology::provenance::current_version;
 use crate::ontology::{source_priority, OntologyError, VOCABULARY_VERSION};
 use rusqlite::{params, Connection};
 
@@ -46,10 +47,13 @@ pub fn assert_attr(
     a: &NewAssertion<'_>,
 ) -> Result<Assertion, OntologyError> {
     let now = unix_now();
+    // Derived here rather than passed in: a caller that can supply the version
+    // is a caller that can forget it, and a fact with no version is exactly the
+    // one nobody can clean up later.
     conn.execute(
         "INSERT INTO ontology_attrs
-            (entity_id, key, value, source, confidence, asserted_at, vocabulary_version, display_in_global_views)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            (entity_id, key, value, source, confidence, asserted_at, vocabulary_version, display_in_global_views, source_version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             entity_id,
             a.key,
@@ -59,6 +63,7 @@ pub fn assert_attr(
             now,
             VOCABULARY_VERSION,
             if a.display_in_global_views { 1 } else { 0 },
+            current_version(a.source),
         ],
     )?;
     let id = conn.last_insert_rowid();

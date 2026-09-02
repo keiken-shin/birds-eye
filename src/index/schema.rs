@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 25;
+pub const CURRENT_SCHEMA_VERSION: u32 = 26;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -998,6 +998,31 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (25, strftime('%s', 'now'));
 "#;
 
+/// Migration 026: which *version* of a producer said this, and one dead table gone.
+///
+/// Every ontology fact already records what produced it. That answers "where
+/// did this come from" but not the question that matters when a parser turns
+/// out to be wrong: which conclusions came from the old one? Without the
+/// version there are two options and both are bad -- trust facts a known-broken
+/// extractor wrote, or re-extract a whole volume. `0` means the producer is
+/// identified by its name and changes by getting a new name, which is true of
+/// every rule. See `src/ontology/provenance.rs`.
+///
+/// `media_metadata` goes at the same time. It was declared in migration 001 and
+/// nothing has ever written a row to it or read one; keeping an empty table
+/// shaped like the right answer invites someone to fill it, and it has no
+/// source, no confidence and no version -- exactly the provenance this
+/// migration is adding everywhere else.
+pub const MIGRATION_026: &str = r#"
+ALTER TABLE ontology_attrs ADD COLUMN source_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ontology_relations ADD COLUMN source_version INTEGER NOT NULL DEFAULT 0;
+
+DROP TABLE IF EXISTS media_metadata;
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (26, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -1024,6 +1049,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (23, MIGRATION_023),
     (24, MIGRATION_024),
     (25, MIGRATION_025),
+    (26, MIGRATION_026),
 ];
 
 #[cfg(test)]
@@ -1115,8 +1141,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 25);
-        assert_eq!(ALL_MIGRATIONS.len(), 25);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 26);
+        assert_eq!(ALL_MIGRATIONS.len(), 26);
     }
 
     #[test]
@@ -1220,6 +1246,26 @@ mod tests {
         assert_eq!(count, 1, "scan_issues must exist after migrations");
     }
 
+    /// A table nothing writes and nothing reads is not harmless: it is shaped
+    /// like the right answer and has none of the provenance the ontology
+    /// carries, so the next person to fill it loses that silently.
+    #[test]
+    fn the_dead_media_metadata_table_is_gone_after_migrations() {
+        use rusqlite::Connection;
+        let conn = Connection::open_in_memory().expect("open memory db");
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).expect("apply migration");
+        }
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='media_metadata'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query sqlite_master");
+        assert_eq!(count, 0, "media_metadata must not survive migrations");
+    }
+
     #[test]
     fn migration_contains_core_tables_and_indexes() {
         for table in [
@@ -1227,7 +1273,6 @@ mod tests {
             "folders",
             "scan_sessions",
             "duplicate_groups",
-            "media_metadata",
             "extension_stats",
             "timeline_history",
         ] {

@@ -4,6 +4,7 @@
 //! cleanup and cataloging can act on meaning rather than on size alone.
 //! `docs/develop/architecture.md` carries the design rationale.
 
+pub mod provenance;
 pub mod attrs;
 pub mod catalog;
 pub mod cleanup;

@@ -1,5 +1,6 @@
 //! Typed-relation CRUD.
 
+use crate::ontology::provenance::current_version;
 use crate::ontology::{OntologyError, VOCABULARY_VERSION};
 use rusqlite::{params, Connection};
 
@@ -27,8 +28,8 @@ pub fn assert_relation(conn: &Connection, r: &NewRelation<'_>) -> Result<Relatio
     let now = unix_now();
     conn.execute(
         "INSERT INTO ontology_relations
-            (subject_id, predicate, object_id, source, confidence, asserted_at, vocabulary_version)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            (subject_id, predicate, object_id, source, confidence, asserted_at, vocabulary_version, source_version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             r.subject_id,
             r.predicate,
@@ -37,6 +38,7 @@ pub fn assert_relation(conn: &Connection, r: &NewRelation<'_>) -> Result<Relatio
             r.confidence,
             now,
             VOCABULARY_VERSION,
+            current_version(r.source),
         ],
     )?;
     Ok(Relation {
