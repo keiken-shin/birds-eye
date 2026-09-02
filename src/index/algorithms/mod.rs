@@ -4,7 +4,7 @@ use crate::index::writer::{FinalizationProgress, IndexError};
 
 mod xxh3;
 
-pub use xxh3::full_file_hash;
+pub use xxh3::{compare_files_bytewise, full_file_hash, BytewiseComparison};
 
 /// Compute progressive XXH3 sample and full hashes for duplicate candidates,
 /// then leave duplicate-group rebuilding to the caller. `cancel` is polled per

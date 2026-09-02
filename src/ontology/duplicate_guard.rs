@@ -27,7 +27,7 @@
 //! That is the honest cost of the claim; giving it progress and a cancel means a
 //! background job, which is worth building only once this proves slow in use.
 
-use crate::index::algorithms::full_file_hash;
+use crate::index::algorithms::compare_files_bytewise;
 use crate::ontology::fs_identity::unchanged_at;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashSet;
@@ -129,29 +129,33 @@ fn verify_group_membership(
         );
     }
 
-    // The complete read. Hash this file once, then each survivor until one
-    // matches, so the common case costs two files rather than the whole group.
-    // `full_file_hash` refuses rather than returning a digest when the file
-    // changes under the read, so this branch covers "unreadable" and "someone is
-    // writing to it right now" alike. Both mean the same thing here: no
-    // verification, so no deletion.
-    let mine = match full_file_hash(Path::new(path)) {
-        Ok(hash) => hash,
-        Err(error) => {
-            return Some(format!("it could not be verified -- {error}"));
-        }
-    };
-    store_full_hash(conn, row.id, &mine);
-
+    // Both files are read in full and compared byte for byte, not by digest.
+    // Verification has to read them anyway, so proof costs the same as strong
+    // evidence -- and it takes the hash out of the destructive path entirely.
+    // No argument about which digest is strong enough can reach a file Bird's
+    // Eye is about to delete.
+    //
+    // Stops at the first survivor that matches, so the common case is two files
+    // rather than the whole group. A survivor we cannot read proves nothing
+    // either way, so it is passed over rather than counted as a difference.
+    let mut last_error: Option<String> = None;
     for (sibling_id, sibling_path) in &siblings {
-        let Ok(theirs) = full_file_hash(Path::new(sibling_path)) else {
-            // A sibling we cannot read proves nothing either way. Try the next.
-            continue;
-        };
-        store_full_hash(conn, *sibling_id, &theirs);
-        if theirs == mine {
-            return None;
+        match compare_files_bytewise(Path::new(path), Path::new(sibling_path)) {
+            Ok(result) => {
+                store_full_hash(conn, row.id, &result.left_digest);
+                store_full_hash(conn, *sibling_id, &result.right_digest);
+                if result.identical {
+                    return None;
+                }
+            }
+            Err(error) => last_error = Some(error.to_string()),
         }
+    }
+
+    // Every survivor failed to read: that is "we could not tell", which is a
+    // different thing from "they differ" and must not be reported as it.
+    if let Some(error) = last_error {
+        return Some(format!("it could not be verified -- {error}"));
     }
 
     Some(
@@ -222,13 +226,15 @@ mod tests {
 
     impl Fixture {
         fn new(name: &str) -> Self {
-            let root = std::env::temp_dir().join("birdseye-dupe-guard").join(format!(
-                "{name}-{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
+            let root = std::env::temp_dir()
+                .join("birdseye-dupe-guard")
+                .join(format!(
+                    "{name}-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                ));
             std::fs::create_dir_all(&root).unwrap();
             Self { root }
         }
@@ -383,9 +389,43 @@ mod tests {
 
         assert!(refusals(&conn, &[a]).is_empty());
         let state: i64 = conn
-            .query_row("SELECT hash_state FROM files WHERE id = 1", [], |r| r.get(0))
+            .query_row("SELECT hash_state FROM files WHERE id = 1", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(state, 0, "no group means no reason to read the file");
+    }
+
+    /// The comparison is byte for byte, not digest against digest, so a single
+    /// differing byte anywhere refuses the deletion -- including the last one,
+    /// which no sampling scheme ever reaches.
+    #[test]
+    fn a_difference_in_the_final_byte_is_caught() {
+        let conn = migrated_conn();
+        let fx = Fixture::new("last-byte");
+        let (body_a, _) = sampled_pair_bodies();
+        let mut body_b = body_a.clone();
+        *body_b.last_mut().unwrap() ^= 0xFF;
+        let a = fx.add(&conn, 1, "a.bin", &body_a);
+        fx.add(&conn, 2, "b.bin", &body_b);
+        group(&conn, 0.80, &[1, 2]);
+
+        let refused = refusals(&conn, std::slice::from_ref(&a));
+        assert_eq!(refused.len(), 1);
+        assert!(refused[0].1.contains("not identical"), "{}", refused[0].1);
+
+        // Both sides were read in the same pass, so both digests are worth
+        // keeping even though the files turned out to differ.
+        let mut stmt = conn
+            .prepare("SELECT full_hash FROM files ORDER BY id")
+            .unwrap();
+        let hashes: Vec<Option<String>> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(hashes[0].is_some() && hashes[1].is_some());
+        assert_ne!(hashes[0], hashes[1]);
     }
 
     /// The complete read is expensive; its result is kept.
@@ -400,9 +440,11 @@ mod tests {
 
         assert!(refusals(&conn, &[a]).is_empty());
         let (hash, state): (Option<String>, i64) = conn
-            .query_row("SELECT full_hash, hash_state FROM files WHERE id = 1", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            .query_row(
+                "SELECT full_hash, hash_state FROM files WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
         assert!(hash.is_some(), "the digest we paid for must be kept");
         assert_eq!(state, 4);

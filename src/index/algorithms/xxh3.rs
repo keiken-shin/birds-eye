@@ -82,18 +82,31 @@ where
                 params![full_hash, "xxh3-full-v1", id],
             )?;
         }
-        emit_counted_progress(progress, "Full hashing strong matches", index as u64 + 1, total);
+        emit_counted_progress(
+            progress,
+            "Full hashing strong matches",
+            index as u64 + 1,
+            total,
+        );
     }
     tx.commit()?;
     Ok(())
 }
 
 enum SampleResult {
-    Sampled { partial_hash: String, sample_hash: String },
-    Full { full_hash: String },
+    Sampled {
+        partial_hash: String,
+        sample_hash: String,
+    },
+    Full {
+        full_hash: String,
+    },
     /// Hashing failed — the file ends up with no hashes and is excluded from
     /// duplicate detection, so the reason is surfaced to the user as a scan issue.
-    Skipped { kind: SkipKind, reason: String },
+    Skipped {
+        kind: SkipKind,
+        reason: String,
+    },
     /// The scan was cancelled mid-hash; not an issue, nothing to report.
     Cancelled,
 }
@@ -144,7 +157,10 @@ fn classify(error: &std::io::Error) -> SkipKind {
 }
 
 fn skipped(error: &std::io::Error) -> SampleResult {
-    SampleResult::Skipped { kind: classify(error), reason: error.to_string() }
+    SampleResult::Skipped {
+        kind: classify(error),
+        reason: error.to_string(),
+    }
 }
 
 fn update_partial_hashes_for_duplicate_candidates<F, C>(
@@ -212,7 +228,10 @@ where
                 match with_lock_retry(|| sample_file_hash(Path::new(&path), size as u64)) {
                     Ok(sample_hash) => {
                         match with_lock_retry(|| partial_file_hash(Path::new(&path), size as u64)) {
-                            Ok(partial_hash) => SampleResult::Sampled { partial_hash, sample_hash },
+                            Ok(partial_hash) => SampleResult::Sampled {
+                                partial_hash,
+                                sample_hash,
+                            },
                             Err(error) => skipped(&error),
                         }
                     }
@@ -231,7 +250,10 @@ where
     let tx = connection.transaction()?;
     for (index, (id, path, result)) in results.into_iter().enumerate() {
         match result {
-            SampleResult::Sampled { partial_hash, sample_hash } => {
+            SampleResult::Sampled {
+                partial_hash,
+                sample_hash,
+            } => {
                 tx.execute(
                     "UPDATE files
                      SET partial_hash = ?1, sample_hash = ?2, full_hash = NULL,
@@ -262,7 +284,12 @@ where
             }
             SampleResult::Cancelled => {}
         }
-        emit_counted_progress(progress, "Sampling duplicate candidates", index as u64 + 1, total);
+        emit_counted_progress(
+            progress,
+            "Sampling duplicate candidates",
+            index as u64 + 1,
+            total,
+        );
     }
     crate::index::writer::add_scan_skips(&tx, scan_id, &tally)?;
     tx.commit()?;
@@ -461,6 +488,86 @@ pub fn full_file_hash(path: &Path) -> std::io::Result<String> {
     })
 }
 
+/// Read two files once each, in lockstep, and answer whether they are byte for
+/// byte the same -- returning both complete digests as a side effect.
+///
+/// A digest match is overwhelming evidence, and it is still evidence. Comparing
+/// the bytes is proof, and here it costs nothing extra: verification before a
+/// deletion has to read both files in full anyway, so the comparison rides along
+/// on reads that were already happening. That removes the hash from the
+/// destructive path entirely -- no argument about which digest is strong enough
+/// can reach a file Bird's Eye is about to delete.
+///
+/// Both reads are bracketed the same way a single hash is: either file moving
+/// mid-comparison is an error, not a mismatch, because "these differ" and "we
+/// could not tell" call for different words.
+pub struct BytewiseComparison {
+    pub identical: bool,
+    pub left_digest: String,
+    pub right_digest: String,
+}
+
+pub fn compare_files_bytewise(left: &Path, right: &Path) -> std::io::Result<BytewiseComparison> {
+    const BLOCK_SIZE: usize = 128 * 1024;
+
+    let mut left_file = File::open(left)?;
+    let mut right_file = File::open(right)?;
+    let left_before = stamp(&left_file)?;
+    let right_before = stamp(&right_file)?;
+
+    let mut left_hasher = Xxh3::new();
+    let mut right_hasher = Xxh3::new();
+    let mut left_buffer = vec![0_u8; BLOCK_SIZE];
+    let mut right_buffer = vec![0_u8; BLOCK_SIZE];
+    let mut identical = left_before.len == right_before.len;
+    let mut left_total = 0_u64;
+    let mut right_total = 0_u64;
+
+    // Keep hashing past the first difference: the digests are worth storing even
+    // when the answer is "not the same file", and abandoning the read would mean
+    // paying for it again on the next attempt.
+    loop {
+        let left_read = fill(&mut left_file, &mut left_buffer)?;
+        let right_read = fill(&mut right_file, &mut right_buffer)?;
+        if left_read == 0 && right_read == 0 {
+            break;
+        }
+        if left_read != right_read || left_buffer[..left_read] != right_buffer[..right_read] {
+            identical = false;
+        }
+        left_total += left_read as u64;
+        right_total += right_read as u64;
+        left_hasher.update(&left_buffer[..left_read]);
+        right_hasher.update(&right_buffer[..right_read]);
+    }
+
+    if left_total != left_before.len || right_total != right_before.len {
+        return Err(changed_while_reading());
+    }
+    if stamp(&left_file)? != left_before || stamp(&right_file)? != right_before {
+        return Err(changed_while_reading());
+    }
+
+    Ok(BytewiseComparison {
+        identical,
+        left_digest: format!("{:032x}", left_hasher.digest128()),
+        right_digest: format!("{:032x}", right_hasher.digest128()),
+    })
+}
+
+/// Fill the buffer as far as EOF allows. A short `read` is not EOF, and treating
+/// it as one would make two identical files compare unequal purely by timing.
+fn fill(file: &mut File, buffer: &mut [u8]) -> std::io::Result<usize> {
+    let mut filled = 0;
+    while filled < buffer.len() {
+        match file.read(&mut buffer[filled..])? {
+            0 => break,
+            n => filled += n,
+        }
+    }
+    Ok(filled)
+}
+
 fn hash_file_chunks(path: &Path, size: u64, chunks: &[(u64, usize)]) -> std::io::Result<String> {
     stable_read(path, Some(size), |file, _| {
         let mut hasher = Xxh3::new();
@@ -538,9 +645,34 @@ mod tests {
         })
         .expect_err("an unstable read must not return a value");
         assert!(
-            error.to_string().contains("changed while it was being read"),
+            error
+                .to_string()
+                .contains("changed while it was being read"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn a_bytewise_comparison_agrees_with_itself_on_identical_files() {
+        // Larger than one 128 KiB block, so the loop runs more than once.
+        let body: Vec<u8> = (0..300_000).map(|i| (i % 251) as u8).collect();
+        let a = write_temp("bytewise-same-a.bin", &body);
+        let b = write_temp("bytewise-same-b.bin", &body);
+
+        let result = compare_files_bytewise(&a, &b).unwrap();
+        assert!(result.identical);
+        assert_eq!(result.left_digest, result.right_digest);
+    }
+
+    #[test]
+    fn a_shorter_file_is_not_a_copy_even_when_its_bytes_are_a_prefix() {
+        let body: Vec<u8> = (0..300_000).map(|i| (i % 251) as u8).collect();
+        let a = write_temp("bytewise-prefix-a.bin", &body);
+        let b = write_temp("bytewise-prefix-b.bin", &body[..200_000]);
+
+        let result = compare_files_bytewise(&a, &b).unwrap();
+        assert!(!result.identical, "a truncated file is not a duplicate");
+        assert_ne!(result.left_digest, result.right_digest);
     }
 
     #[test]
