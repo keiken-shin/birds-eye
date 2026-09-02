@@ -3,6 +3,7 @@
 use crate::ontology::vocabulary::EntityKind;
 use crate::ontology::OntologyError;
 use rusqlite::{params, Connection, OptionalExtension};
+use std::str::FromStr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entity {

@@ -1215,7 +1215,6 @@ mod tests {
 
     #[test]
     fn ontology_migration_present() {
-        assert!(CURRENT_SCHEMA_VERSION >= 5);
         assert!(ALL_MIGRATIONS.iter().any(|(v, _)| *v == 5));
     }
 
@@ -1298,7 +1297,6 @@ mod tests {
 
     #[test]
     fn migration_006_present_and_contains_populator_state() {
-        assert!(CURRENT_SCHEMA_VERSION >= 6);
         let mig = ALL_MIGRATIONS
             .iter()
             .find(|(v, _)| *v == 6)
@@ -1334,7 +1332,6 @@ mod tests {
 
     #[test]
     fn migration_007_present_and_creates_cleanup_view() {
-        assert!(CURRENT_SCHEMA_VERSION >= 7);
         let mig = ALL_MIGRATIONS
             .iter()
             .find(|(v, _)| *v == 7)

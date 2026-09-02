@@ -18,18 +18,13 @@ impl From<rusqlite::Error> for IndexError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScanMode {
     /// Full pipeline: metadata index plus progressive duplicate refinement.
+    #[default]
     Smart,
     /// Metadata index only; duplicate refinement is skipped.
     MetadataOnly,
-}
-
-impl Default for ScanMode {
-    fn default() -> Self {
-        Self::Smart
-    }
 }
 
 impl ScanMode {
@@ -711,6 +706,10 @@ impl IndexWriter {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Seven filters, each independent of the others. Folding them into a
+    /// struct would move the same seven fields one level out and give every
+    /// caller a builder to fill in, which is more code saying the same thing.
+    #[allow(clippy::too_many_arguments)]
     pub fn search_files_filtered(
         &self,
         query: &str,
@@ -1926,7 +1925,7 @@ pub(crate) fn emit_counted_progress<F>(
     if progress_total <= 1
         || progress_current == progress_total
         || progress_current == 1
-        || progress_current % 128 == 0
+        || progress_current.is_multiple_of(128)
     {
         progress_stage(progress, message, progress_current, progress_total);
     }
@@ -2435,7 +2434,9 @@ mod tests {
             .expect("failed to record error event");
         assert_eq!(writer.scan_issues(10).expect("issues").len(), 1);
 
-        writer.probe_folders(&[locked.clone()]).expect("probe failed");
+        writer
+            .probe_folders(std::slice::from_ref(&locked))
+            .expect("probe failed");
 
         let issues = writer.scan_issues(10).expect("issues");
         assert!(issues.is_empty(), "recovered directory clears its issue");

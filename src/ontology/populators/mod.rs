@@ -78,7 +78,7 @@ impl PopulatorContext {
 
     pub fn note_file(&mut self) {
         self.counters.files_visited += 1;
-        if self.counters.files_visited % PROGRESS_EVERY == 0 {
+        if self.counters.files_visited.is_multiple_of(PROGRESS_EVERY) {
             if let Some(progress) = &self.progress {
                 progress(&self.populator_name, self.counters.files_visited);
             }
@@ -171,6 +171,9 @@ pub trait Populator: Send + Sync {
     ) -> Result<PopulatorOutcome, PopulatorError>;
 }
 
+/// One property row, and the arguments are its columns. A struct here would be
+/// a second name for the same record with a conversion in between.
+#[allow(clippy::too_many_arguments)]
 pub fn emit_property(
     conn: &mut Connection,
     ctx: &mut PopulatorContext,

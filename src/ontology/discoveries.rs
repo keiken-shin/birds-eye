@@ -8,6 +8,7 @@
 use crate::ontology::OntologyError;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Discovery {
@@ -39,17 +40,6 @@ impl DiscoveryStatus {
         }
     }
 
-    pub fn from_str(s: &str) -> Result<Self, OntologyError> {
-        match s {
-            "pending" => Ok(DiscoveryStatus::Pending),
-            "confirmed" => Ok(DiscoveryStatus::Confirmed),
-            "rejected" => Ok(DiscoveryStatus::Rejected),
-            "expired" => Ok(DiscoveryStatus::Expired),
-            other => Err(OntologyError::InvalidVocabulary(format!(
-                "DiscoveryStatus: {other}"
-            ))),
-        }
-    }
 }
 
 pub struct NewDiscovery<'a> {
@@ -204,6 +194,23 @@ fn unix_now() -> i64 {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }
+
+impl std::str::FromStr for DiscoveryStatus {
+    type Err = OntologyError;
+
+    fn from_str(s: &str) -> Result<Self, OntologyError> {
+        match s {
+            "pending" => Ok(DiscoveryStatus::Pending),
+            "confirmed" => Ok(DiscoveryStatus::Confirmed),
+            "rejected" => Ok(DiscoveryStatus::Rejected),
+            "expired" => Ok(DiscoveryStatus::Expired),
+            other => Err(OntologyError::InvalidVocabulary(format!(
+                "DiscoveryStatus: {other}"
+            ))),
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

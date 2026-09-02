@@ -80,8 +80,7 @@ pub fn candidates(conn: &Connection, zones: &[String]) -> Result<Vec<Candidate>,
         return Ok(Vec::new());
     }
 
-    let placeholders = std::iter::repeat("?")
-        .take(zone_of.len())
+    let placeholders = std::iter::repeat_n("?", zone_of.len())
         .collect::<Vec<_>>()
         .join(",");
     let protected_roles = PROTECTED_ROLES
@@ -169,8 +168,7 @@ fn settled_subtrees(
     conn: &Connection,
     zone_folders: &[ZoneFolder],
 ) -> Result<HashSet<i64>, OntologyError> {
-    let placeholders = std::iter::repeat("?")
-        .take(zone_folders.len())
+    let placeholders = std::iter::repeat_n("?", zone_folders.len())
         .collect::<Vec<_>>()
         .join(",");
     let sql = format!(

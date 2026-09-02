@@ -6,6 +6,7 @@
 use crate::ontology::vocabulary::{keys, Sensitivity};
 use crate::ontology::OntologyError;
 use rusqlite::{params, Connection};
+use std::str::FromStr;
 
 pub fn is_globally_visible_file(conn: &Connection, file_id: i64) -> Result<bool, OntologyError> {
     is_globally_visible(conn, "File", "linked_file_id", file_id)

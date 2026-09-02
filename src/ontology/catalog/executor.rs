@@ -106,7 +106,7 @@ pub fn execute_plan_with(
         // this same session marks sources deleted without inserting destinations.
         // `Option<Option<i64>>` — outer None means no row, inner Some means the
         // row is already soft-deleted. Both disqualify the item.
-        let row: Option<(Option<i64>, i64, Option<i64>, Option<String>)> = conn
+        let row: Option<ReviewedRow> = conn
             .query_row(
                 "SELECT deleted_at, size, modified_at, object_id FROM files WHERE id = ?1",
                 params![item.file_id],
@@ -190,6 +190,11 @@ pub fn execute_plan_with(
         failed,
     })
 }
+
+/// What the index says about a source file at execute time: its `deleted_at`,
+/// the size and mtime it was reviewed at, and the object id if one was
+/// recorded. `None` for the whole thing means there is no row at all.
+type ReviewedRow = (Option<i64>, i64, Option<i64>, Option<String>);
 
 /// Ask the destination side the questions that are true of the whole plan,
 /// before the first byte moves. `Err(reason)` refuses the plan, leaving it

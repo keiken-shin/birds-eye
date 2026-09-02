@@ -144,7 +144,7 @@ fn list_indexes(app: tauri::AppHandle) -> Result<Vec<IndexMetadataDto>, String> 
         }
     }
 
-    entries.sort_by(|a, b| b.last_scanned_at.cmp(&a.last_scanned_at));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.last_scanned_at));
     Ok(entries)
 }
 

@@ -13,3 +13,8 @@ birds-eye = { path = ".." }
 serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
+
+# Same gate as the core crate: a warning count that nobody counts is where a
+# real warning hides.
+[lints.clippy]
+all = { level = "deny", priority = -1 }

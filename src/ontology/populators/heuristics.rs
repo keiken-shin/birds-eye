@@ -14,6 +14,12 @@ const FOLDER_BATCH_SIZE: i64 = 50;
 
 pub struct StructuralHeuristicPopulator;
 
+impl Default for StructuralHeuristicPopulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StructuralHeuristicPopulator {
     pub fn new() -> Self {
         Self
@@ -624,6 +630,8 @@ mod tests {
         .unwrap();
     }
 
+    /// A test fixture that writes one row. The columns are the arguments.
+    #[allow(clippy::too_many_arguments)]
     fn insert_file(
         conn: &Connection,
         id: i64,

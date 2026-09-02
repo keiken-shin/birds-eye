@@ -22,16 +22,6 @@ impl EntityKind {
         }
     }
 
-    pub fn from_str(s: &str) -> Result<Self, OntologyError> {
-        match s {
-            "File" => Ok(Self::File),
-            "Folder" => Ok(Self::Folder),
-            "Project" => Ok(Self::Project),
-            "Work" => Ok(Self::Work),
-            "Theme" => Ok(Self::Theme),
-            other => Err(OntologyError::InvalidVocabulary(format!("EntityKind: {other}"))),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,19 +50,6 @@ impl Role {
         }
     }
 
-    pub fn from_str(s: &str) -> Result<Self, OntologyError> {
-        match s {
-            "source" => Ok(Self::Source),
-            "derivative" => Ok(Self::Derivative),
-            "reference" => Ok(Self::Reference),
-            "asset" => Ok(Self::Asset),
-            "tool" => Ok(Self::Tool),
-            "backup" => Ok(Self::Backup),
-            "scratch" => Ok(Self::Scratch),
-            "system" => Ok(Self::System),
-            other => Err(OntologyError::InvalidVocabulary(format!("Role: {other}"))),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,18 +72,6 @@ impl Replaceability {
         }
     }
 
-    pub fn from_str(s: &str) -> Result<Self, OntologyError> {
-        match s {
-            "regenerable" => Ok(Self::Regenerable),
-            "redownloadable" => Ok(Self::Redownloadable),
-            "recoverable-with-effort" => Ok(Self::RecoverableWithEffort),
-            "irreplaceable" => Ok(Self::Irreplaceable),
-            "unknown" => Ok(Self::Unknown),
-            other => Err(OntologyError::InvalidVocabulary(format!(
-                "Replaceability: {other}"
-            ))),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,18 +89,6 @@ impl Sensitivity {
             Self::Normal => "normal",
             Self::Private => "private",
             Self::Restricted => "restricted",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Result<Self, OntologyError> {
-        match s {
-            "public" => Ok(Self::Public),
-            "normal" => Ok(Self::Normal),
-            "private" => Ok(Self::Private),
-            "restricted" => Ok(Self::Restricted),
-            other => Err(OntologyError::InvalidVocabulary(format!(
-                "Sensitivity: {other}"
-            ))),
         }
     }
 
@@ -164,18 +117,6 @@ impl Lifecycle {
         }
     }
 
-    pub fn from_str(s: &str) -> Result<Self, OntologyError> {
-        match s {
-            "planning" => Ok(Self::Planning),
-            "active" => Ok(Self::Active),
-            "finished" => Ok(Self::Finished),
-            "archived" => Ok(Self::Archived),
-            "abandoned" => Ok(Self::Abandoned),
-            other => Err(OntologyError::InvalidVocabulary(format!(
-                "Lifecycle: {other}"
-            ))),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -204,19 +145,6 @@ impl Origin {
         }
     }
 
-    pub fn from_str(s: &str) -> Result<Self, OntologyError> {
-        match s {
-            "user-created" => Ok(Self::UserCreated),
-            "web-download" => Ok(Self::WebDownload),
-            "phone-screenshot" => Ok(Self::PhoneScreenshot),
-            "phone-camera" => Ok(Self::PhoneCamera),
-            "messenger-received" => Ok(Self::MessengerReceived),
-            "app-export" => Ok(Self::AppExport),
-            "archive-extracted" => Ok(Self::ArchiveExtracted),
-            "unknown" => Ok(Self::Unknown),
-            other => Err(OntologyError::InvalidVocabulary(format!("Origin: {other}"))),
-        }
-    }
 }
 
 /// Property keys (the `key` column of `ontology_attrs`).
@@ -241,9 +169,112 @@ pub mod predicates {
     pub const DEPICTS: &str = "depicts";
 }
 
+impl std::str::FromStr for EntityKind {
+    type Err = OntologyError;
+
+    fn from_str(s: &str) -> Result<Self, OntologyError> {
+        match s {
+            "File" => Ok(Self::File),
+            "Folder" => Ok(Self::Folder),
+            "Project" => Ok(Self::Project),
+            "Work" => Ok(Self::Work),
+            "Theme" => Ok(Self::Theme),
+            other => Err(OntologyError::InvalidVocabulary(format!("EntityKind: {other}"))),
+        }
+    }
+}
+
+impl std::str::FromStr for Role {
+    type Err = OntologyError;
+
+    fn from_str(s: &str) -> Result<Self, OntologyError> {
+        match s {
+            "source" => Ok(Self::Source),
+            "derivative" => Ok(Self::Derivative),
+            "reference" => Ok(Self::Reference),
+            "asset" => Ok(Self::Asset),
+            "tool" => Ok(Self::Tool),
+            "backup" => Ok(Self::Backup),
+            "scratch" => Ok(Self::Scratch),
+            "system" => Ok(Self::System),
+            other => Err(OntologyError::InvalidVocabulary(format!("Role: {other}"))),
+        }
+    }
+}
+
+impl std::str::FromStr for Replaceability {
+    type Err = OntologyError;
+
+    fn from_str(s: &str) -> Result<Self, OntologyError> {
+        match s {
+            "regenerable" => Ok(Self::Regenerable),
+            "redownloadable" => Ok(Self::Redownloadable),
+            "recoverable-with-effort" => Ok(Self::RecoverableWithEffort),
+            "irreplaceable" => Ok(Self::Irreplaceable),
+            "unknown" => Ok(Self::Unknown),
+            other => Err(OntologyError::InvalidVocabulary(format!(
+                "Replaceability: {other}"
+            ))),
+        }
+    }
+}
+
+impl std::str::FromStr for Sensitivity {
+    type Err = OntologyError;
+
+    fn from_str(s: &str) -> Result<Self, OntologyError> {
+        match s {
+            "public" => Ok(Self::Public),
+            "normal" => Ok(Self::Normal),
+            "private" => Ok(Self::Private),
+            "restricted" => Ok(Self::Restricted),
+            other => Err(OntologyError::InvalidVocabulary(format!(
+                "Sensitivity: {other}"
+            ))),
+        }
+    }
+}
+
+impl std::str::FromStr for Lifecycle {
+    type Err = OntologyError;
+
+    fn from_str(s: &str) -> Result<Self, OntologyError> {
+        match s {
+            "planning" => Ok(Self::Planning),
+            "active" => Ok(Self::Active),
+            "finished" => Ok(Self::Finished),
+            "archived" => Ok(Self::Archived),
+            "abandoned" => Ok(Self::Abandoned),
+            other => Err(OntologyError::InvalidVocabulary(format!(
+                "Lifecycle: {other}"
+            ))),
+        }
+    }
+}
+
+impl std::str::FromStr for Origin {
+    type Err = OntologyError;
+
+    fn from_str(s: &str) -> Result<Self, OntologyError> {
+        match s {
+            "user-created" => Ok(Self::UserCreated),
+            "web-download" => Ok(Self::WebDownload),
+            "phone-screenshot" => Ok(Self::PhoneScreenshot),
+            "phone-camera" => Ok(Self::PhoneCamera),
+            "messenger-received" => Ok(Self::MessengerReceived),
+            "app-export" => Ok(Self::AppExport),
+            "archive-extracted" => Ok(Self::ArchiveExtracted),
+            "unknown" => Ok(Self::Unknown),
+            other => Err(OntologyError::InvalidVocabulary(format!("Origin: {other}"))),
+        }
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
     use crate::ontology::OntologyError;
 
     fn round_trip<T, F, G>(values: &[T], to_str: F, from_str: G)

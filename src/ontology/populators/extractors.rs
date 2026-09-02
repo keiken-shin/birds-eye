@@ -12,6 +12,7 @@ use crate::ontology::populators::{
 use crate::ontology::vocabulary::{keys, Sensitivity};
 use rusqlite::Connection;
 use std::fs;
+use std::str::FromStr;
 
 const BATCH_SIZE: i64 = 200;
 const MAX_EXTRACT_BYTES: usize = 2 * 1024 * 1024;
@@ -23,6 +24,12 @@ pub const KEY_CAPTURED_AT: &str = "capturedAt";
 pub const KEY_ARCHIVE_ENTRY_COUNT: &str = "archiveEntryCount";
 
 pub struct MetadataExtractorPopulator;
+
+impl Default for MetadataExtractorPopulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl MetadataExtractorPopulator {
     pub fn new() -> Self {
@@ -470,7 +477,7 @@ mod tests {
 
     #[test]
     fn jpeg_ascii_datetime_is_extracted_as_captured_at() {
-        let bytes = b"\xff\xd8\xff\xe1Exif\0\02026:06:08 12:34:56\0";
+        let bytes = b"\xff\xd8\xff\xe1Exif\x00\x002026:06:08 12:34:56\x00";
         let facts = extract_jpeg_exif(bytes);
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].key, KEY_CAPTURED_AT);

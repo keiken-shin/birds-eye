@@ -15,6 +15,12 @@ pub struct PhaseTimingEntry {
     pub duration_ms: u64,
 }
 
+impl Default for PhaseTimer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PhaseTimer {
     pub fn new() -> Self {
         Self {

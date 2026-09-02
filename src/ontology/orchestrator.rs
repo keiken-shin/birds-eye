@@ -19,6 +19,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::str::FromStr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PopulatorStatus {
@@ -40,18 +41,6 @@ impl PopulatorStatus {
         }
     }
 
-    pub fn from_str(value: &str) -> Result<Self, OntologyError> {
-        match value {
-            "idle" => Ok(Self::Idle),
-            "running" => Ok(Self::Running),
-            "paused" => Ok(Self::Paused),
-            "completed" => Ok(Self::Completed),
-            "failed" => Ok(Self::Failed),
-            other => Err(OntologyError::InvalidVocabulary(format!(
-                "PopulatorStatus: {other}"
-            ))),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -336,6 +325,24 @@ fn unix_now() -> i64 {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }
+
+impl std::str::FromStr for PopulatorStatus {
+    type Err = OntologyError;
+
+    fn from_str(value: &str) -> Result<Self, OntologyError> {
+        match value {
+            "idle" => Ok(Self::Idle),
+            "running" => Ok(Self::Running),
+            "paused" => Ok(Self::Paused),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            other => Err(OntologyError::InvalidVocabulary(format!(
+                "PopulatorStatus: {other}"
+            ))),
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

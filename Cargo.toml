@@ -27,3 +27,12 @@ path = "src/lib.rs"
 [[bin]]
 name = "birds-eye-scan"
 path = "src/main.rs"
+
+# The gate that stops the warning count creeping back up. It was 24 before
+# anyone counted, which is how a real warning hides. Denying at the crate level
+# means every build gets the gate, rather than only whoever remembers the flag.
+#
+# A toolchain upgrade that adds a lint will fail the build until it is dealt
+# with. That is the point, and it is one commit to fix.
+[lints.clippy]
+all = { level = "deny", priority = -1 }
