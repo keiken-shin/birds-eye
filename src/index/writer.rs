@@ -5,6 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::index::analysis::AnalysisLevel;
 
 #[derive(Debug)]
 pub enum IndexError {
@@ -135,6 +136,10 @@ pub struct DuplicateFileSummary {
     pub hash_state: i64,
     /// `files.id` — see `FileSearchResult::id`.
     pub id: i64,
+    /// Whether the last read of this file could be trusted: `stable`, or the
+    /// name of what went wrong. `None` means no read has been attempted, which
+    /// is a different thing from a read that failed.
+    pub verification_status: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -926,7 +931,8 @@ impl IndexWriter {
         limit: usize,
     ) -> Result<Vec<DuplicateFileSummary>, IndexError> {
         let mut statement = self.connection.prepare(
-            "SELECT files.path, files.size, files.modified_at, files.hash_state, files.id
+            "SELECT files.path, files.size, files.modified_at, files.hash_state, files.id,
+                    files.verification_status
              FROM duplicate_group_files dgf
              JOIN files ON files.id = dgf.file_id
              WHERE dgf.group_id = ?1 AND files.deleted_at IS NULL
@@ -940,6 +946,7 @@ impl IndexWriter {
                 modified_at: row.get(2)?,
                 hash_state: row.get(3)?,
                 id: row.get(4)?,
+                verification_status: row.get(5)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -1341,10 +1348,12 @@ impl IndexWriter {
                 sample_hash = CASE WHEN r.same_content THEN files.sample_hash END,
                 full_hash = CASE WHEN r.same_content THEN files.full_hash END,
                 hash_algorithm = CASE WHEN r.same_content THEN files.hash_algorithm END,
-                hash_state = CASE WHEN r.same_content THEN files.hash_state ELSE 0 END
+                hash_state = CASE WHEN r.same_content THEN files.hash_state ELSE ?1 END,
+                verification_status =
+                    CASE WHEN r.same_content THEN files.verification_status END
              FROM _renames r
              WHERE files.id = r.old_id",
-            [],
+            params![AnalysisLevel::None.as_i64()],
         )?;
 
         // The ontology names a file by its path, so the row surviving the move
@@ -1748,6 +1757,14 @@ impl IndexWriter {
                           AND excluded.object_id IS NOT NULL
                           AND files.object_id IS NOT excluded.object_id)
                     THEN 0 ELSE files.hash_state END,
+                verification_status = CASE
+                    WHEN files.size IS NOT excluded.size
+                      OR files.modified_at IS NOT excluded.modified_at
+                      OR files.created_at IS NOT excluded.created_at
+                      OR (files.object_id IS NOT NULL
+                          AND excluded.object_id IS NOT NULL
+                          AND files.object_id IS NOT excluded.object_id)
+                    THEN NULL ELSE files.verification_status END,
                 folder_id = excluded.folder_id,
                 name = excluded.name,
                 extension = excluded.extension,
@@ -2032,7 +2049,7 @@ mod tests {
         writer
             .connection()
             .execute(
-                "UPDATE files SET full_hash = 'abc', hash_state = 4",
+                &format!("UPDATE files SET full_hash = 'abc', hash_state = {}", AnalysisLevel::Complete.as_i64()),
                 [],
             )
             .expect("pretend the file was hashed");
@@ -2819,7 +2836,7 @@ mod tests {
         writer
             .connection()
             .execute(
-                "UPDATE files SET full_hash = 'kept', hash_state = 4 WHERE id = ?1",
+                &format!("UPDATE files SET full_hash = 'kept', hash_state = {} WHERE id = ?1", AnalysisLevel::Complete.as_i64()),
                 params![original_id],
             )
             .expect("record a digest");

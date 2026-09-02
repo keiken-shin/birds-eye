@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 24;
+pub const CURRENT_SCHEMA_VERSION: u32 = 25;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -980,6 +980,24 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (24, strftime('%s', 'now'));
 "#;
 
+/// Whether the last read of a file could be trusted, as opposed to how much of
+/// it was read.
+///
+/// `hash_state` was carrying both. `4` was written as "we read all of it" and
+/// used as "we read all of it and it held still", and the deletion guard leans
+/// on the second one. NULL means no read has been attempted. Otherwise it is
+/// `stable`, or the name of what went wrong -- the same words the scan issue
+/// list uses, so there is one vocabulary rather than two.
+///
+/// See `src/index/analysis.rs` for why this is a column on `files` rather than
+/// a join into `scan_issues`.
+pub const MIGRATION_025: &str = r#"
+ALTER TABLE files ADD COLUMN verification_status TEXT;
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (25, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -1005,6 +1023,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (22, MIGRATION_022),
     (23, MIGRATION_023),
     (24, MIGRATION_024),
+    (25, MIGRATION_025),
 ];
 
 #[cfg(test)]
@@ -1096,8 +1115,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 24);
-        assert_eq!(ALL_MIGRATIONS.len(), 24);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 25);
+        assert_eq!(ALL_MIGRATIONS.len(), 25);
     }
 
     #[test]

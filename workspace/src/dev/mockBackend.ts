@@ -299,7 +299,13 @@ const AGE_BUCKETS = [
 /* Duplicates                                                          */
 /* ------------------------------------------------------------------ */
 
-type DupFileFix = { path: string; size: number; modified_at: number; hash_state: 0 | 2 | 4 };
+type DupFileFix = {
+  path: string;
+  size: number;
+  modified_at: number;
+  hash_state: 0 | 2 | 4;
+  verification_status?: "locked" | "offline" | "denied" | "changed" | "failed";
+};
 
 const DUP_GROUPS: Array<{
   id: number;
@@ -329,7 +335,9 @@ const DUP_GROUPS: Array<{
     files: [
       { path: j("Videos", "Exports", "yt-final-v12.mp4"), size: Math.round(2.7 * GB), modified_at: NOW - 96 * DAY, hash_state: 4 },
       { path: j("Downloads", "yt-final-v12.mp4"), size: Math.round(2.7 * GB), modified_at: NOW - 94 * DAY, hash_state: 4 },
-      { path: j("Downloads", "yt-final-v12 (1).mp4"), size: Math.round(2.7 * GB), modified_at: NOW - 91 * DAY, hash_state: 4 },
+      // One that Bird's Eye tried to read and could not, so the reason tag is
+      // reachable in browser dev.
+      { path: j("Downloads", "yt-final-v12 (1).mp4"), size: Math.round(2.7 * GB), modified_at: NOW - 91 * DAY, hash_state: 0, verification_status: "locked" },
     ],
   },
   {
@@ -1094,7 +1102,13 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       return done(searchFiles(request as Parameters<typeof searchFiles>[0]));
     case "duplicate_group_files": {
       const group = DUP_GROUPS.find((g) => g.id === (request.group_id as number));
-      return done((group?.files ?? []).map((f) => ({ ...f, file_id: mockFileId(f.path) })));
+      return done(
+        (group?.files ?? []).map((f) => ({
+          ...f,
+          file_id: mockFileId(f.path),
+          verification_status: f.verification_status ?? (f.hash_state === 0 ? null : "stable"),
+        }))
+      );
     }
     case "treemap_lens_data":
       return done(ontologyEnabled ? LENS : []);

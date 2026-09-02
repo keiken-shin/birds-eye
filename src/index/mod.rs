@@ -1,4 +1,5 @@
 pub mod algorithms;
+pub mod analysis;
 pub mod coverage;
 pub mod schema;
 pub mod writer;

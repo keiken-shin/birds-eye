@@ -43,6 +43,17 @@ fn main() {
                 );
             }
             ScanEvent::Finished(report) => {
+                // The walk only records what each file claims about itself.
+                // Without this the index it just wrote answers "nothing here is
+                // a copy of anything" to every question -- the same gap #67
+                // closed in scan_to_index, and this binary is how the index
+                // gets built by hand.
+                if let Some(writer) = index_writer.as_mut() {
+                    println!("refining duplicates...");
+                    writer
+                        .refine_duplicates()
+                        .expect("failed to refine duplicates");
+                }
                 println!(
                     "finished files={} folders={} bytes={} elapsed_ms={}",
                     report.stats.files_scanned,

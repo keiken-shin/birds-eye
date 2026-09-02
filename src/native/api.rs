@@ -146,6 +146,10 @@ pub struct DuplicateFileSummaryDto {
     pub modified_at: Option<i64>,
     /// 0 = unresolved (size match only), 2 = sample hash, 4 = full-file XXH3
     pub hash_state: i64,
+    /// Why this file has the analysis level it has. `None` means nothing was
+    /// attempted; `stable` means the read held still; anything else names what
+    /// stopped it -- locked, offline, denied, changed.
+    pub verification_status: Option<String>,
     /// See `FileSearchResultDto::file_id`.
     pub file_id: i64,
 }
@@ -1135,6 +1139,7 @@ pub fn duplicate_group_files(
             size: file.size,
             modified_at: file.modified_at,
             hash_state: file.hash_state,
+            verification_status: file.verification_status,
             file_id: file.id,
         })
         .collect::<Vec<_>>();
@@ -1998,7 +2003,7 @@ mod tests {
         // After smart-mode refinement, files should have hash_state >= 2
         // (either sample hash=2 or full-file hash=4)
         assert!(
-            files.iter().all(|f| f.hash_state == 4),
+            files.iter().all(|f| f.hash_state == crate::index::analysis::AnalysisLevel::Complete.as_i64()),
             "expected hash_state == 4 after full refinement of small files, got {:?}",
             files.iter().map(|f| f.hash_state).collect::<Vec<_>>()
         );

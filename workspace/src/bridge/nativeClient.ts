@@ -113,12 +113,30 @@ export type NativeScanIssue = {
   message: string;
 };
 
+/** How much of a file was read: none, sampled, or every byte. */
+export type AnalysisLevel = 0 | 2 | 4;
+
+/**
+ * Why a file has the analysis level it has.
+ * `null` means nothing was attempted; `"stable"` means the read held still;
+ * anything else names what stopped it.
+ */
+export type VerificationStatus =
+  | null
+  | "stable"
+  | "offline"
+  | "locked"
+  | "denied"
+  | "changed"
+  | "failed";
+
 export type NativeDuplicateFile = {
   path: string;
   size: number;
   modified_at: number | null;
-  hash_state: 0 | 2 | 4;
+  hash_state: AnalysisLevel;
   file_id: number;
+  verification_status: VerificationStatus;
 };
 
 /**

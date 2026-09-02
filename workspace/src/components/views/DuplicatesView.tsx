@@ -26,6 +26,19 @@ const HASH_TAG: Record<number, { label: string; tone: "green" | "neutral" }> = {
   0: { label: "SIZE MATCH", tone: "neutral" },
 };
 
+/**
+ * A file with no digest may simply never have needed one, or Bird's Eye may
+ * have tried and been stopped. "SIZE MATCH" reads like the first and is wrong
+ * for the second, and the second is the one the person can do something about.
+ */
+const UNREAD_REASON: Record<string, string> = {
+  offline: "STORED ONLINE",
+  locked: "IN USE",
+  denied: "NOT ALLOWED",
+  changed: "KEPT CHANGING",
+  failed: "COULD NOT READ",
+};
+
 function ConfidenceTag({ confidence }: { confidence: number }) {
   const evidence = duplicateEvidence(confidence);
   return <Tag tone={evidence === "exact" ? "green" : "neutral"}>{EVIDENCE_LABEL[evidence]}</Tag>;
@@ -316,7 +329,13 @@ export function DuplicatesView() {
                   {files.map((f) => {
                     const name = baseName(f.path);
                     const staged = isStaged(f.path);
-                    const hash = HASH_TAG[f.hash_state] ?? HASH_TAG[0];
+                    const stopped =
+                      f.verification_status && f.verification_status !== "stable"
+                        ? UNREAD_REASON[f.verification_status]
+                        : null;
+                    const hash = stopped
+                      ? { label: stopped, tone: "neutral" as const }
+                      : HASH_TAG[f.hash_state] ?? HASH_TAG[0];
                     return (
                       <Card
                         key={f.path}

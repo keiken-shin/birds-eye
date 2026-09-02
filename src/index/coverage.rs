@@ -22,6 +22,7 @@
 use crate::index::writer::IndexError;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
+use crate::index::analysis::AnalysisLevel;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct ScanCoverage {
@@ -88,11 +89,15 @@ impl ScanCoverage {
 pub fn scan_coverage(conn: &Connection, scan_id: i64) -> Result<ScanCoverage, IndexError> {
     let (files_indexed, read_fully, read_sampled, not_needed) = conn.query_row(
         "SELECT COUNT(*),
-                COALESCE(SUM(hash_state = 4), 0),
-                COALESCE(SUM(hash_state = 2), 0),
-                COALESCE(SUM(hash_state = 0), 0)
+                COALESCE(SUM(hash_state = ?1), 0),
+                COALESCE(SUM(hash_state = ?2), 0),
+                COALESCE(SUM(hash_state = ?3), 0)
          FROM files WHERE deleted_at IS NULL",
-        [],
+        params![
+            AnalysisLevel::Complete.as_i64(),
+            AnalysisLevel::Sampled.as_i64(),
+            AnalysisLevel::None.as_i64()
+        ],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
     )?;
 

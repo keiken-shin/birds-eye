@@ -5,6 +5,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use xxhash_rust::xxh3::Xxh3;
 
+use crate::index::analysis::{AnalysisLevel, VERIFIED_STABLE};
 use crate::index::writer::{
     emit_counted_progress, progress_stage, FinalizationProgress, IndexError,
 };
@@ -49,7 +50,7 @@ where
     C: Fn() -> bool + Sync,
 {
     const EAGER_FULL_HASH_MAX_BYTES: i64 = 64 * 1024 * 1024;
-    const CANDIDATES: &str = "FROM files
+    let candidates = "FROM files
              WHERE deleted_at IS NULL
                AND size <= ?1
                AND sample_hash IS NOT NULL
@@ -62,7 +63,7 @@ where
                )";
 
     let total: u64 = connection.query_row(
-        &format!("SELECT COUNT(*) {CANDIDATES}"),
+        &format!("SELECT COUNT(*) {candidates}"),
         params![EAGER_FULL_HASH_MAX_BYTES],
         |row| row.get::<_, i64>(0),
     )? as u64;
@@ -77,7 +78,7 @@ where
 
         let batch: Vec<(i64, String)> = {
             let mut statement = connection.prepare(&format!(
-                "SELECT id, path {CANDIDATES} AND id > ?2 ORDER BY id LIMIT ?3"
+                "SELECT id, path {candidates} AND id > ?2 ORDER BY id LIMIT ?3"
             ))?;
             let rows = statement.query_map(
                 params![EAGER_FULL_HASH_MAX_BYTES, after_id, HASH_BATCH as i64],
@@ -109,8 +110,17 @@ where
         for (id, full_hash) in results {
             if let Some(full_hash) = full_hash {
                 tx.execute(
-                    "UPDATE files SET full_hash = ?1, hash_algorithm = ?2, hash_state = 4 WHERE id = ?3",
-                    params![full_hash, "xxh3-full-v1", id],
+                    "UPDATE files
+                     SET full_hash = ?1, hash_algorithm = ?2,
+                         hash_state = ?3, verification_status = ?4
+                     WHERE id = ?5",
+                    params![
+                        full_hash,
+                        "xxh3-full-v1",
+                        AnalysisLevel::Complete.as_i64(),
+                        VERIFIED_STABLE,
+                        id
+                    ],
                 )?;
             }
             done += 1;
@@ -199,17 +209,24 @@ where
     F: FnMut(FinalizationProgress),
     C: Fn() -> bool + Sync,
 {
-    const CANDIDATES: &str = "FROM files
+    // The level is interpolated rather than bound, because this fragment is
+    // pasted into two queries that already number their own parameters. It is
+    // an integer from an enum, so there is nothing here a value could smuggle.
+    let candidates = format!(
+        "FROM files
              WHERE deleted_at IS NULL
-               AND (sample_hash IS NULL OR hash_state < 2 OR hash_algorithm IS NULL OR hash_algorithm NOT LIKE 'xxh3-%')
+               AND (sample_hash IS NULL OR hash_state < {sampled} OR hash_algorithm IS NULL OR hash_algorithm NOT LIKE 'xxh3-%')
                AND size IN (
                  SELECT size FROM files
                  WHERE deleted_at IS NULL AND size > 0
                  GROUP BY size
                  HAVING COUNT(*) > 1
-               )";
+               )",
+        sampled = AnalysisLevel::Sampled.as_i64()
+    );
+    let candidates = candidates.as_str();
 
-    let total: u64 = connection.query_row(&format!("SELECT COUNT(*) {CANDIDATES}"), [], |row| {
+    let total: u64 = connection.query_row(&format!("SELECT COUNT(*) {candidates}"), [], |row| {
         row.get::<_, i64>(0)
     })? as u64;
     progress_stage(progress, "Sampling duplicate candidates", 0, total);
@@ -231,7 +248,7 @@ where
         // otherwise be handed back on every page forever.
         let batch: Vec<(i64, String, i64)> = {
             let mut statement = connection.prepare(&format!(
-                "SELECT id, path, size {CANDIDATES} AND id > ?1 ORDER BY id LIMIT ?2"
+                "SELECT id, path, size {candidates} AND id > ?1 ORDER BY id LIMIT ?2"
             ))?;
             let rows = statement.query_map(params![after_id, HASH_BATCH as i64], |row| {
                 Ok((
@@ -289,22 +306,44 @@ where
                     tx.execute(
                         "UPDATE files
                      SET sample_hash = ?1, full_hash = NULL,
-                         hash_algorithm = ?2, hash_state = 2
-                     WHERE id = ?3",
-                        params![sample_hash, "xxh3-sample-v1", id],
+                         hash_algorithm = ?2, hash_state = ?3,
+                         verification_status = ?4
+                     WHERE id = ?5",
+                        params![
+                            sample_hash,
+                            "xxh3-sample-v1",
+                            AnalysisLevel::Sampled.as_i64(),
+                            VERIFIED_STABLE,
+                            id
+                        ],
                     )?;
                 }
                 SampleResult::Full { full_hash } => {
                     tx.execute(
                         "UPDATE files
                      SET sample_hash = ?1, full_hash = ?1,
-                         hash_algorithm = ?2, hash_state = 4
-                     WHERE id = ?3",
-                        params![full_hash, "xxh3-full-v1", id],
+                         hash_algorithm = ?2, hash_state = ?3,
+                         verification_status = ?4
+                     WHERE id = ?5",
+                        params![
+                            full_hash,
+                            "xxh3-full-v1",
+                            AnalysisLevel::Complete.as_i64(),
+                            VERIFIED_STABLE,
+                            id
+                        ],
                     )?;
                 }
                 SampleResult::Skipped { kind, reason } => {
                     *tally.entry(kind.as_str()).or_insert(0) += 1;
+                    // On the row as well as in the scan log. The log answers
+                    // "what happened on that run"; the row answers "can I
+                    // trust what is stored here", which is the question the
+                    // deletion guard asks, by id, long after the run.
+                    tx.execute(
+                        "UPDATE files SET verification_status = ?1 WHERE id = ?2",
+                        params![kind.as_str(), id],
+                    )?;
                     crate::index::writer::insert_scan_issue(
                         &tx,
                         scan_id,
@@ -625,6 +664,94 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, bytes).expect("write temp file");
         path
+    }
+
+    /// A row has to say whether the last read of it can be trusted, not just
+    /// how much of it was read. "We never looked" and "we looked and it kept
+    /// moving" both leave a file with no digest, and only one of them is worth
+    /// telling a person about.
+    #[test]
+    fn a_row_records_whether_its_last_read_could_be_trusted() {
+        use crate::index::schema::ALL_MIGRATIONS;
+
+        let dir = std::env::temp_dir().join(format!(
+            "birdseye-verification-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let readable = dir.join("here.bin");
+        std::fs::write(&readable, vec![4_u8; 2048]).unwrap();
+        // Same size, so both are duplicate candidates and both get read. This
+        // one is not there any more, which is the failure the row must carry.
+        let vanished = dir.join("gone.bin");
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        for (_, sql) in ALL_MIGRATIONS {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (1, NULL, '/root', 'root', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_sessions (id, root_path, started_at, status)
+             VALUES (1, '/root', 0, 'running')",
+            [],
+        )
+        .unwrap();
+        for (id, path) in [(1_i64, &readable), (2, &vanished)] {
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, indexed_at)
+                 VALUES (?1, 1, ?2, ?3, 2048, 0)",
+                params![
+                    id,
+                    path.to_string_lossy(),
+                    path.file_name().unwrap().to_string_lossy()
+                ],
+            )
+            .unwrap();
+        }
+
+        update_sample_hashes_for_duplicate_candidates(&mut conn, 1, &|| false, &mut |_| {})
+            .expect("sampling must not fail because one file is unreadable");
+
+        let status = |id: i64| -> Option<String> {
+            conn.query_row(
+                "SELECT verification_status FROM files WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            status(1).as_deref(),
+            Some(VERIFIED_STABLE),
+            "a file that was read from first byte to last says so"
+        );
+        let failed = status(2).expect("the unreadable file must say what went wrong");
+        assert_ne!(
+            failed, VERIFIED_STABLE,
+            "a read that never happened is not a stable read"
+        );
+        assert!(
+            !failed.is_empty(),
+            "and it names the reason rather than going quiet"
+        );
+
+        let level: i64 = conn
+            .query_row("SELECT hash_state FROM files WHERE id = 2", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            AnalysisLevel::from_i64(level),
+            AnalysisLevel::None,
+            "nothing was read, so nothing may claim to have been"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

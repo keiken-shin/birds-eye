@@ -203,9 +203,16 @@ fn surviving_siblings(
 /// better than refusing the deletion over a bookkeeping error.
 fn store_full_hash(conn: &Connection, file_id: i64, hash: &str) {
     let _ = conn.execute(
-        "UPDATE files SET full_hash = ?1, hash_algorithm = 'xxh3-full-v1', hash_state = 4
-         WHERE id = ?2",
-        params![hash, file_id],
+        "UPDATE files
+         SET full_hash = ?1, hash_algorithm = 'xxh3-full-v1',
+             hash_state = ?2, verification_status = ?3
+         WHERE id = ?4",
+        params![
+            hash,
+            crate::index::analysis::AnalysisLevel::Complete.as_i64(),
+            crate::index::analysis::VERIFIED_STABLE,
+            file_id
+        ],
     );
 }
 
