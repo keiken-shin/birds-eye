@@ -1175,8 +1175,13 @@ impl IndexWriter {
         let now = now_millis();
         let tx = self.connection.transaction()?;
 
-        tx.execute("DELETE FROM duplicate_group_files", [])?;
-        tx.execute("DELETE FROM duplicate_groups", [])?;
+        // The groups are deliberately left alone. Wiping them here destroyed
+        // every group id before the rebuild could reuse it, which is what made
+        // ids churn; and it emptied the duplicates view for the whole length of
+        // a refinement, so a scan cancelled halfway left the user with nothing
+        // rather than with the last answer that was true. `rebuild_duplicate_
+        // size_groups` owns their lifecycle now -- it upserts what still holds
+        // and deletes what does not.
         tx.execute("DELETE FROM hash_jobs WHERE scan_id = ?1", params![scan_id])?;
         tx.execute(
             "DELETE FROM duplicate_candidates WHERE scan_id = ?1",
@@ -1531,8 +1536,15 @@ impl IndexWriter {
 
     fn rebuild_duplicate_size_groups(&mut self) -> Result<(), IndexError> {
         let tx = self.connection.transaction()?;
+        // Membership is rebuilt from scratch every time; the groups themselves
+        // are not, because their ids are handed to the UI and have to still
+        // mean the same group on the next scan. See migration 027.
         tx.execute("DELETE FROM duplicate_group_files", [])?;
-        tx.execute("DELETE FROM duplicate_groups", [])?;
+        tx.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS still_a_group (id INTEGER PRIMARY KEY)",
+            [],
+        )?;
+        tx.execute("DELETE FROM still_a_group", [])?;
 
         let groups = {
             let mut statement = tx.prepare(
@@ -1582,12 +1594,23 @@ impl IndexWriter {
         };
 
         for (size, sample_hash, full_hash, confidence, _file_count, reclaimable_bytes) in groups {
-            tx.execute(
+            // Upsert on the group's natural key, so a group that was already
+            // here keeps its id and its created_at. RETURNING rather than
+            // last_insert_rowid(), which is not set by a DO UPDATE.
+            let group_id: i64 = tx.query_row(
                 "INSERT INTO duplicate_groups (size, sample_hash, full_hash, confidence, reclaimable_bytes, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(group_key) DO UPDATE SET
+                   confidence = excluded.confidence,
+                   reclaimable_bytes = excluded.reclaimable_bytes
+                 RETURNING id",
                 params![size, sample_hash, full_hash, confidence, reclaimable_bytes, now_millis()],
+                |row| row.get(0),
             )?;
-            let group_id = tx.last_insert_rowid();
+            tx.execute(
+                "INSERT OR IGNORE INTO still_a_group (id) VALUES (?1)",
+                params![group_id],
+            )?;
             // Members are filtered the same way the group was: a hard link that
             // matches the hash is still one file with another name, and putting
             // it in the group would offer a deletion that frees nothing.
@@ -1611,6 +1634,15 @@ impl IndexWriter {
             // No hash at all never forms a group: the grouping query above
             // requires a sample hash, so size-only coincidences are excluded.
         }
+
+        // A group whose copies were deleted or edited apart is no longer a
+        // group. Its members go with it through the cascade.
+        tx.execute(
+            "DELETE FROM duplicate_groups
+             WHERE id NOT IN (SELECT id FROM still_a_group)",
+            [],
+        )?;
+        tx.execute("DROP TABLE still_a_group", [])?;
 
         tx.commit()?;
         Ok(())
@@ -3014,6 +3046,89 @@ mod tests {
         assert_eq!(hashed_files, 0);
         assert_eq!(root_total_bytes, 128);
         cleanup(&root);
+    }
+
+    /// The UI lists groups and then asks for one by id. If an unrelated group
+    /// appearing anywhere on the disk renumbers the others, that second call
+    /// opens someone else's files.
+    #[test]
+    fn a_group_keeps_its_id_when_an_unrelated_group_appears() {
+        let root = test_root("group-id-stability");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("a1.bin"), &[1; 64]);
+        write_file(&root.join("a2.bin"), &[1; 64]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut writer);
+        writer
+            .refine_duplicates_with_progress(&|| false, |_| {})
+            .expect("failed to refine duplicates");
+
+        let identify = |writer: &IndexWriter| -> Vec<(i64, i64)> {
+            let mut statement = writer
+                .connection()
+                .prepare("SELECT id, size FROM duplicate_groups ORDER BY size")
+                .expect("prepare");
+            let rows = statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .expect("query");
+            rows.map(Result::unwrap).collect()
+        };
+        let before = identify(&writer);
+        assert_eq!(before.len(), 1, "one group to start with");
+
+        // A larger duplicate pair turns up elsewhere. Nothing about the first
+        // group changed -- and the rebuild orders by reclaimable bytes, so the
+        // newcomer sorts ahead of it.
+        write_file(&root.join("b1.bin"), &[2; 4096]);
+        write_file(&root.join("b2.bin"), &[2; 4096]);
+        scan_into_index(&root, &mut writer);
+        writer
+            .refine_duplicates_with_progress(&|| false, |_| {})
+            .expect("failed to refine duplicates");
+
+        let after = identify(&writer);
+        assert_eq!(after.len(), 2, "two groups now");
+        assert_eq!(
+            after[0], before[0],
+            "the original group kept its id and its size"
+        );
+    }
+
+    /// The other half of owning the lifecycle: a group that stops being a group
+    /// has to go, or the duplicates view offers deletions that free nothing.
+    #[test]
+    fn a_group_whose_copies_are_gone_is_removed() {
+        let root = test_root("group-removal");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("a1.bin"), &[1; 64]);
+        write_file(&root.join("a2.bin"), &[1; 64]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut writer);
+        writer
+            .refine_duplicates_with_progress(&|| false, |_| {})
+            .expect("failed to refine duplicates");
+        let count = |writer: &IndexWriter, table: &str| -> i64 {
+            writer
+                .connection()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                .expect("count")
+        };
+        assert_eq!(count(&writer, "duplicate_groups"), 1);
+
+        fs::remove_file(root.join("a2.bin")).expect("remove the copy");
+        scan_into_index(&root, &mut writer);
+        writer
+            .refine_duplicates_with_progress(&|| false, |_| {})
+            .expect("failed to refine duplicates");
+
+        assert_eq!(count(&writer, "duplicate_groups"), 0, "no copies, no group");
+        assert_eq!(
+            count(&writer, "duplicate_group_files"),
+            0,
+            "members must go with the group"
+        );
     }
 
     #[test]

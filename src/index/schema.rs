@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 26;
+pub const CURRENT_SCHEMA_VERSION: u32 = 27;
 
 // The connection pragmas that used to sit here now live in
 // `open_index_connection`. They were never schema: `foreign_keys` and
@@ -1026,6 +1026,40 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (26, strftime('%s', 'now'));
 "#;
 
+/// Migration 027: a duplicate group keeps the same id across rebuilds.
+///
+/// `duplicate_groups.id` was a bare rowid handed out in whatever order the
+/// rebuild happened to insert, and every rebuild deleted the table first. So
+/// the id of a group changed whenever an unrelated group appeared anywhere on
+/// the disk: measured on a four-file tree, adding one larger duplicate pair
+/// moved an untouched group from id 2 to id 3 and left id 1 pointing at a
+/// completely different group. The UI lists groups and then asks for one by id
+/// (`duplicate_group_files`), so a rescan between those two steps opened the
+/// wrong files.
+///
+/// A group already has a natural identity -- the size and hashes its members
+/// share -- so that becomes the key, and the rebuild upserts on it. `full_hash`
+/// is null until a group is confirmed byte-for-byte and NULL never equals NULL
+/// in a unique index, hence the `COALESCE`.
+///
+/// Existing rows go, because they were built without the key and the next scan
+/// rebuilds them anyway.
+pub const MIGRATION_027: &str = r#"
+DELETE FROM duplicate_group_files;
+DELETE FROM duplicate_groups;
+
+ALTER TABLE duplicate_groups ADD COLUMN group_key TEXT
+  GENERATED ALWAYS AS (
+    size || ':' || COALESCE(sample_hash, '') || ':' || COALESCE(full_hash, '')
+  ) VIRTUAL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_duplicate_groups_key
+  ON duplicate_groups(group_key);
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (27, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -1053,6 +1087,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (24, MIGRATION_024),
     (25, MIGRATION_025),
     (26, MIGRATION_026),
+    (27, MIGRATION_027),
 ];
 
 #[cfg(test)]
@@ -1144,8 +1179,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 26);
-        assert_eq!(ALL_MIGRATIONS.len(), 26);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 27);
+        assert_eq!(ALL_MIGRATIONS.len(), 27);
     }
 
     #[test]
