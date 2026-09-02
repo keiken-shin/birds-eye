@@ -113,7 +113,7 @@ pub fn restore_with(
     // bin for an item that is no longer in it, which fails identically on every
     // retry while the Library keeps offering the button.
     if entry.restore_status == "restore_pending" && Path::new(&entry.original_path).exists() {
-        return close_as_restored(conn, entry_id, entry.file_id);
+        return settle_restore(conn, &entry);
     }
 
     // Claim the restore before doing it, so the crash window above is a state
@@ -133,24 +133,101 @@ pub fn restore_with(
         return Err(OntologyError::Populator(reason));
     }
 
-    close_as_restored(conn, entry_id, entry.file_id)
+    settle_restore(conn, &entry)
 }
 
-/// Mark an entry restored and re-link its index row if it still exists.
-fn close_as_restored(
-    conn: &Connection,
-    entry_id: i64,
-    file_id: i64,
-) -> Result<(), OntologyError> {
+/// What the object now sitting at the original path has to say for itself,
+/// compared with what was recorded when the file was removed.
+///
+/// `Ok(())` means it is the file that went away. `Err(reason)` means something
+/// is there, or nothing is, but it is not that file.
+fn identity_after_restore(conn: &Connection, entry: &CleanupLogEntry) -> Result<(), String> {
+    let path = Path::new(&entry.original_path);
+    let metadata = match std::fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            // The restore reported success and yet the path is empty. On
+            // Windows the bin puts a file back beside an occupant under a
+            // generated name rather than overwriting, which lands exactly here.
+            return Err(format!(
+                "the restore reported success but nothing is at {} -- {error}",
+                entry.original_path
+            ));
+        }
+    };
+
+    // The filesystem's own id for the object, which settles the question
+    // outright when both sides have one. Measured on this NTFS volume by
+    // `tests/recycle_bin_identity.rs`: sending a file to the bin and restoring
+    // it returns the same id, byte for byte. So a mismatch here means the
+    // object is not the one that was removed, and it is treated as such.
+    let recorded_object: Option<String> = conn
+        .query_row(
+            "SELECT object_id FROM files WHERE id = ?1",
+            params![entry.file_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    if let (Some(recorded), Ok(found)) = (
+        recorded_object.as_deref(),
+        crate::native::file_id::object_id(path),
+    ) {
+        return if found.key() == recorded {
+            Ok(())
+        } else {
+            // A restore that had to copy the bytes -- across volumes, or on a
+            // trash implementation that does not rename -- would also land
+            // here. Saying so plainly is better than either silently trusting
+            // it or claiming certainty about which of the two happened.
+            Err(format!(
+                "what is at {} is not the object that was removed -- if the restore made a new copy                  rather than putting the original back, rescan and it will be picked up",
+                entry.original_path
+            ))
+        };
+    }
+
+    // No id on either side. Falling back to size: weaker, but it is the one
+    // fact the log itself records, so it works for an index row written before
+    // ids were collected.
+    let found = metadata.len() as i64;
+    if found == entry.size {
+        return Ok(());
+    }
+    Err(format!(
+        "what is at {} is not the file that was removed -- it was {} bytes, and this is {found}",
+        entry.original_path, entry.size
+    ))
+}
+
+/// Close the log entry, and re-link the index row only if what came back is
+/// really the file that went away.
+fn settle_restore(conn: &Connection, entry: &CleanupLogEntry) -> Result<(), OntologyError> {
+    let verdict = identity_after_restore(conn, entry);
+
+    // The entry leaves `restore_pending` either way. It is no longer in the
+    // recycle bin, and leaving it pending would offer a button that fails
+    // identically forever.
     conn.execute(
         "UPDATE ontology_cleanup_log SET restore_status = 'restored' WHERE id = ?1",
-        params![entry_id],
+        params![entry.id],
     )?;
-    conn.execute(
-        "UPDATE files SET deleted_at = NULL WHERE id = ?1",
-        params![file_id],
-    )?;
-    Ok(())
+
+    match verdict {
+        Ok(()) => {
+            conn.execute(
+                "UPDATE files SET deleted_at = NULL WHERE id = ?1",
+                params![entry.file_id],
+            )?;
+            Ok(())
+        }
+        // The index row stays deleted on purpose. Marking it live would point a
+        // row carrying the old size and the old hashes at an object that is not
+        // that file, and every later answer built on it would be wrong. The
+        // next scan will index whatever is actually there.
+        Err(reason) => Err(OntologyError::Populator(reason)),
+    }
 }
 
 /// Public entry point: open the index, use the OS recycle bin.
@@ -244,8 +321,38 @@ mod tests {
     impl Restorer for OkRestorer {
         fn restore(&self, original_path: &Path) -> Result<(), String> {
             self.seen.lock().unwrap().push(original_path.display().to_string());
+            // A restore that reports success has put a file back. Saying so
+            // without doing it is the exact failure the verification exists to
+            // catch, so the honest fake writes the file.
+            std::fs::write(original_path, vec![0_u8; SEEDED_SIZE as usize]).unwrap();
             Ok(())
         }
+    }
+
+    /// The size the seeded log entry records, and therefore what an honest
+    /// restore has to put back.
+    const SEEDED_SIZE: i64 = 100;
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "be-cleanup-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Point a seeded entry at a real path on disk, which is what every test
+    /// that actually restores needs.
+    fn point_at(conn: &Connection, entry_id: i64, path: &Path) {
+        conn.execute(
+            "UPDATE ontology_cleanup_log SET original_path = ?2 WHERE id = ?1",
+            params![entry_id, path.to_string_lossy()],
+        )
+        .unwrap();
     }
 
     /// The peer of the relocation log's stranding: bin restore succeeds, the
@@ -261,16 +368,9 @@ mod tests {
             }
         }
 
-        let dir = std::env::temp_dir().join(format!(
-            "be-cleanup-converge-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = temp_dir("converge");
         let original = dir.join("back-already.txt");
-        std::fs::write(&original, b"the file is already home").unwrap();
+        std::fs::write(&original, vec![0_u8; SEEDED_SIZE as usize]).unwrap();
 
         let mut conn = migrated_conn();
         let entry_id = seed_cleaned_file(&conn, Some(i64::MAX));
@@ -330,6 +430,8 @@ mod tests {
     fn restore_flips_status_and_clears_deleted_at() {
         let mut conn = migrated_conn();
         let entry_id = seed_cleaned_file(&conn, Some(i64::MAX));
+        let dir = temp_dir("happy");
+        point_at(&conn, entry_id, &dir.join("a.js"));
 
         let restorer = OkRestorer::new();
         restore_with(&mut conn, entry_id, &restorer).unwrap();
@@ -381,5 +483,123 @@ mod tests {
             .query_row("SELECT restore_status FROM ontology_cleanup_log", [], |r| r.get(0))
             .unwrap();
         assert_eq!(status, "expired");
+    }
+
+    /// The recycle bin reported success and put nothing back. On Windows this
+    /// is what happens when the original path is occupied: the item lands
+    /// beside it under a generated name, and the bin still calls that a
+    /// restore.
+    #[test]
+    fn a_restore_that_put_nothing_back_is_not_reported_as_success() {
+        struct LiesAboutIt;
+        impl Restorer for LiesAboutIt {
+            fn restore(&self, _p: &Path) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        let mut conn = migrated_conn();
+        let entry_id = seed_cleaned_file(&conn, Some(i64::MAX));
+        let dir = temp_dir("empty-handed");
+        point_at(&conn, entry_id, &dir.join("a.js"));
+
+        let error = restore_with(&mut conn, entry_id, &LiesAboutIt)
+            .expect_err("nothing came back, so this is not a restore");
+        assert!(
+            error.to_string().contains("nothing is at"),
+            "the message has to say what is wrong: {error}"
+        );
+
+        let deleted_at: Option<i64> = conn
+            .query_row("SELECT deleted_at FROM files WHERE id=1", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            deleted_at.is_some(),
+            "the index row must stay deleted -- nothing came back to point it at"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Something is at the path, but it is not the file that was removed.
+    /// Re-linking the index row here would point a row carrying the old size
+    /// and the old hashes at a stranger.
+    #[test]
+    fn a_different_file_at_the_original_path_is_not_the_restored_file() {
+        struct PutsBackSomethingElse;
+        impl Restorer for PutsBackSomethingElse {
+            fn restore(&self, original_path: &Path) -> Result<(), String> {
+                std::fs::write(original_path, b"a completely different file").unwrap();
+                Ok(())
+            }
+        }
+
+        let mut conn = migrated_conn();
+        let entry_id = seed_cleaned_file(&conn, Some(i64::MAX));
+        let dir = temp_dir("stranger");
+        point_at(&conn, entry_id, &dir.join("a.js"));
+
+        let error = restore_with(&mut conn, entry_id, &PutsBackSomethingElse)
+            .expect_err("a different file is not the file that was removed");
+        assert!(
+            error.to_string().contains("is not the file that was removed"),
+            "the message has to name the problem: {error}"
+        );
+
+        let (status, deleted_at): (String, Option<i64>) = (
+            conn.query_row(
+                "SELECT restore_status FROM ontology_cleanup_log WHERE id=?1",
+                params![entry_id],
+                |r| r.get(0),
+            )
+            .unwrap(),
+            conn.query_row("SELECT deleted_at FROM files WHERE id=1", [], |r| r.get(0))
+                .unwrap(),
+        );
+        assert_eq!(
+            status, "restored",
+            "the entry must leave restore_pending, or the undo button fails forever"
+        );
+        assert!(
+            deleted_at.is_some(),
+            "the index row must stay deleted -- it does not describe what is there"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The strict branch: an id was recorded, and what is at the path is a
+    /// different object. Same size, so the weaker check would have waved it
+    /// through.
+    #[test]
+    fn a_recorded_object_id_that_does_not_match_is_refused_even_at_the_right_size() {
+        struct PutsBackATwin;
+        impl Restorer for PutsBackATwin {
+            fn restore(&self, original_path: &Path) -> Result<(), String> {
+                std::fs::write(original_path, vec![1_u8; SEEDED_SIZE as usize]).unwrap();
+                Ok(())
+            }
+        }
+
+        let mut conn = migrated_conn();
+        let entry_id = seed_cleaned_file(&conn, Some(i64::MAX));
+        let dir = temp_dir("twin");
+        point_at(&conn, entry_id, &dir.join("a.js"));
+        conn.execute(
+            "UPDATE files SET object_id = 'deadbeefdeadbeef:00000000000000000000000000000001'
+             WHERE id = 1",
+            [],
+        )
+        .unwrap();
+
+        let error = restore_with(&mut conn, entry_id, &PutsBackATwin)
+            .expect_err("the right size is not the right file");
+        assert!(
+            error.to_string().contains("not the object that was removed"),
+            "the message has to name the problem: {error}"
+        );
+        let deleted_at: Option<i64> = conn
+            .query_row("SELECT deleted_at FROM files WHERE id=1", [], |r| r.get(0))
+            .unwrap();
+        assert!(deleted_at.is_some(), "the index row must stay deleted");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
