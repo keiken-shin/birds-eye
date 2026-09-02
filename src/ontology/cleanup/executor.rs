@@ -107,6 +107,19 @@ pub fn execute_plan_with(
             cand.modified_at,
             reviewed_object.as_deref(),
         ) {
+            // A whole volume going away mid-plan otherwise reports as every
+            // remaining file having vanished, which reads as "Bird's Eye
+            // deleted them". Say what actually happened, once, and stop rather
+            // than filling the report with the same misleading line.
+            if volume_is_gone(&cand.path) {
+                failed.push(CleanupFailure {
+                    file_id: cand.file_id,
+                    path: cand.path.clone(),
+                    reason: "the drive this file is on is no longer connected -- nothing further                              was touched"
+                        .to_string(),
+                });
+                break;
+            }
             failed.push(CleanupFailure {
                 file_id: cand.file_id,
                 path: cand.path.clone(),
@@ -206,6 +219,18 @@ pub fn execute_cleanup_plan(
 ) -> Result<CleanupResult, OntologyError> {
     let mut conn = crate::index::open_index_connection(index_path)?;
     execute_plan_with(&mut conn, plan_id, &SystemTrasher, DEFAULT_RETENTION_DAYS)
+}
+
+/// Has the drive itself gone, rather than this one file?
+///
+/// Checked only when a file already failed its identity check, so the cost
+/// falls on the error path. The root of the path is the volume: `C:\` on
+/// Windows, the share root for a UNC path, `/` on Unix, which never vanishes.
+fn volume_is_gone(path: &str) -> bool {
+    match Path::new(path).ancestors().last() {
+        Some(root) if !root.as_os_str().is_empty() => !root.exists(),
+        _ => false,
+    }
 }
 
 /// Settle log rows a crash left mid-flight.
@@ -506,6 +531,25 @@ mod tests {
     /// A crash between writing the log row and trashing the file used to leave
     /// a row at `pending`, which the restore path refuses to touch. The file
     /// could be sitting in the recycle bin with its only record unusable.
+    /// A drive that is present is not a drive that is gone, and a path on a
+    /// drive letter that was never mounted is.
+    #[test]
+    fn a_missing_drive_is_told_apart_from_a_missing_file() {
+        let here = std::env::temp_dir().join("does-not-exist.bin");
+        assert!(
+            !volume_is_gone(&here.display().to_string()),
+            "the temp drive is connected; only the file is missing"
+        );
+
+        // A drive letter with nothing mounted on it. Windows only: elsewhere
+        // that string is just a filename containing backslashes, and "/" is
+        // always there, so there is no unmounted root to describe.
+        #[cfg(windows)]
+        if !Path::new("Q:\\").exists() {
+            assert!(volume_is_gone(r"Q:\somewhere\file.bin"));
+        }
+    }
+
     #[test]
     fn a_stranded_log_row_for_a_vanished_file_becomes_restorable() {
         let mut conn = migrated_conn();
