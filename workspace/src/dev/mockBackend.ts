@@ -1050,6 +1050,7 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
         skipped_changed: 5,
         skipped_failed: 1,
         folders_unreadable: issues.filter((i) => i.phase === "walk").length,
+        volume_kind: "removable",
       });
     }
     case "retry_scan_issues": {

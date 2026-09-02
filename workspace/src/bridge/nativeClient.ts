@@ -205,6 +205,8 @@ export type NativeScanCoverage = {
   skipped_changed: number;
   skipped_failed: number;
   folders_unreadable: number;
+  /** "fixed" | "removable" | "remote" | "cdrom" | "ramdisk" | "unknown". */
+  volume_kind: string;
 };
 
 /** What the last scan actually managed to read — so a recommendation can say

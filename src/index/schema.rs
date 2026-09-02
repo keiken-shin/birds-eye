@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 22;
+pub const CURRENT_SCHEMA_VERSION: u32 = 23;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -941,6 +941,23 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (22, strftime('%s', 'now'));
 "#;
 
+/// What kind of volume a scan was of.
+///
+/// A network share, a USB stick and an internal disk were all just paths, so a
+/// report could not say which world its numbers came from. The kind changes
+/// what they mean: a share can go quiet without anything being deleted, a stick
+/// can be pulled between the scan and the cleanup, and only a fixed disk makes
+/// "it was there a minute ago" a safe assumption.
+///
+/// `'unknown'` where the platform will not say, which is honest and is the
+/// answer everywhere that is not Windows.
+pub const MIGRATION_023: &str = r#"
+ALTER TABLE scan_sessions ADD COLUMN volume_kind TEXT;
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (23, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -964,6 +981,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (20, MIGRATION_020),
     (21, MIGRATION_021),
     (22, MIGRATION_022),
+    (23, MIGRATION_023),
 ];
 
 #[cfg(test)]
@@ -1055,8 +1073,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 22);
-        assert_eq!(ALL_MIGRATIONS.len(), 22);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 23);
+        assert_eq!(ALL_MIGRATIONS.len(), 23);
     }
 
     #[test]

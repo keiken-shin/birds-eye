@@ -333,3 +333,102 @@ mod tests {
         assert!(!drives.is_empty(), "expected at least one fixed drive on a real machine");
     }
 }
+
+/// What kind of volume a path lives on: `fixed`, `removable`, `remote`,
+/// `cdrom`, `ramdisk`, or `unknown`.
+///
+/// The kind changes what a number means. A share can go quiet without anything
+/// being deleted; a USB stick can be pulled between the scan and the cleanup;
+/// a fixed disk is the only case where "it was there a minute ago" is a safe
+/// assumption. Recording it per scan lets a report say which world it came from
+/// instead of presenting every volume as an internal disk.
+///
+/// `unknown` is returned rather than guessed whenever Windows will not say, and
+/// on every other platform, where this distinction is not drawn the same way.
+pub fn volume_kind(path: &std::path::Path) -> &'static str {
+    #[cfg(windows)]
+    {
+        // GetDriveTypeW wants a root: "C:\" for a drive letter, or the share
+        // root for a UNC path. Anything else, including a path on a volume
+        // mounted into a folder, it will not answer for.
+        let Some(root) = volume_root(path) else {
+            return "unknown";
+        };
+        let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+        let raw = unsafe {
+            windows_sys::Win32::Storage::FileSystem::GetDriveTypeW(wide.as_ptr())
+        };
+        drive_type_label(raw)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        "unknown"
+    }
+}
+
+/// The root Windows will answer about: `C:\` from a drive-letter path, or
+/// `\\server\share\` from a UNC path.
+#[cfg(any(windows, test))]
+fn volume_root(path: &std::path::Path) -> Option<String> {
+    const SEP: char = '\\';
+    let text = path.to_string_lossy().replace('/', "\\");
+    if let Some(rest) = text.strip_prefix(r"\\") {
+        // A UNC path names a server and a share. The share is the volume; the
+        // server on its own is not one.
+        let mut parts = rest.splitn(3, SEP);
+        let server = parts.next().filter(|s| !s.is_empty())?;
+        let share = parts.next().filter(|s| !s.is_empty())?;
+        return Some(format!(r"\\{server}\{share}\"));
+    }
+    let bytes = text.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+        return Some(format!("{}:\\", text.chars().next()?));
+    }
+    None
+}
+
+#[cfg(test)]
+mod volume_kind_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn a_drive_letter_path_reduces_to_its_drive_root() {
+        assert_eq!(
+            volume_root(Path::new(r"C:\Users\someone\file.txt")).as_deref(),
+            Some("C:\\")
+        );
+        assert_eq!(volume_root(Path::new("D:/photos")).as_deref(), Some("D:\\"));
+    }
+
+    /// A share is a volume; the server it lives on is not.
+    #[test]
+    fn a_unc_path_reduces_to_the_share_not_the_server() {
+        assert_eq!(
+            volume_root(Path::new(r"\\nas\media\holiday\a.jpg")).as_deref(),
+            Some(r"\\nas\media\")
+        );
+        // A server name alone names no volume, with or without a trailing slash.
+        assert_eq!(volume_root(Path::new(r"\\nas")), None);
+        assert_eq!(volume_root(Path::new(r"\\nas\")), None);
+    }
+
+    #[test]
+    fn a_path_with_no_volume_in_it_has_no_root() {
+        assert_eq!(volume_root(Path::new("relative/thing")), None);
+        assert_eq!(volume_root(Path::new("")), None);
+    }
+
+    /// Whatever this machine's temp directory is on, the answer must be a real
+    /// kind rather than a guess.
+    #[cfg(windows)]
+    #[test]
+    fn the_kind_of_a_real_path_is_a_named_kind() {
+        let kind = volume_kind(&std::env::temp_dir());
+        assert!(
+            ["fixed", "removable", "remote", "cdrom", "ramdisk"].contains(&kind),
+            "temp dir reported as {kind}"
+        );
+    }
+}

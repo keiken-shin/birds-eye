@@ -50,6 +50,13 @@ pub struct ScanCoverage {
     /// Folders the walker could not open at all. Whatever is under them is not
     /// in any number above.
     pub folders_unreadable: i64,
+
+    /// What kind of volume this was: `fixed`, `removable`, `remote`, `cdrom`,
+    /// `ramdisk`, or `unknown`. It changes what the numbers mean. A share can
+    /// go quiet without anything being deleted; a stick can be pulled between
+    /// the scan and the cleanup; only a fixed disk makes "it was there a minute
+    /// ago" a safe assumption.
+    pub volume_kind: String,
 }
 
 impl ScanCoverage {
@@ -91,10 +98,11 @@ pub fn scan_coverage(conn: &Connection, scan_id: i64) -> Result<ScanCoverage, In
 
     // A scan row can be missing (a fresh index, a deleted session). Zeroes are
     // the truthful answer then, not an error.
-    let session: Option<(i64, i64, i64, i64, i64, i64)> = conn
+    #[allow(clippy::type_complexity)]
+    let session: Option<(i64, i64, i64, i64, i64, i64, Option<String>)> = conn
         .query_row(
             "SELECT skipped_offline, skipped_locked, skipped_denied, skipped_changed,
-                    skipped_failed, inaccessible_entries
+                    skipped_failed, inaccessible_entries, volume_kind
              FROM scan_sessions WHERE id = ?1",
             params![scan_id],
             |row| {
@@ -105,12 +113,13 @@ pub fn scan_coverage(conn: &Connection, scan_id: i64) -> Result<ScanCoverage, In
                     row.get(3)?,
                     row.get(4)?,
                     row.get(5)?,
+                    row.get(6)?,
                 ))
             },
         )
         .optional()?;
-    let (offline, locked, denied, changed, failed, folders) =
-        session.unwrap_or((0, 0, 0, 0, 0, 0));
+    let (offline, locked, denied, changed, failed, folders, volume_kind) =
+        session.unwrap_or((0, 0, 0, 0, 0, 0, None));
 
     Ok(ScanCoverage {
         files_indexed,
@@ -123,6 +132,9 @@ pub fn scan_coverage(conn: &Connection, scan_id: i64) -> Result<ScanCoverage, In
         skipped_changed: changed,
         skipped_failed: failed,
         folders_unreadable: folders,
+        // A scan recorded before the kind was known says so, rather than
+        // claiming to be a fixed disk.
+        volume_kind: volume_kind.unwrap_or_else(|| "unknown".to_string()),
     })
 }
 

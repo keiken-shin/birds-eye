@@ -1092,8 +1092,14 @@ impl IndexWriter {
         self.files_since_commit = 0;
         self.begin_scan_transaction()?;
         self.connection.execute(
-            "INSERT INTO scan_sessions (root_path, started_at, status, scan_strategy) VALUES (?1, ?2, 'running', ?3)",
-            params![path_to_string(root), started_at, self.active_scan_mode.as_id()],
+            "INSERT INTO scan_sessions (root_path, started_at, status, scan_strategy, volume_kind)
+             VALUES (?1, ?2, 'running', ?3, ?4)",
+            params![
+                path_to_string(root),
+                started_at,
+                self.active_scan_mode.as_id(),
+                crate::native::drives::volume_kind(root)
+            ],
         )?;
         self.session_id = Some(self.connection.last_insert_rowid());
         self.active_root = Some(root.to_path_buf());

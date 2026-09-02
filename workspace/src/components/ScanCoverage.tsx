@@ -25,6 +25,16 @@ type Skip = {
   icon: typeof Lock;
 };
 
+/** What the kind of volume changes about the numbers on this page. */
+const VOLUME_NOTE: Record<string, string> = {
+  removable:
+    "This is a removable drive. Unplug it and Bird's Eye cannot see these files - which is not the same as them being gone.",
+  remote:
+    "This is a network location. It can go quiet without anything being deleted, and it may have changed since the scan.",
+  cdrom: "This is a disc. Nothing on it can be deleted or moved.",
+  ramdisk: "This is a RAM disk. Everything on it disappears when the machine restarts.",
+};
+
 const SKIPS: Skip[] = [
   {
     key: "skipped_offline",
@@ -136,6 +146,12 @@ export function ScanCoveragePanel({ indexPath }: { indexPath: string }) {
           )}
         </p>
       </div>
+
+      {VOLUME_NOTE[coverage.volume_kind] ? (
+        <p className="border-t border-line-soft px-4 py-2 text-11 leading-snug text-muted">
+          {VOLUME_NOTE[coverage.volume_kind]}
+        </p>
+      ) : null}
 
       <div className="divide-y divide-line-soft border-t border-line-soft">
         {coverage.read_fully > 0 ? (
