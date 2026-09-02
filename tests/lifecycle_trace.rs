@@ -39,7 +39,7 @@ struct Rig {
 
 impl Rig {
     fn new(name: &str) -> Self {
-        let root = std::env::temp_dir()
+        let base = std::env::temp_dir()
             .join("birdseye-lifecycle")
             .join(format!(
                 "{name}-{}",
@@ -48,9 +48,16 @@ impl Rig {
                     .unwrap()
                     .as_nanos()
             ));
-        std::fs::create_dir_all(&root).expect("create rig root");
+        let root = base;
+        // The index lives beside the tree, not inside it: an index file in the
+        // scanned folder is a file the scan then indexes, which quietly changes
+        // every count this test makes.
+        std::fs::create_dir_all(root.join("tree")).expect("create rig root");
         let index = root.join("index.sqlite");
-        Self { root, index }
+        Self {
+            root: root.join("tree"),
+            index,
+        }
     }
 
     fn write(&self, rel: &str, bytes: &[u8]) -> PathBuf {
@@ -113,7 +120,9 @@ impl Rig {
 
 impl Drop for Rig {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
+        if let Some(base) = self.root.parent() {
+            let _ = std::fs::remove_dir_all(base);
+        }
     }
 }
 
@@ -355,5 +364,55 @@ fn a_staged_file_survives_being_renamed_underneath_the_basket() {
         staged[0].path,
         renamed.to_string_lossy().replace('/', "\\"),
         "the basket must follow the file, not keep pointing at a name that is gone"
+    );
+}
+
+/// One set of bytes with two names is one file's worth of disk, not two, and
+/// deleting one of the names frees nothing.
+#[test]
+fn a_hard_link_is_counted_once_and_is_not_offered_as_a_duplicate() {
+    let rig = Rig::new("hard-link");
+    let original = rig.write("data/one.bin", &vec![5u8; 100_000]);
+    let link = rig.root.join("data/also-one.bin");
+    std::fs::hard_link(&original, &link).expect("hard link");
+    rig.scan();
+
+    let conn = rig.conn();
+    let rows: i64 = conn
+        .query_row("SELECT COUNT(*) FROM files WHERE deleted_at IS NULL", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(rows, 2, "both names are real files and both stay listed");
+
+    let carriers: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL AND shares_bytes_with IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(carriers, 1, "only one name may carry the bytes");
+
+    // Matched exactly, not with LIKE: SQLite's LIKE is case-insensitive for
+    // ASCII, and "AppData" ends in "data".
+    let folder_bytes: i64 = conn
+        .query_row(
+            "SELECT direct_bytes FROM folders WHERE path = ?1",
+            rusqlite::params![rig.root.join("data").to_string_lossy().replace('/', "\\")],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        folder_bytes, 100_000,
+        "the folder holds one file's worth of disk, not two"
+    );
+
+    let groups: i64 = conn
+        .query_row("SELECT COUNT(*) FROM duplicate_groups", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        groups, 0,
+        "two names for one file are not a duplicate pair -- deleting one frees nothing"
     );
 }

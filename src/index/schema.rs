@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 19;
+pub const CURRENT_SCHEMA_VERSION: u32 = 20;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -873,6 +873,28 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (19, strftime('%s', 'now'));
 "#;
 
+/// One set of bytes, several names.
+///
+/// A hard link is not a copy. The file exists once on disk and appears in
+/// several folders, so counting its size once per name inflates every folder
+/// total above it, the volume total, and every reclaim figure derived from
+/// them -- and it makes two names for one file look like a duplicate pair,
+/// where deleting one frees nothing at all.
+///
+/// `shares_bytes_with` points at the first row seen for that object. NULL means
+/// this row is the one that carries the bytes, which is every ordinary file.
+/// Rows that point elsewhere stay fully visible as files; they just stop
+/// contributing their size a second time.
+pub const MIGRATION_020: &str = r#"
+ALTER TABLE files ADD COLUMN shares_bytes_with INTEGER;
+
+CREATE INDEX IF NOT EXISTS idx_files_shares_bytes_with
+  ON files(shares_bytes_with) WHERE shares_bytes_with IS NOT NULL;
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (20, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -893,6 +915,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (17, MIGRATION_017),
     (18, MIGRATION_018),
     (19, MIGRATION_019),
+    (20, MIGRATION_020),
 ];
 
 #[cfg(test)]
@@ -984,8 +1007,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 19);
-        assert_eq!(ALL_MIGRATIONS.len(), 19);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 20);
+        assert_eq!(ALL_MIGRATIONS.len(), 20);
     }
 
     #[test]

@@ -242,6 +242,7 @@ impl IndexWriter {
                 progress_stage(&mut progress, "Marking missing files", 0, 1);
                 self.mark_missing_files_deleted()?;
                 progress_stage(&mut progress, "Marking missing files", 1, 1);
+                self.mark_shared_byte_links()?;
                 self.commit_scan_transaction()?;
                 self.recompute_folder_rollups(&mut progress)?;
                 progress_stage(&mut progress, "Building extension statistics", 0, 1);
@@ -933,19 +934,24 @@ impl IndexWriter {
     /// Rebuild the materialized overview aggregates (media, per-folder media,
     /// monthly activity, age bands). Runs once per scan finalization so the
     /// startup overview reads small tables instead of full-scanning `files`.
+    /// Byte totals here count one set of bytes once. Every file is still one
+    /// file in the counts; only the name that carries the bytes contributes
+    /// them, so a hard link does not appear twice in any total.
     fn rebuild_derived_stats(&mut self) -> Result<(), IndexError> {
         let tx = self.connection.transaction()?;
         tx.execute_batch(
             "DELETE FROM media_stats;
              INSERT INTO media_stats (media_kind, file_count, total_bytes)
-             SELECT media_kind, COUNT(*), COALESCE(SUM(size), 0)
+             SELECT media_kind, COUNT(*), COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN size ELSE 0 END), 0)
              FROM files
              WHERE deleted_at IS NULL
              GROUP BY media_kind;
 
              DELETE FROM folder_media_stats;
              INSERT INTO folder_media_stats (folder_path, media_kind, total_bytes)
-             SELECT f.path, files.media_kind, COALESCE(SUM(files.size), 0)
+             SELECT f.path, files.media_kind,
+                    COALESCE(SUM(CASE WHEN files.shares_bytes_with IS NULL
+                                      THEN files.size ELSE 0 END), 0)
              FROM files
              JOIN folders f ON f.id = files.folder_id
              WHERE files.deleted_at IS NULL
@@ -955,7 +961,7 @@ impl IndexWriter {
              INSERT INTO month_stats (bucket, file_count, total_bytes)
              SELECT COALESCE(strftime('%Y-%m', modified_at, 'unixepoch'), 'unknown'),
                     COUNT(*),
-                    COALESCE(SUM(size), 0)
+                    COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN size ELSE 0 END), 0)
              FROM files
              WHERE deleted_at IS NULL
              GROUP BY 1;
@@ -972,10 +978,11 @@ impl IndexWriter {
                       ELSE 'gt2yr'
                     END AS bucket,
                     COUNT(*),
-                    COALESCE(SUM(size), 0)
+                    COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN size ELSE 0 END), 0)
              FROM (
                SELECT modified_at,
                       size,
+                      shares_bytes_with,
                       CAST(strftime('%s', 'now') AS INTEGER) - modified_at AS age
                FROM files
                WHERE deleted_at IS NULL
@@ -1385,14 +1392,57 @@ impl IndexWriter {
         Ok(())
     }
 
+    /// Decide which name carries the bytes when one file has several.
+    ///
+    /// A hard link is one set of bytes with several directory entries. Every
+    /// entry is a real file and stays listed as one, but only the first may
+    /// contribute its size, or the folder totals above them, the volume total,
+    /// and every reclaim figure count the same bytes twice.
+    ///
+    /// "First" is the lowest row id, which is stable across rescans as long as
+    /// the rows survive -- and after the rename carry-forward above, they do.
+    /// An arbitrary choice, made the same way every time, which is what matters:
+    /// nothing about a hard link makes one name more real than another.
+    ///
+    /// A link whose other names are outside the scanned root cannot be seen,
+    /// and is counted once, which is the right answer for this tree anyway.
+    fn mark_shared_byte_links(&self) -> Result<(), IndexError> {
+        self.connection.execute(
+            "UPDATE files
+             SET shares_bytes_with = (
+                 SELECT MIN(other.id) FROM files other
+                 WHERE other.object_id = files.object_id AND other.deleted_at IS NULL
+             )
+             WHERE object_id IS NOT NULL AND deleted_at IS NULL",
+            [],
+        )?;
+        // The carrier points at nothing: NULL is what every ordinary file has,
+        // and what every sum already filters on.
+        self.connection.execute(
+            "UPDATE files SET shares_bytes_with = NULL WHERE shares_bytes_with = id",
+            [],
+        )?;
+        Ok(())
+    }
+
+    /// The point on the chart is what the tree holds, taken from the index
+    /// rather than from the walk's running tally. The tally adds a file's size
+    /// once per directory entry, so a hard link puts bytes on the chart that
+    /// are not on the disk -- 742 MB of them in `C:\Program Files` alone.
     fn capture_timeline(&self, root: &Path, stats: &ScanStats) -> Result<(), IndexError> {
+        let total_bytes: i64 = self.connection.query_row(
+            "SELECT COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN size ELSE 0 END), 0)
+             FROM files WHERE deleted_at IS NULL",
+            [],
+            |row| row.get(0),
+        )?;
         self.connection.execute(
             "INSERT INTO timeline_history (root_path, captured_at, total_bytes, file_count, folder_count)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 path_to_string(root),
                 now_millis(),
-                stats.bytes_scanned as i64,
+                total_bytes,
                 stats.files_scanned as i64,
                 stats.folders_scanned as i64
             ],
@@ -1405,7 +1455,7 @@ impl IndexWriter {
         tx.execute("DELETE FROM extension_stats", [])?;
         tx.execute(
             "INSERT INTO extension_stats (extension, file_count, total_bytes, updated_at)
-             SELECT extension, COUNT(*), COALESCE(SUM(size), 0), ?1
+             SELECT extension, COUNT(*), COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN size ELSE 0 END), 0), ?1
              FROM files
              WHERE deleted_at IS NULL AND extension IS NOT NULL
              GROUP BY extension",
@@ -1445,7 +1495,11 @@ impl IndexWriter {
                  -- GROUP BY treats NULLs as equal, so without this filter every
                  -- same-size unhashed file — a video and a document alike —
                  -- collapses into one phantom \"duplicate\" group.
+                 -- A hard link is not a duplicate: it is one file with two
+                 -- names, and deleting one of them frees nothing. Only the name
+                 -- carrying the bytes takes part.
                  WHERE deleted_at IS NULL AND size > 0 AND partial_hash IS NOT NULL
+                   AND shares_bytes_with IS NULL
                  GROUP BY size, partial_hash, sample_hash, full_hash
                  HAVING COUNT(*) > 1
                  ORDER BY reclaimable_bytes DESC",
@@ -1524,7 +1578,11 @@ impl IndexWriter {
             "CREATE TEMP TABLE _folder_direct AS
              SELECT folder_id AS id,
                     COUNT(*)             AS direct_files,
-                    COALESCE(SUM(size),0) AS direct_bytes
+                    -- Every name is a file and is counted as one. Only the name
+                    -- that carries the bytes contributes them, so a hard link
+                    -- does not inflate the folder it also appears in.
+                    COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN size ELSE 0 END), 0)
+                      AS direct_bytes
              FROM files
              WHERE deleted_at IS NULL
              GROUP BY folder_id",
@@ -1543,6 +1601,14 @@ impl IndexWriter {
                  WHERE f.parent_id IS NOT NULL
              )
              UPDATE folders SET
+                -- Also rewritten from the index, not left as the scanner's live
+                -- tally: the walk counts every directory entry, so a hard link
+                -- added its bytes once per name. Two sources of truth for the
+                -- same number is how they disagree.
+                direct_files = COALESCE(
+                    (SELECT d.direct_files FROM _folder_direct d WHERE d.id = folders.id), 0),
+                direct_bytes = COALESCE(
+                    (SELECT d.direct_bytes FROM _folder_direct d WHERE d.id = folders.id), 0),
                 total_files = COALESCE((
                     SELECT SUM(d.direct_files)
                     FROM ancestry a
