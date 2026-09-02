@@ -34,6 +34,10 @@ pub struct FileRecord {
     /// What the filesystem calls this object, when it would say. `None` on a
     /// volume that does not answer; callers fall back to size and last-modified.
     pub object_id: Option<crate::native::file_id::ObjectId>,
+    /// Bytes actually occupied on disk, when the volume says. `size` is what
+    /// the file claims; this is what deleting it gives back. They differ by
+    /// orders of magnitude for sparse and compressed files.
+    pub allocated: Option<u64>,
 }
 
 #[derive(Debug, Clone)]

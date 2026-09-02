@@ -1,5 +1,5 @@
 pub mod api;
-pub mod dir_ids;
+pub mod dir_facts;
 pub mod drives;
 pub mod file_id;
 pub mod jobs;

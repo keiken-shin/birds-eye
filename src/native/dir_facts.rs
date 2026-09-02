@@ -1,4 +1,4 @@
-//! Object ids for every child of one folder, in one pass.
+//! What one folder can say about every child, in a single pass.
 //!
 //! Asking [`super::file_id::object_id`] per file costs about 60 microseconds
 //! here: it opens a handle, asks, and closes it, once per file. Measured over
@@ -11,6 +11,12 @@
 //! alongside its name. Measured on the same tree: 2.1 microseconds per entry,
 //! about a seventh of the walk. Identity stops being a luxury.
 //!
+//! The same record carries the allocated size, which is the number of bytes the
+//! object actually occupies. For a sparse or compressed file that is nothing
+//! like its logical length: a 64 MB sparse file measured here occupied 128 KB,
+//! and 8 MB of zeros under NTFS compression occupied none at all. Deleting them
+//! frees what is allocated, not what is logical, so both numbers are collected.
+//!
 //! A folder that cannot be opened this way yields an empty map, and the caller
 //! falls back to asking per file. No identity is better than a wrong one, and
 //! both are better than refusing to scan.
@@ -20,12 +26,22 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::Path;
 
-/// Map of child name to object id. Empty means "ask another way", never
-/// "this folder has no children".
-pub type DirIds = HashMap<OsString, ObjectId>;
+/// What the folder listing knows about one child.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirFact {
+    pub object_id: ObjectId,
+    /// Bytes actually occupied on disk. Cluster-rounded for an ordinary file,
+    /// far below the logical length for a sparse or compressed one. Verified
+    /// against `GetCompressedFileSize`, which returns the same figure.
+    pub allocated: u64,
+}
+
+/// Map of child name to what the listing said. Empty means "ask another way",
+/// never "this folder has no children".
+pub type DirFacts = HashMap<OsString, DirFact>;
 
 #[cfg(windows)]
-pub fn dir_ids(dir: &Path) -> DirIds {
+pub fn dir_facts(dir: &Path) -> DirFacts {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
@@ -41,7 +57,7 @@ pub fn dir_ids(dir: &Path) -> DirIds {
     /// Large folders simply take more calls.
     const BUFFER_BYTES: usize = 64 * 1024;
 
-    let mut out = DirIds::new();
+    let mut out = DirFacts::new();
     let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
 
     let handle = unsafe {
@@ -98,12 +114,16 @@ pub fn dir_ids(dir: &Path) -> DirIds {
             if name != "." && name != ".." {
                 out.insert(
                     name,
-                    ObjectId {
-                        volume,
-                        // FileId here is the 64-bit index. A ReFS volume needs
-                        // the 128-bit form, which only the per-file call gives,
-                        // so callers on ReFS should expect the narrow id.
-                        id: entry.FileId as u64 as u128,
+                    DirFact {
+                        object_id: ObjectId {
+                            volume,
+                            // FileId here is the 64-bit index. A ReFS volume
+                            // needs the 128-bit form, which only the per-file
+                            // call gives, so callers on ReFS should expect the
+                            // narrow id. Tracked as #63.
+                            id: entry.FileId as u64 as u128,
+                        },
+                        allocated: entry.AllocationSize.max(0) as u64,
                     },
                 );
             }
@@ -121,8 +141,8 @@ pub fn dir_ids(dir: &Path) -> DirIds {
 /// Everywhere else, one `lstat` per file is already cheap, so there is nothing
 /// worth batching. The caller falls back to `object_id` per entry.
 #[cfg(not(windows))]
-pub fn dir_ids(_dir: &Path) -> DirIds {
-    DirIds::new()
+pub fn dir_facts(_dir: &Path) -> DirFacts {
+    DirFacts::new()
 }
 
 #[cfg(test)]
@@ -145,12 +165,46 @@ mod tests {
         }
         std::fs::create_dir(dir.join("sub")).unwrap();
 
-        let ids = dir_ids(&dir);
-        assert_eq!(ids.len(), 4, "three files and one folder, no . or ..");
-        for (name, id) in &ids {
+        let facts = dir_facts(&dir);
+        assert_eq!(facts.len(), 4, "three files and one folder, no . or ..");
+        for (name, fact) in &facts {
             let direct = super::super::file_id::object_id(&dir.join(name)).unwrap();
-            assert_eq!(*id, direct, "{name:?}");
+            assert_eq!(fact.object_id, direct, "{name:?}");
         }
+    }
+
+    /// A sparse file occupies far less than it claims. Reporting its logical
+    /// length as space that can be reclaimed is the overclaim this exists to
+    /// stop.
+    #[cfg(windows)]
+    #[test]
+    fn a_sparse_file_reports_what_it_occupies_not_what_it_claims() {
+        let dir = fixture("sparse");
+        let path = dir.join("sparse.bin");
+        std::fs::write(&path, b"x").unwrap();
+        let marked = std::process::Command::new("fsutil")
+            .args(["sparse", "setflag", &path.display().to_string()])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !marked {
+            return; // No sparse support on this volume; nothing to prove.
+        }
+        {
+            use std::io::{Seek, SeekFrom, Write};
+            let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            file.seek(SeekFrom::Start(64 * 1024 * 1024)).unwrap();
+            file.write_all(b"end").unwrap();
+        }
+
+        let fact = dir_facts(&dir)[std::ffi::OsStr::new("sparse.bin")];
+        let logical = std::fs::metadata(&path).unwrap().len();
+        assert!(logical > 64 * 1024 * 1024, "the file claims to be large");
+        assert!(
+            fact.allocated < logical / 100,
+            "allocated {} should be a fraction of logical {logical}",
+            fact.allocated
+        );
     }
 
     #[cfg(windows)]
@@ -158,6 +212,6 @@ mod tests {
     fn a_folder_that_cannot_be_opened_yields_nothing_rather_than_failing() {
         let missing = std::env::temp_dir().join("birdseye-dir-ids-absent-folder");
         let _ = std::fs::remove_dir_all(&missing);
-        assert!(dir_ids(&missing).is_empty());
+        assert!(dir_facts(&missing).is_empty());
     }
 }

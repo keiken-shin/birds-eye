@@ -292,7 +292,7 @@ impl WorkerContext {
         // and not being able to afford it. An empty map is the honest answer
         // for a folder that will not enumerate this way; each file is asked
         // directly instead.
-        let folder_ids = crate::native::dir_ids::dir_ids(dir);
+        let folder_facts = crate::native::dir_facts::dir_facts(dir);
 
         for entry in read_dir {
             if self.cancelled.load(Ordering::Relaxed) {
@@ -345,10 +345,11 @@ impl WorkerContext {
                     .bytes_scanned
                     .fetch_add(metadata.len(), Ordering::Relaxed);
 
-                let object_id = folder_ids
-                    .get(&entry.file_name())
-                    .copied()
+                let fact = folder_facts.get(&entry.file_name()).copied();
+                let object_id = fact
+                    .map(|f| f.object_id)
                     .or_else(|| crate::native::file_id::object_id(&path).ok());
+                let allocated = fact.map(|f| f.allocated).or_else(|| allocated_bytes(&metadata));
 
                 let record = FileRecord {
                     parent: dir.to_path_buf(),
@@ -363,6 +364,7 @@ impl WorkerContext {
                     accessed: metadata.accessed().ok(),
                     created: metadata.created().ok(),
                     object_id,
+                    allocated,
                 };
 
                 let _ = self.events_tx.send(ScanEvent::FileIndexed(record));
@@ -521,4 +523,18 @@ mod tests {
             fs::remove_dir_all(root).expect("failed to remove test folder");
         }
     }
+}
+
+/// What the platform's own metadata says a file occupies, for the folders and
+/// platforms the bulk listing does not cover. Windows has no such field on
+/// `Metadata`, so it returns `None` and the logical size stands in.
+#[cfg(unix)]
+fn allocated_bytes(meta: &std::fs::Metadata) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    Some(meta.blocks() * 512)
+}
+
+#[cfg(not(unix))]
+fn allocated_bytes(_meta: &std::fs::Metadata) -> Option<u64> {
+    None
 }

@@ -461,7 +461,7 @@ impl IndexWriter {
         let mut direct_bytes = 0u64;
         let mut subdirs = Vec::new();
         // Same one-call-per-folder identity lookup the scanner worker uses.
-        let folder_ids = crate::native::dir_ids::dir_ids(dir);
+        let folder_facts = crate::native::dir_facts::dir_facts(dir);
         for entry in read_dir {
             let entry = match entry {
                 Ok(entry) => entry,
@@ -492,9 +492,9 @@ impl IndexWriter {
                 .map(|e| e.to_ascii_lowercase());
             direct_files += 1;
             direct_bytes += metadata.len();
-            let object_id = folder_ids
-                .get(&entry.file_name())
-                .copied()
+            let fact = folder_facts.get(&entry.file_name()).copied();
+            let object_id = fact
+                .map(|f| f.object_id)
                 .or_else(|| crate::native::file_id::object_id(&path).ok());
             self.index_file(&FileRecord {
                 parent: dir.to_path_buf(),
@@ -506,6 +506,7 @@ impl IndexWriter {
                 accessed: metadata.accessed().ok(),
                 created: metadata.created().ok(),
                 object_id,
+                allocated: fact.map(|f| f.allocated),
             })?;
         }
         self.index_folder(&FolderRecord {
@@ -1268,14 +1269,15 @@ impl IndexWriter {
              ),
              fresh AS (
                  SELECT id, object_id, folder_id, path, name, extension, size,
-                        modified_at, accessed_at, created_at, media_kind, indexed_at
+                        modified_at, accessed_at, created_at, media_kind, indexed_at,
+                        allocated_size
                  FROM files
                  WHERE deleted_at IS NULL AND indexed_at >= ?1 AND object_id IS NOT NULL
                    AND (path = ?2 OR path LIKE ?3)
              )
              SELECT s.id AS old_id, f.id AS new_id, f.folder_id, f.path, f.name,
                     f.extension, f.size, f.modified_at, f.accessed_at, f.created_at,
-                    f.media_kind, f.indexed_at,
+                    f.media_kind, f.indexed_at, f.allocated_size,
                     (s.size IS f.size
                      AND s.modified_at IS f.modified_at
                      AND s.created_at IS f.created_at) AS same_content
@@ -1308,6 +1310,7 @@ impl IndexWriter {
                 created_at = r.created_at,
                 media_kind = r.media_kind,
                 indexed_at = r.indexed_at,
+                allocated_size = r.allocated_size,
                 partial_hash = CASE WHEN r.same_content THEN files.partial_hash END,
                 sample_hash = CASE WHEN r.same_content THEN files.sample_hash END,
                 full_hash = CASE WHEN r.same_content THEN files.full_hash END,
@@ -1399,7 +1402,13 @@ impl IndexWriter {
                           ELSE 0.60
                         END AS confidence,
                         COUNT(*) AS file_count,
-                        size * (COUNT(*) - 1) AS reclaimable_bytes
+                        -- What deleting the extra copies actually gives back.
+                        -- A sparse or compressed file hands back the bytes it
+                        -- occupies, not the length it claims, and the copy that
+                        -- is kept is assumed to be the one occupying most, so
+                        -- the figure is never an overclaim.
+                        SUM(COALESCE(allocated_size, size))
+                          - MAX(COALESCE(allocated_size, size)) AS reclaimable_bytes
                  FROM files
                  -- Files whose hashing failed or was skipped (locked, permission
                  -- denied, cloud placeholders, vanished) keep NULL hashes; SQL
@@ -1547,9 +1556,9 @@ impl IndexWriter {
         let folder_id = self.ensure_folder(&file.parent)?;
         self.connection.execute(
             "INSERT INTO files (
-                folder_id, path, name, extension, size, modified_at, accessed_at, created_at, media_kind, indexed_at, object_id, deleted_at
+                folder_id, path, name, extension, size, modified_at, accessed_at, created_at, media_kind, indexed_at, object_id, allocated_size, deleted_at
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL)
              ON CONFLICT(path) DO UPDATE SET
                 partial_hash = CASE
                     WHEN files.size IS NOT excluded.size
@@ -1601,6 +1610,7 @@ impl IndexWriter {
                 media_kind = excluded.media_kind,
                 indexed_at = excluded.indexed_at,
                 object_id = COALESCE(excluded.object_id, files.object_id),
+                allocated_size = COALESCE(excluded.allocated_size, files.allocated_size),
                 deleted_at = NULL",
             params![
                 folder_id,
@@ -1613,7 +1623,8 @@ impl IndexWriter {
                 system_time_to_unix(file.created),
                 classify_media_kind(file.extension.as_deref()),
                 self.active_scan_started_at.unwrap_or_else(now_millis),
-                file.object_id.map(|id| id.key())
+                file.object_id.map(|id| id.key()),
+                file.allocated.map(|bytes| bytes as i64)
             ],
         )?;
 
@@ -1863,6 +1874,7 @@ mod tests {
             accessed: None,
             created: Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000)),
             object_id: Some(crate::native::file_id::ObjectId { volume: 7, id }),
+            allocated: Some(4096),
         };
 
         writer.index_file(&record(1)).expect("first scan");
@@ -2514,6 +2526,45 @@ mod tests {
 
     /// A rename is not a death and a birth. The row must survive it, with the
     /// same id, so everything the ontology attached to that file survives too.
+    /// Two copies of a 40 GB sparse image that each occupy 2 GB. Deleting one
+    /// frees 2 GB, and saying 40 GB is the overclaim this fixes.
+    #[test]
+    fn reclaimable_bytes_are_what_the_copies_occupy_not_what_they_claim() {
+        let mut writer = IndexWriter::open_in_memory().expect("open index");
+        writer
+            .connection()
+            .execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, '/root', 'root', 0, 0)",
+                [],
+            )
+            .expect("seed folder");
+        for (id, name) in [(1, "a.vhdx"), (2, "b.vhdx")] {
+            writer
+                .connection()
+                .execute(
+                    "INSERT INTO files (id, folder_id, path, name, size, allocated_size,
+                                        partial_hash, sample_hash, full_hash, hash_state, indexed_at)
+                     VALUES (?1, 1, ?2, ?2, 42949672960, 2147483648, 'p', 's', 'f', 4, 0)",
+                    params![id, name],
+                )
+                .expect("seed file");
+        }
+
+        writer.rebuild_duplicate_size_groups().expect("rebuild groups");
+
+        let reclaimable: i64 = writer
+            .connection()
+            .query_row("SELECT reclaimable_bytes FROM duplicate_groups", [], |row| {
+                row.get(0)
+            })
+            .expect("read the group");
+        assert_eq!(
+            reclaimable, 2_147_483_648,
+            "deleting one copy frees what it occupies, not what it claims"
+        );
+    }
+
     #[test]
     fn a_renamed_file_keeps_its_row_instead_of_dying_and_being_reborn() {
         let root = test_root("renamed");

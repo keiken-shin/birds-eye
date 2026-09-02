@@ -86,14 +86,16 @@ pub fn execute_plan_with(
         // The candidate view predates object ids, so the id is fetched here
         // rather than widening a view every caller shares. A plan holds a
         // handful of files, not a volume's worth.
-        let reviewed_object: Option<String> = conn
+        // The allocated size rides along: what trashing this file gives back is
+        // what it occupies, which for a sparse or compressed file is nothing
+        // like the length it reports.
+        let (reviewed_object, allocated): (Option<String>, Option<i64>) = conn
             .query_row(
-                "SELECT object_id FROM files WHERE id = ?1",
+                "SELECT object_id, allocated_size FROM files WHERE id = ?1",
                 rusqlite::params![cand.file_id],
-                |row| row.get::<_, Option<String>>(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .ok()
-            .flatten();
+            .unwrap_or((None, None));
         if let Err(reason) = unchanged_at(
             Path::new(&cand.path),
             cand.size,
@@ -148,7 +150,7 @@ pub fn execute_plan_with(
                 match bookkeeping {
                     Ok(_) => {
                         cleaned += 1;
-                        bytes_cleaned += cand.size.max(0) as u64;
+                        bytes_cleaned += allocated.unwrap_or(cand.size).max(0) as u64;
                     }
                     // Per-file isolation for DB errors too: the file IS in the recycle
                     // bin and the 'pending' log row keeps the trail.
@@ -448,6 +450,28 @@ mod tests {
     /// The same protection, driven by the filesystem's own answer rather than
     /// by size and timestamp. The row names an object that is not the one now
     /// at that path, which is what a delete-and-recreate leaves behind.
+    /// The freed figure is what the file occupied, not what it claimed. A
+    /// sparse image is the case that makes the two differ by orders of
+    /// magnitude; the ratio is what matters, so the fixture stays small.
+    #[test]
+    fn bytes_cleaned_counts_what_the_file_occupied() {
+        let mut conn = migrated_conn();
+        let fx = Fixture::new("occupied");
+        fx.add_scratch(&conn, 1, "sparse.js", 4000);
+        conn.execute("UPDATE files SET allocated_size = 512 WHERE id = 1", [])
+            .unwrap();
+        let plan_id = create_plan(&conn, &CleanupScope::default()).unwrap();
+
+        let trasher = RecordingTrasher::new();
+        let result = execute_plan_with(&mut conn, plan_id, &trasher, 90).unwrap();
+
+        assert_eq!(result.cleaned, 1);
+        assert_eq!(
+            result.bytes_cleaned, 512,
+            "the disk gets back what the file occupied, not its logical 4000"
+        );
+    }
+
     #[test]
     fn a_file_that_is_a_different_object_than_the_one_reviewed_is_not_trashed() {
         let mut conn = migrated_conn();

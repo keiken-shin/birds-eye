@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 18;
+pub const CURRENT_SCHEMA_VERSION: u32 = 19;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -855,6 +855,24 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (18, strftime('%s', 'now'));
 "#;
 
+/// What a file occupies, alongside what it claims.
+///
+/// `files.size` is the logical length. For a sparse disk image, a compressed
+/// folder, or a deduplicated volume, the bytes on disk can be a small fraction
+/// of that. Bird's Eye was reporting the logical figure as space used and as
+/// space that could be reclaimed, so deleting a 40 GB sparse image that
+/// occupies 2 GB was advertised as freeing 40 GB.
+///
+/// Nullable, because rows indexed before this have no figure and a volume that
+/// will not answer never gets one. Absent means "unknown", and callers fall
+/// back to `size` rather than to zero.
+pub const MIGRATION_019: &str = r#"
+ALTER TABLE files ADD COLUMN allocated_size INTEGER;
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (19, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -874,6 +892,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (16, MIGRATION_016),
     (17, MIGRATION_017),
     (18, MIGRATION_018),
+    (19, MIGRATION_019),
 ];
 
 #[cfg(test)]
@@ -965,8 +984,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 18);
-        assert_eq!(ALL_MIGRATIONS.len(), 18);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 19);
+        assert_eq!(ALL_MIGRATIONS.len(), 19);
     }
 
     #[test]

@@ -719,7 +719,13 @@ fn treemap_lens_data_for_conn(conn: &Connection) -> rusqlite::Result<Vec<Treemap
         }
     }
 
-    let mut stmt = conn.prepare_cached("SELECT path, reason, size FROM v_cleanup_candidates")?;
+    // Joined to files for the allocated size: the view carries the logical
+    // length, and what a folder gives back is what its files occupy.
+    let mut stmt = conn.prepare_cached(
+        "SELECT c.path, c.reason, COALESCE(f.allocated_size, c.size)
+         FROM v_cleanup_candidates c
+         JOIN files f ON f.id = c.file_id",
+    )?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
