@@ -497,6 +497,11 @@ impl IndexWriter {
             let object_id = fact
                 .map(|f| f.object_id)
                 .or_else(|| crate::native::file_id::object_id(&path).ok());
+            let detected_format = if crate::scanner::sniff::worth_sniffing(extension.as_deref()) {
+                crate::scanner::sniff::detect_format(&path)
+            } else {
+                None
+            };
             self.index_file(&FileRecord {
                 parent: dir.to_path_buf(),
                 path,
@@ -508,6 +513,7 @@ impl IndexWriter {
                 created: metadata.created().ok(),
                 object_id,
                 allocated: fact.map(|f| f.allocated),
+                detected_format,
             })?;
         }
         self.index_folder(&FolderRecord {
@@ -1652,9 +1658,9 @@ impl IndexWriter {
         let folder_id = self.ensure_folder(&file.parent)?;
         self.connection.execute(
             "INSERT INTO files (
-                folder_id, path, name, extension, size, modified_at, accessed_at, created_at, media_kind, indexed_at, object_id, allocated_size, deleted_at
+                folder_id, path, name, extension, size, modified_at, accessed_at, created_at, media_kind, indexed_at, object_id, allocated_size, detected_format, deleted_at
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL)
              ON CONFLICT(path) DO UPDATE SET
                 partial_hash = CASE
                     WHEN files.size IS NOT excluded.size
@@ -1707,6 +1713,7 @@ impl IndexWriter {
                 indexed_at = excluded.indexed_at,
                 object_id = COALESCE(excluded.object_id, files.object_id),
                 allocated_size = COALESCE(excluded.allocated_size, files.allocated_size),
+                detected_format = COALESCE(excluded.detected_format, files.detected_format),
                 deleted_at = NULL",
             params![
                 folder_id,
@@ -1720,7 +1727,8 @@ impl IndexWriter {
                 classify_media_kind(file.extension.as_deref()),
                 self.active_scan_started_at.unwrap_or_else(now_millis),
                 file.object_id.map(|id| id.key()),
-                file.allocated.map(|bytes| bytes as i64)
+                file.allocated.map(|bytes| bytes as i64),
+                file.detected_format
             ],
         )?;
 
@@ -1971,6 +1979,7 @@ mod tests {
             created: Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000)),
             object_id: Some(crate::native::file_id::ObjectId { volume: 7, id }),
             allocated: Some(4096),
+            detected_format: None,
         };
 
         writer.index_file(&record(1)).expect("first scan");

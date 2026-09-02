@@ -21,9 +21,11 @@
 //!   alone.
 //!
 //! Format comes from the file header, not the extension, so a `.jpg` that is not
-//! a JPEG is skipped rather than decoded as one. The extension is still the
-//! candidate prefilter -- reading every file on the volume to find the images is
-//! the separate, larger change tracked as magic-byte detection.
+//! a JPEG is skipped rather than decoded as one. The candidate prefilter reads
+//! `files.detected_format`, which the scan records for every file whose name
+//! either claims an image format or claims nothing. A row with no recorded
+//! format -- indexed before that existed -- falls back to its extension, so an
+//! old index keeps working rather than going silently empty.
 //!
 //! Deliberately still absent, tracked separately rather than half-built here:
 //! EXIF orientation normalisation (a rotated original and its upright export
@@ -139,8 +141,17 @@ fn load_image_batch(conn: &Connection, after_id: i64) -> Result<Vec<ImageFile>, 
          FROM files
          WHERE id > ?1
            AND deleted_at IS NULL
-           AND lower(COALESCE(extension, '')) IN
-               ('jpg', 'jpeg', 'jpe', 'jfif', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff')
+           -- What the bytes said, when the scan looked; the extension only
+           -- where it did not. A .jpg that is not an image is excluded here
+           -- rather than opened and rejected, and a real image with no
+           -- extension at all becomes visible for the first time.
+           AND (
+             CASE
+               WHEN detected_format IS NOT NULL THEN detected_format <> 'unknown'
+               ELSE lower(COALESCE(extension, '')) IN
+                 ('jpg', 'jpeg', 'jpe', 'jfif', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff')
+             END
+           )
          ORDER BY id ASC
          LIMIT ?2",
     )?;

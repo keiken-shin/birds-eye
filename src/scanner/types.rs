@@ -38,6 +38,10 @@ pub struct FileRecord {
     /// the file claims; this is what deleting it gives back. They differ by
     /// orders of magnitude for sparse and compressed files.
     pub allocated: Option<u64>,
+    /// What the first bytes say this file is. `None` when the file was not
+    /// worth opening for the question, which is most files; see
+    /// [`crate::scanner::sniff`].
+    pub detected_format: Option<&'static str>,
 }
 
 #[derive(Debug, Clone)]

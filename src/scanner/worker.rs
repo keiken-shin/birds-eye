@@ -351,13 +351,23 @@ impl WorkerContext {
                     .or_else(|| crate::native::file_id::object_id(&path).ok());
                 let allocated = fact.map(|f| f.allocated).or_else(|| allocated_bytes(&metadata));
 
+                // Only for files whose name makes a claim worth checking, or
+                // makes no claim at all. Under six per cent of a real volume.
+                let extension = path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.to_ascii_lowercase());
+                let detected_format =
+                    if crate::scanner::sniff::worth_sniffing(extension.as_deref()) {
+                        crate::scanner::sniff::detect_format(&path)
+                    } else {
+                        None
+                    };
+
                 let record = FileRecord {
                     parent: dir.to_path_buf(),
                     name: entry.file_name().to_string_lossy().into_owned(),
-                    extension: path
-                        .extension()
-                        .and_then(|ext| ext.to_str())
-                        .map(|ext| ext.to_ascii_lowercase()),
+                    extension,
                     path,
                     size: metadata.len(),
                     modified: metadata.modified().ok(),
@@ -365,6 +375,7 @@ impl WorkerContext {
                     created: metadata.created().ok(),
                     object_id,
                     allocated,
+                    detected_format,
                 };
 
                 let _ = self.events_tx.send(ScanEvent::FileIndexed(record));

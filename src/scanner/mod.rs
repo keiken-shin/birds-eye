@@ -1,3 +1,4 @@
+pub mod sniff;
 mod types;
 mod worker;
 

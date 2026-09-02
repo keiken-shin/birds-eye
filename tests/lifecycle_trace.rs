@@ -494,3 +494,49 @@ fn the_scan_log_does_not_name_the_folders_it_walked() {
         );
     }
 }
+
+/// A name is a claim. The index must record what the bytes say, and the media
+/// features must read that rather than the claim.
+#[test]
+fn a_file_is_typed_by_its_bytes_not_by_the_name_someone_gave_it() {
+    const PNG_HEAD: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    let rig = Rig::new("sniff");
+    rig.write("pics/liar.jpg", PNG_HEAD);
+    rig.write("pics/IMG_0421", PNG_HEAD);
+    rig.write("pics/notes.jpg", b"plain text pretending to be a picture");
+    rig.write("pics/program.dll", &vec![0u8; 400]);
+    rig.scan();
+
+    let conn = rig.conn();
+    let seen: Vec<(String, Option<String>)> = conn
+        .prepare("SELECT name, detected_format FROM files ORDER BY name")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let of = |name: &str| {
+        seen.iter()
+            .find(|(n, _)| n == name)
+            .unwrap_or_else(|| panic!("{name} missing from {seen:#?}"))
+            .1
+            .clone()
+    };
+
+    assert_eq!(of("liar.jpg").as_deref(), Some("png"), "the bytes decide");
+    assert_eq!(
+        of("IMG_0421").as_deref(),
+        Some("png"),
+        "an image with no extension must still be found"
+    );
+    assert_eq!(
+        of("notes.jpg").as_deref(),
+        Some("unknown"),
+        "looked at, and it is not an image -- which is not the same as unlooked-at"
+    );
+    assert_eq!(
+        of("program.dll"),
+        None,
+        "a name that makes no image claim is not worth opening"
+    );
+}

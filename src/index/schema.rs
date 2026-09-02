@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 20;
+pub const CURRENT_SCHEMA_VERSION: u32 = 21;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -895,6 +895,27 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (20, strftime('%s', 'now'));
 "#;
 
+/// What the bytes say the file is, next to what its name claims.
+///
+/// `extension` is a claim made by whoever named the file. A PNG renamed to
+/// `.jpg` was treated as a JPEG by every media feature; a real photo saved as
+/// `IMG_0421` with no extension was invisible to all of them.
+///
+/// Three states, and the third is the point. A format name means the head of
+/// the file was read and recognised. `'unknown'` means it was read and matched
+/// nothing. NULL means it was never read -- most files are not worth opening
+/// for this, and the index should say which ones it checked rather than imply
+/// it checked everything.
+pub const MIGRATION_021: &str = r#"
+ALTER TABLE files ADD COLUMN detected_format TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_files_detected_format
+  ON files(detected_format) WHERE detected_format IS NOT NULL;
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (21, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -916,6 +937,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (18, MIGRATION_018),
     (19, MIGRATION_019),
     (20, MIGRATION_020),
+    (21, MIGRATION_021),
 ];
 
 #[cfg(test)]
@@ -1007,8 +1029,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 20);
-        assert_eq!(ALL_MIGRATIONS.len(), 20);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 21);
+        assert_eq!(ALL_MIGRATIONS.len(), 21);
     }
 
     #[test]
