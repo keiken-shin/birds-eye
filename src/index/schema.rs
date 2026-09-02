@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 27;
+pub const CURRENT_SCHEMA_VERSION: u32 = 28;
 
 // The connection pragmas that used to sit here now live in
 // `open_index_connection`. They were never schema: `foreign_keys` and
@@ -1060,6 +1060,74 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (27, strftime('%s', 'now'));
 "#;
 
+/// Migration 028: a file's entity is the file, not its path.
+///
+/// `ontology_entities` was keyed `UNIQUE(kind, canonical_id)` where
+/// `canonical_id` is a path. A path is a label, not an identity: rename a file
+/// and the next populator run created a *second* entity for it. Measured on one
+/// renamed file: two `File` entities, both with `linked_file_id = 1`, with
+/// everything ever learned about the file on the first and nothing on the
+/// second. Every attribute, relation and rejection recorded before the rename
+/// silently stopped applying.
+///
+/// The identity was already sitting in the table. `linked_file_id` points at
+/// the `files` row, which #30 made survive a rename. So that becomes the key,
+/// enforced by a partial unique index -- partial because a `Project` or `Theme`
+/// entity links to no row at all, and NULLs must not collide with each other.
+///
+/// Rows that already split are merged rather than dropped: attributes,
+/// relations and negative assertions are pointed at the oldest entity for that
+/// file, which is the one holding the history, and the younger copies go. A
+/// merge is the only honest repair here -- deleting either side throws away
+/// something a user or a populator asserted.
+pub const MIGRATION_028: &str = r#"
+CREATE TEMP TABLE entity_merge AS
+SELECT loser.id AS loser_id,
+       (SELECT MIN(keeper.id)
+          FROM ontology_entities AS keeper
+         WHERE keeper.kind = loser.kind
+           AND keeper.linked_file_id IS loser.linked_file_id
+           AND keeper.linked_folder_id IS loser.linked_folder_id) AS keeper_id
+  FROM ontology_entities AS loser
+ WHERE loser.linked_file_id IS NOT NULL
+    OR loser.linked_folder_id IS NOT NULL;
+
+DELETE FROM entity_merge WHERE keeper_id IS NULL OR keeper_id = loser_id;
+
+UPDATE ontology_attrs
+   SET entity_id = (SELECT keeper_id FROM entity_merge WHERE loser_id = entity_id)
+ WHERE entity_id IN (SELECT loser_id FROM entity_merge);
+
+UPDATE ontology_relations
+   SET subject_id = (SELECT keeper_id FROM entity_merge WHERE loser_id = subject_id)
+ WHERE subject_id IN (SELECT loser_id FROM entity_merge);
+
+UPDATE ontology_relations
+   SET object_id = (SELECT keeper_id FROM entity_merge WHERE loser_id = object_id)
+ WHERE object_id IN (SELECT loser_id FROM entity_merge);
+
+UPDATE ontology_negative_assertions
+   SET subject_id = (SELECT keeper_id FROM entity_merge WHERE loser_id = subject_id)
+ WHERE subject_id IN (SELECT loser_id FROM entity_merge);
+
+UPDATE ontology_negative_assertions
+   SET object_id = (SELECT keeper_id FROM entity_merge WHERE loser_id = object_id)
+ WHERE object_id IN (SELECT loser_id FROM entity_merge);
+
+DELETE FROM ontology_entities WHERE id IN (SELECT loser_id FROM entity_merge);
+
+DROP TABLE entity_merge;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ontology_entities_one_per_file
+  ON ontology_entities(kind, linked_file_id) WHERE linked_file_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ontology_entities_one_per_folder
+  ON ontology_entities(kind, linked_folder_id) WHERE linked_folder_id IS NOT NULL;
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (28, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -1088,6 +1156,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (25, MIGRATION_025),
     (26, MIGRATION_026),
     (27, MIGRATION_027),
+    (28, MIGRATION_028),
 ];
 
 #[cfg(test)]
@@ -1179,8 +1248,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 27);
-        assert_eq!(ALL_MIGRATIONS.len(), 27);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 28);
+        assert_eq!(ALL_MIGRATIONS.len(), 28);
     }
 
     #[test]

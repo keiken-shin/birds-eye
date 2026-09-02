@@ -16,8 +16,17 @@ pub struct Entity {
     pub created_at: i64,
 }
 
-/// Insert an entity, or return the existing entity's row if one already exists
-/// with the same `(kind, canonical_id)`.
+/// Insert an entity, or return the one that already stands for the same thing.
+///
+/// "The same thing" is the linked row when there is one. A path is a label a
+/// file wears, not the file: keying on it meant a rename produced a *second*
+/// entity, with everything ever learned about that file left on the first and
+/// nothing on the second. `linked_file_id` survives a rename, so it is the
+/// identity, and the path follows the file rather than defining it.
+///
+/// An entity with no linked row -- a `Project`, a `Theme` -- has nothing else
+/// to be identified by, so for those the canonical id is still the key. That is
+/// correct: those ids are chosen names, not observations of a disk.
 pub fn upsert_entity(
     conn: &Connection,
     kind: EntityKind,
@@ -26,6 +35,18 @@ pub fn upsert_entity(
     linked_folder_id: Option<i64>,
     display_name: Option<&str>,
 ) -> Result<Entity, OntologyError> {
+    if let Some(existing) = get_entity_by_link(conn, kind, linked_file_id, linked_folder_id)? {
+        // The file is the same file; only what it is called has changed.
+        if existing.canonical_id != canonical_id {
+            conn.execute(
+                "UPDATE ontology_entities SET canonical_id = ?1 WHERE id = ?2",
+                params![canonical_id, existing.id],
+            )?;
+        }
+        return get_entity(conn, existing.id)?
+            .ok_or_else(|| OntologyError::Sqlite(rusqlite::Error::QueryReturnedNoRows));
+    }
+
     conn.execute(
         "INSERT OR IGNORE INTO ontology_entities
             (kind, canonical_id, linked_file_id, linked_folder_id, display_name, created_at)
@@ -42,6 +63,26 @@ pub fn upsert_entity(
 
     get_entity_by_canonical(conn, kind, canonical_id)?
         .ok_or_else(|| OntologyError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+}
+
+/// The entity standing for a linked `files` or `folders` row, if one exists.
+/// `None` when the caller linked nothing -- there is no row to be identified by.
+fn get_entity_by_link(
+    conn: &Connection,
+    kind: EntityKind,
+    linked_file_id: Option<i64>,
+    linked_folder_id: Option<i64>,
+) -> Result<Option<Entity>, OntologyError> {
+    let (column, id) = match (linked_file_id, linked_folder_id) {
+        (Some(id), _) => ("linked_file_id", id),
+        (None, Some(id)) => ("linked_folder_id", id),
+        (None, None) => return Ok(None),
+    };
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT id, kind, canonical_id, linked_file_id, linked_folder_id, display_name, created_at
+         FROM ontology_entities WHERE kind = ?1 AND {column} = ?2"
+    ))?;
+    Ok(stmt.query_row(params![kind.as_str(), id], row_to_entity).optional()?)
 }
 
 pub fn get_entity(conn: &Connection, id: i64) -> Result<Option<Entity>, OntologyError> {
@@ -129,6 +170,135 @@ mod tests {
             conn.execute_batch(sql).unwrap();
         }
         conn
+    }
+
+    fn seed_one_file(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+             VALUES (1, NULL, '/r', 'r', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO files (id, folder_id, path, name, size, indexed_at)
+             VALUES (1, 1, '/r/old.txt', 'old.txt', 5, 0)",
+            [],
+        )
+        .unwrap();
+    }
+
+    /// A rename must not create a second entity. It used to: everything ever
+    /// learned about the file stayed on the first one and the populators wrote
+    /// to a blank second one, so the file silently forgot itself.
+    #[test]
+    fn renaming_a_file_keeps_its_entity_and_everything_on_it() {
+        let conn = migrated_conn();
+        seed_one_file(&conn);
+
+        let before =
+            upsert_entity(&conn, EntityKind::File, "/r/old.txt", Some(1), None, None).unwrap();
+        crate::ontology::attrs::assert_attr(
+            &conn,
+            before.id,
+            &crate::ontology::attrs::NewAssertion {
+                key: "role",
+                value: "keep",
+                source: "user",
+                confidence: 1.0,
+                display_in_global_views: true,
+            },
+        )
+        .unwrap();
+
+        // The scan renames the file. Same row, new path.
+        conn.execute(
+            "UPDATE files SET path = '/r/new.txt', name = 'new.txt' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        let after =
+            upsert_entity(&conn, EntityKind::File, "/r/new.txt", Some(1), None, None).unwrap();
+
+        assert_eq!(after.id, before.id, "one file, one entity");
+        assert_eq!(
+            after.canonical_id, "/r/new.txt",
+            "the label follows the file"
+        );
+        let kept: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ontology_attrs WHERE entity_id = ?1 AND key = 'role'",
+                params![after.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, 1, "what was asserted about the file is still about it");
+    }
+
+    /// An entity with nothing linked -- a Project, a Theme -- has no row to be
+    /// identified by, so its chosen name is still its identity.
+    #[test]
+    fn an_unlinked_entity_is_still_keyed_by_its_chosen_name() {
+        let conn = migrated_conn();
+        let first =
+            upsert_entity(&conn, EntityKind::Project, "proj-a", None, None, Some("A")).unwrap();
+        let second =
+            upsert_entity(&conn, EntityKind::Project, "proj-b", None, None, Some("B")).unwrap();
+        assert_ne!(
+            first.id, second.id,
+            "two named projects are two entities, not one"
+        );
+    }
+
+    /// Indexes an existing install already split have to be repaired, not just
+    /// prevented from splitting further -- the history is on the older row.
+    #[test]
+    fn migration_merges_entities_that_already_split() {
+        let conn = Connection::open_in_memory().unwrap();
+        for (version, sql) in ALL_MIGRATIONS {
+            if *version == 28 {
+                // The state an older build left: one file, two entities, the
+                // history on the first and a later assertion on the second.
+                seed_one_file(&conn);
+                conn.execute(
+                    "INSERT INTO ontology_entities (id, kind, canonical_id, linked_file_id, created_at)
+                     VALUES (1, 'File', '/r/old.txt', 1, 0), (2, 'File', '/r/new.txt', 1, 0)",
+                    [],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO ontology_attrs
+                        (entity_id, key, value, source, confidence, asserted_at, vocabulary_version)
+                     VALUES (1, 'role', 'keep', 'user', 1.0, 0, 1),
+                            (2, 'media', 'text', 'rule:ext', 0.9, 0, 1)",
+                    [],
+                )
+                .unwrap();
+            }
+            conn.execute_batch(sql).unwrap();
+        }
+
+        let entities: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ontology_entities WHERE linked_file_id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(entities, 1, "the two collapse into one");
+
+        let survivor: i64 = conn
+            .query_row("SELECT id FROM ontology_entities WHERE linked_file_id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(survivor, 1, "the older row is the one that holds the history");
+
+        let facts: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ontology_attrs WHERE entity_id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(facts, 2, "nothing asserted about the file is thrown away");
     }
 
     #[test]
