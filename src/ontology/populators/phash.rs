@@ -188,8 +188,34 @@ fn hash_file(path: &str) -> Option<Hashes> {
     let format = image::guess_format(&head[..read]).ok()?;
 
     let bytes = fs::read(path).ok()?;
-    let decoded = image::load_from_memory_with_format(&bytes, format).ok()?;
-    Some(hash_image(&decoded))
+    Some(hash_image(&decode_upright(bytes, format)?))
+}
+
+/// Decode and turn the picture the way it is meant to be seen.
+///
+/// A phone shoots portrait by holding the sensor sideways: the pixels are
+/// stored landscape and an EXIF orientation tag says how to turn them. `image`
+/// does not apply that tag on decode, so the same photograph -- once straight
+/// from the camera, once after an editor baked the rotation in -- decoded as
+/// two pictures at right angles and hashed as two unrelated images. That is the
+/// library people have the most duplicates in.
+///
+/// The tag lives in the file's metadata, which `load_from_memory` throws away,
+/// so this goes through the decoder to read it before the pixels are taken.
+fn decode_upright(bytes: Vec<u8>, format: image::ImageFormat) -> Option<image::DynamicImage> {
+    use image::ImageDecoder;
+
+    let mut decoder = image::ImageReader::with_format(std::io::Cursor::new(bytes), format)
+        .into_decoder()
+        .ok()?;
+    // An unreadable or absent tag means "already upright", which is what an
+    // untagged file is. A broken tag is not worth failing a hash over.
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut decoded = image::DynamicImage::from_decoder(decoder).ok()?;
+    decoded.apply_orientation(orientation);
+    Some(decoded)
 }
 
 /// `Read::read` may return fewer bytes than asked for without being at EOF.
@@ -541,6 +567,110 @@ struct NearDuplicateFile {
 
 #[cfg(test)]
 mod tests {
+    /// A JPEG whose pixels are stored sideways with an EXIF orientation tag,
+    /// the way every phone writes a portrait photo.
+    ///
+    /// Built by hand rather than committed as a fixture so the bytes that make
+    /// the test true are visible: `FFE1`, the segment length, `Exif  `, a
+    /// big-endian TIFF header, and one IFD entry -- tag 0x0112, type SHORT,
+    /// value 6 ("rotate 90 clockwise to display").
+    fn jpeg_with_orientation_6(image: &image::DynamicImage) -> Vec<u8> {
+        let mut plain = Vec::new();
+        image
+            .write_to(&mut std::io::Cursor::new(&mut plain), image::ImageFormat::Jpeg)
+            .expect("encode jpeg");
+
+        let mut app1: Vec<u8> = vec![0xFF, 0xE1];
+        let mut payload: Vec<u8> = b"Exif  ".to_vec();
+        payload.extend_from_slice(b"MM *"); // big-endian TIFF magic
+        payload.extend_from_slice(&8_u32.to_be_bytes()); // IFD0 starts right here
+        payload.extend_from_slice(&1_u16.to_be_bytes()); // one entry
+        payload.extend_from_slice(&0x0112_u16.to_be_bytes()); // Orientation
+        payload.extend_from_slice(&3_u16.to_be_bytes()); // SHORT
+        payload.extend_from_slice(&1_u32.to_be_bytes()); // one value
+        payload.extend_from_slice(&6_u16.to_be_bytes()); // the value...
+        payload.extend_from_slice(&0_u16.to_be_bytes()); // ...padded to 4 bytes
+        payload.extend_from_slice(&0_u32.to_be_bytes()); // no next IFD
+        app1.extend_from_slice(&((payload.len() + 2) as u16).to_be_bytes());
+        app1.extend_from_slice(&payload);
+
+        // Straight after SOI, where a camera puts it.
+        let mut out = plain[..2].to_vec();
+        out.extend_from_slice(&app1);
+        out.extend_from_slice(&plain[2..]);
+        out
+    }
+
+    fn write_temp(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "be-phash-{}-{}-{name}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, bytes).expect("write fixture");
+        path
+    }
+
+    /// The same photograph, once tagged and once already turned, must hash the
+    /// same. Before the orientation tag was applied these were two unrelated
+    /// images and no duplicate was ever found between them.
+    #[test]
+    fn a_photo_tagged_sideways_hashes_as_the_photo_turned_upright() {
+        // Asymmetric on both axes, so a rotation genuinely changes the hash.
+        let landscape = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(
+            256,
+            256,
+            |x, y| {
+                let bright = if x < 96 && y < 160 { 255 } else { (x / 3) as u8 };
+                image::Rgb([bright, (y / 2) as u8, ((x + y) / 4) as u8])
+            },
+        ));
+        let turned = landscape.rotate90(); // what orientation 6 asks for
+
+        let tagged = write_temp("tagged.jpg", &jpeg_with_orientation_6(&landscape));
+        let mut turned_bytes = Vec::new();
+        turned
+            .write_to(
+                &mut std::io::Cursor::new(&mut turned_bytes),
+                image::ImageFormat::Jpeg,
+            )
+            .expect("encode turned");
+        let already_turned = write_temp("turned.jpg", &turned_bytes);
+        let mut plain_bytes = Vec::new();
+        landscape
+            .write_to(
+                &mut std::io::Cursor::new(&mut plain_bytes),
+                image::ImageFormat::Jpeg,
+            )
+            .expect("encode plain");
+        let untagged = write_temp("plain.jpg", &plain_bytes);
+
+        let tagged_hash = hash_file(tagged.to_str().unwrap()).expect("hash tagged");
+        let turned_hash = hash_file(already_turned.to_str().unwrap()).expect("hash turned");
+        let plain_hash = hash_file(untagged.to_str().unwrap()).expect("hash plain");
+
+        let matched = hamming_distance(&tagged_hash.phash, &turned_hash.phash);
+        assert!(
+            matched <= 4,
+            "tagged and turned must be near-identical, distance was {matched}"
+        );
+
+        // And the tag must actually have been applied: the same bytes read
+        // without it are a different picture.
+        let ignored = hamming_distance(&tagged_hash.phash, &plain_hash.phash);
+        assert!(
+            ignored > matched,
+            "orientation was ignored: tagged matched the unturned image at {ignored}"
+        );
+
+        for path in [tagged, already_turned, untagged] {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
 
     /// The banding claim, checked rather than argued: every pair the all-pairs
     /// scan would report is also produced by the prefilter. If this ever fails,
