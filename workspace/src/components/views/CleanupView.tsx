@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { formatBytes, formatCount } from "@bridge/domain";
 import { VERDICT_STYLES } from "../../lib/verdict";
+import { splitByEvidence } from "../../lib/evidence";
 import {
   folderRecommendations,
   staleFileRecommendations,
@@ -56,10 +57,11 @@ export function CleanupView() {
   const [picked, setPicked] = useState<Set<string>>(new Set());
 
   const dupGroups = overview?.duplicate_groups ?? [];
-  const dupWaste = useMemo(
-    () => dupGroups.reduce((s, g) => s + g.reclaimable_bytes, 0),
-    [dupGroups]
-  );
+  // Split, never summed: a byte-identical copy and a group that agreed on a few
+  // sampled chunks are different claims about the same number of bytes.
+  const dupSplit = useMemo(() => splitByEvidence(dupGroups), [dupGroups]);
+  const dupWaste = dupSplit.exact;
+  const dupUnconfirmed = dupSplit.sampled + dupSplit["size-only"];
 
   const groups: RecGroup[] = useMemo(() => {
     const rows = Array.from(lensByPath.values());
@@ -197,7 +199,7 @@ export function CleanupView() {
         sub={
           <>
             <span className="mono font-semibold text-primary-ink">{formatBytes(listedTotal)}</span>{" "}
-            you can free
+            worth letting go
           </>
         }
         actions={
@@ -269,7 +271,11 @@ export function CleanupView() {
                 icon={Copy}
                 tint="var(--color-danger)"
                 title="Duplicate files"
-                count={`${formatCount(dupGroups.length)} groups · ${formatBytes(dupWaste)} you can free`}
+                count={
+                  dupUnconfirmed > 0
+                    ? `${formatCount(dupGroups.length)} groups · ${formatBytes(dupWaste)} in exact copies · ${formatBytes(dupUnconfirmed)} not confirmed yet`
+                    : `${formatCount(dupGroups.length)} groups · ${formatBytes(dupWaste)} in exact copies`
+                }
                 risk="review"
               />
               <div
@@ -421,7 +427,7 @@ function GroupCard({
         icon={group.icon}
         tint={group.tint}
         title={group.title}
-        count={`${formatCount(group.items.length)} ${group.items.length === 1 ? "item" : "items"} · ${formatBytes(totalBytes)} you can free`}
+        count={`${formatCount(group.items.length)} ${group.items.length === 1 ? "item" : "items"} · ${formatBytes(totalBytes)} worth letting go`}
         risk={group.risk}
         check={headerCheck}
         onCheck={onToggleGroup}

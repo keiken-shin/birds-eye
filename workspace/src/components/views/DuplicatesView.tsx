@@ -9,6 +9,7 @@ import {
 import { useIndexData } from "../../state/indexData";
 import { useWorkspace } from "../../state/workspaceStore";
 import { baseName } from "../../lib/discoveries";
+import { duplicateEvidence, EVIDENCE_LABEL, splitByEvidence } from "../../lib/evidence";
 import { FilePreview } from "../FilePreview";
 import { MoveDialog, type MoveTarget } from "../MoveDialog";
 import { Card, EmptyState, Meter, SectionLabel } from "../ui/Card";
@@ -20,15 +21,14 @@ const GROUP_LIMIT = 100;
 const FILES_PER_GROUP = 50;
 
 const HASH_TAG: Record<number, { label: string; tone: "green" | "neutral" }> = {
-  4: { label: "VERIFIED", tone: "green" },
+  4: { label: "EXACT COPY", tone: "green" },
   2: { label: "SAMPLED", tone: "neutral" },
   0: { label: "SIZE MATCH", tone: "neutral" },
 };
 
 function ConfidenceTag({ confidence }: { confidence: number }) {
-  if (confidence >= 0.99) return <Tag tone="green">VERIFIED</Tag>;
-  if (confidence >= 0.8) return <Tag>SAMPLED</Tag>;
-  return <Tag>SIZE MATCH</Tag>;
+  const evidence = duplicateEvidence(confidence);
+  return <Tag tone={evidence === "exact" ? "green" : "neutral"}>{EVIDENCE_LABEL[evidence]}</Tag>;
 }
 
 function modifiedAgo(ts: number | null) {
@@ -85,7 +85,12 @@ export function DuplicatesView() {
     [overview]
   );
 
-  const totalWaste = useMemo(() => groups.reduce((s, g) => s + g.reclaimable_bytes, 0), [groups]);
+  // Deliberately not one total. A group of byte-identical copies and a group
+  // that agreed on a few hundred kilobytes of a 20 GB file are different claims,
+  // and adding them together presents the weaker one at the strength of the
+  // stronger one.
+  const waste = useMemo(() => splitByEvidence(groups), [groups]);
+  const unconfirmedWaste = waste.sampled + waste["size-only"];
   const maxWaste = groups[0]?.reclaimable_bytes ?? 0;
   const selectedGroup = groups.find((g) => g.id === selectedId) ?? null;
 
@@ -200,8 +205,17 @@ export function DuplicatesView() {
         sub={
           <span>
             {groups.length} groups ·{" "}
-            <span className="mono font-semibold text-danger">{formatBytes(totalWaste)}</span>{" "}
-            recoverable
+            <span className="mono font-semibold text-danger">{formatBytes(waste.exact)}</span> in
+            exact copies
+            {unconfirmedWaste > 0 ? (
+              <>
+                {" · "}
+                <span className="mono font-semibold text-ink-soft">
+                  {formatBytes(unconfirmedWaste)}
+                </span>{" "}
+                not confirmed yet
+              </>
+            ) : null}
           </span>
         }
         actions={
@@ -268,11 +282,18 @@ export function DuplicatesView() {
               <div className="flex flex-none items-baseline gap-3 border-b border-line-soft px-4 py-2.5">
                 <span className="text-12 text-muted">
                   Group <span className="mono text-ink-soft">#{selectedGroup.id}</span> ·{" "}
-                  {selectedGroup.file_count} identical copies ·{" "}
-                  <span className="mono text-ink-soft">{formatBytes(selectedGroup.size)}</span> each
+                  {/* "identical" is a claim about the bytes. Only an exact group
+                      has compared them; the others matched on sampled chunks or
+                      on size, and saying identical there is simply untrue. */}
+                  {selectedGroup.file_count}{" "}
+                  {duplicateEvidence(selectedGroup.confidence) === "exact"
+                    ? "identical copies"
+                    : "copies that look the same"}{" "}
+                  · <span className="mono text-ink-soft">{formatBytes(selectedGroup.size)}</span>{" "}
+                  each
                 </span>
                 <span className="ml-auto text-11 text-faint">
-                  free{" "}
+                  {duplicateEvidence(selectedGroup.confidence) === "exact" ? "free " : "up to "}
                   <span className="mono font-semibold text-primary-ink">
                     {formatBytes(selectedGroup.reclaimable_bytes)}
                   </span>{" "}

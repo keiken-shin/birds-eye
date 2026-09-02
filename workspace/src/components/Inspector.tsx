@@ -280,7 +280,7 @@ export function Inspector() {
                                 <span className="mono font-semibold">
                                   {formatBytes(reclaimable)}
                                 </span>{" "}
-                                you can free{reasonLabel ? ` · ${reasonLabel}` : ""}
+                                worth letting go{reasonLabel ? ` · ${reasonLabel}` : ""}
                               </>
                             ) : verdict === "protected" ? (
                               "Bird's Eye won't remove this one, whatever you stage."

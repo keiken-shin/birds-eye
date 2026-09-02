@@ -159,7 +159,7 @@ export function TreemapView() {
           <span className="mono text-11 text-dim">{formatBytes(scopeTotal)}</span>
           {reclaimableTotal > 0 ? (
             <span className="text-11 text-primary-ink">
-              {formatBytes(reclaimableTotal)} you can free
+              {formatBytes(reclaimableTotal)} worth letting go
             </span>
           ) : null}
           <span className="flex gap-[2px] rounded-lg border border-line-input bg-field p-[2px] text-10">
@@ -256,7 +256,7 @@ export function TreemapView() {
                           border: "1px solid var(--color-primary-edge)",
                         }
                   }
-                  title={staged ? "Staged for cleanup" : `${formatBytes(reclaimable)} you can free`}
+                  title={staged ? "Staged for cleanup" : `${formatBytes(reclaimable)} worth letting go`}
                 >
                   {staged ? <Check size={11} strokeWidth={3} /> : <ArrowUp size={11} strokeWidth={2.5} />}
                 </div>

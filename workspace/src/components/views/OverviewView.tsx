@@ -16,6 +16,7 @@ import { formatBytes, formatCount } from "@bridge/domain";
 import { useIndexData } from "../../state/indexData";
 import { useWorkspace } from "../../state/workspaceStore";
 import { scopeChildren } from "../../lib/folderTree";
+import { splitByEvidence } from "../../lib/evidence";
 import { categoryOf } from "../../lib/categories";
 import { ALL_CLEANUP_REASONS, folderRecommendations } from "../../lib/recommendations";
 import { Card, EmptyState, SectionLabel, StatCard, useCountUp } from "../ui/Card";
@@ -43,10 +44,12 @@ export function OverviewView() {
 
   const totalBytes = activeEntry?.bytes_scanned ?? 0;
   const totalFiles = activeEntry?.files_scanned ?? 0;
-  const dupWaste = useMemo(
-    () => (overview?.duplicate_groups ?? []).reduce((s, g) => s + g.reclaimable_bytes, 0),
-    [overview]
-  );
+  // Only groups whose members were compared byte for byte. The rest matched on
+  // sampled parts of the file, and a tile is far too little room to say so --
+  // the duplicates view splits them out properly.
+  const dupSplit = useMemo(() => splitByEvidence(overview?.duplicate_groups ?? []), [overview]);
+  const dupWaste = dupSplit.exact;
+  const dupUnconfirmed = dupSplit.sampled + dupSplit["size-only"];
 
   const categorySegments: Segment[] = useMemo(() => {
     const media = [...(overview?.media ?? [])].sort((a, b) => b.total_bytes - a.total_bytes);
@@ -138,11 +141,17 @@ export function OverviewView() {
               {/* Not animated: the one number the whole landing is about must be
                   right the instant it paints, including when rAF never runs. */}
               <h2 className="text-[26px] leading-tight font-semibold tracking-tight text-ink">
-                You can safely free{" "}
-                <span className="mono text-primary-ink">{formatBytes(reclaimableTotal)}</span>.
+                Bird's Eye found{" "}
+                <span className="mono text-primary-ink">{formatBytes(reclaimableTotal)}</span> worth
+                letting go.
               </h2>
+              {/* This number is built from what each file IS -- a copy, a rebuild,
+                  a scratch file whose original is still here -- not from comparing
+                  the bytes. It is a good reason to look, and it is not a guarantee,
+                  so the sentence must not read like one. */}
               <p className="mt-1 text-12 text-muted">
-                Here's where it is, biggest first — what each one is, and why it's safe to let go.
+                Here's where it is, biggest first — what each one is, and why Bird's Eye thinks you
+                won't miss it. Look before you let anything go.
               </p>
             </div>
 
@@ -193,8 +202,19 @@ export function OverviewView() {
         <div className="be-rise grid grid-cols-2 gap-3 xl:grid-cols-4">
           <StatCard label="Indexed" value={formatBytes(animatedTotal)} icon={HardDrive} tint="var(--color-history)" sub={<span className="mono">{formatCount(totalFiles)} files</span>} />
           <StatCard label="Files" value={formatCount(Math.round(animatedFiles))} icon={FilesIcon} tint="var(--color-cat-photo)" sub={<span className="mono">{formatCount(activeEntry?.folders_scanned ?? 0)} folders</span>} />
-          <StatCard label="You can free" value={formatBytes(animatedReclaim)} icon={Sparkles} tint="var(--color-primary)" sub="review it, then clean" onClick={() => setView("cleanup")} />
-          <StatCard label="Duplicate waste" value={formatBytes(animatedDup)} icon={Copy} tint="var(--color-danger)" sub={`${overview?.duplicate_groups.length ?? 0} groups`} onClick={() => setView("duplicates")} />
+          <StatCard label="Worth letting go" value={formatBytes(animatedReclaim)} icon={Sparkles} tint="var(--color-primary)" sub="review it, then clean" onClick={() => setView("cleanup")} />
+          <StatCard
+            label="Exact copies"
+            value={formatBytes(animatedDup)}
+            icon={Copy}
+            tint="var(--color-danger)"
+            sub={
+              dupUnconfirmed > 0
+                ? `+ ${formatBytes(dupUnconfirmed)} not confirmed yet`
+                : `${overview?.duplicate_groups.length ?? 0} groups`
+            }
+            onClick={() => setView("duplicates")}
+          />
         </div>
 
         {/* Composition bar */}
@@ -260,8 +280,8 @@ export function OverviewView() {
           <Card className="be-rise be-d3 p-4">
             <SectionLabel className="mb-3">Quick actions</SectionLabel>
             <div className="grid grid-cols-2 gap-2.5">
-              <QuickAction icon={Copy} tint="var(--color-danger)" title="Find duplicates" sub={`${formatBytes(dupWaste)} you can free`} onClick={() => setView("duplicates")} />
-              <QuickAction icon={Sparkles} tint="var(--color-primary)" title="Clean up" sub={`${formatBytes(reclaimableTotal)} you can free`} onClick={() => setView("cleanup")} />
+              <QuickAction icon={Copy} tint="var(--color-danger)" title="Find duplicates" sub={`${formatBytes(dupWaste)} in exact copies`} onClick={() => setView("duplicates")} />
+              <QuickAction icon={Sparkles} tint="var(--color-primary)" title="Clean up" sub={`${formatBytes(reclaimableTotal)} worth a look`} onClick={() => setView("cleanup")} />
               <QuickAction icon={FolderTree} tint="var(--color-cat-archive)" title="Open the map" sub="see it by size and safety" onClick={() => setView("treemap")} />
               <QuickAction icon={Database} tint="var(--color-cat-document)" title="Largest files" sub="biggest first" onClick={() => setView("files")} />
               <QuickAction icon={FolderInput} tint="var(--color-cat-model)" title="Organise" sub="files that belong elsewhere" onClick={() => setView("catalog")} />
