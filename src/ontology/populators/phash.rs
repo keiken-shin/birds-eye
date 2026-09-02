@@ -40,6 +40,7 @@ use crate::ontology::populators::{
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
 
@@ -327,52 +328,131 @@ fn upsert_hash(
     Ok(())
 }
 
+/// Bands the 128 bits of fingerprint are cut into for candidate generation.
+///
+/// One more band than the distance threshold, and that is the whole trick. If
+/// two images differ in at most 12 bits and the bits are split into 13 groups,
+/// at least one group must be bit-for-bit identical -- twelve errors cannot
+/// touch thirteen groups. So every real pair shares an exact band value, and
+/// looking only at rows that share one loses nothing.
+const BANDS: usize = NEAR_DUPLICATE_DISTANCE as usize + 1;
+
+/// The two 64-bit fingerprints as one number, so bands can be cut across both.
+fn fingerprint(row: &HashRow) -> u128 {
+    (u128::from(u64::from_be_bytes(row.phash)) << 64) | u128::from(u64::from_be_bytes(row.dhash))
+}
+
+/// The bits of one band, as a lookup key. Bands are 9 or 10 bits wide; the
+/// exact split does not matter, only that they partition all 128 bits.
+fn band_value(fingerprint: u128, band: usize) -> u64 {
+    let lo = band * 128 / BANDS;
+    let hi = (band + 1) * 128 / BANDS;
+    ((fingerprint >> lo) & ((1_u128 << (hi - lo)) - 1)) as u64
+}
+
+/// Every pair worth comparing, found without comparing every pair.
+///
+/// The obvious loop compares each image with every other, which is fine for a
+/// folder of holiday photos and never returns for a photo library: a million
+/// images is five hundred billion comparisons. This produces the same answers
+/// by only ever comparing rows that share an identical band, which by the
+/// pigeonhole argument above is every pair that could possibly be close enough.
+///
+/// ponytail: a run of rows sharing one band value is compared all-pairs, capped
+/// at MAX_RUN. Ten thousand byte-identical thumbnails would land in one run and
+/// hit that cap. The fix when it matters is to emit one cluster discovery for
+/// the run instead of a pair per combination, which the payload already allows.
+fn candidate_pairs(hashes: &[HashRow]) -> Vec<(usize, usize)> {
+    const MAX_RUN: usize = 4096;
+
+    let fingerprints: Vec<u128> = hashes.iter().map(fingerprint).collect();
+    let mut seen: HashSet<(u32, u32)> = HashSet::new();
+    let mut pairs = Vec::new();
+    // One band at a time, so only one band's worth of keys is ever resident.
+    let mut keyed: Vec<(u64, u32)> = Vec::with_capacity(fingerprints.len());
+
+    for band in 0..BANDS {
+        keyed.clear();
+        keyed.extend(
+            fingerprints
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (band_value(*value, band), index as u32)),
+        );
+        keyed.sort_unstable();
+
+        let mut start = 0;
+        while start < keyed.len() {
+            let mut end = start + 1;
+            while end < keyed.len() && keyed[end].0 == keyed[start].0 {
+                end += 1;
+            }
+            let run = &keyed[start..end.min(start + MAX_RUN)];
+            for (offset, (_, left)) in run.iter().enumerate() {
+                for (_, right) in run.iter().skip(offset + 1) {
+                    let key = if left < right {
+                        (*left, *right)
+                    } else {
+                        (*right, *left)
+                    };
+                    if seen.insert(key) {
+                        pairs.push((key.0 as usize, key.1 as usize));
+                    }
+                }
+            }
+            start = end;
+        }
+    }
+
+    pairs
+}
+
 fn emit_near_duplicate_discoveries(
     conn: &Connection,
     ctx: &mut PopulatorContext,
 ) -> Result<(), PopulatorError> {
     let hashes = load_hashes(conn)?;
-    for left_idx in 0..hashes.len() {
-        for right in hashes.iter().skip(left_idx + 1) {
-            if hashes[left_idx].file_id == right.file_id {
-                continue;
-            }
-            let distance = hamming_distance(&hashes[left_idx].phash, &right.phash)
-                + hamming_distance(&hashes[left_idx].dhash, &right.dhash);
-            if distance > NEAR_DUPLICATE_DISTANCE {
-                continue;
-            }
-
-            let payload = NearDuplicatePayload {
-                files: vec![
-                    NearDuplicateFile {
-                        file_id: hashes[left_idx].file_id,
-                        path: hashes[left_idx].path.clone(),
-                        size: hashes[left_idx].size.max(0) as u64,
-                    },
-                    NearDuplicateFile {
-                        file_id: right.file_id,
-                        path: right.path.clone(),
-                        size: right.size.max(0) as u64,
-                    },
-                ],
-                hamming_distance: distance,
-            };
-            let payload_json = serde_json::to_string(&payload)?;
-            if discovery_exists(conn, "near-duplicate-cluster", &payload_json)? {
-                continue;
-            }
-            insert_discovery(
-                conn,
-                &NewDiscovery {
-                    kind: "near-duplicate-cluster",
-                    payload_json: &payload_json,
-                    confidence: confidence_for_distance(distance),
-                    potential_bytes_unlocked: hashes[left_idx].size.min(right.size).max(0) as u64,
-                },
-            )?;
-            ctx.note_discovery();
+    for (left_idx, right_idx) in candidate_pairs(&hashes) {
+        let left = &hashes[left_idx];
+        let right = &hashes[right_idx];
+        if left.file_id == right.file_id {
+            continue;
         }
+        let distance = hamming_distance(&left.phash, &right.phash)
+            + hamming_distance(&left.dhash, &right.dhash);
+        if distance > NEAR_DUPLICATE_DISTANCE {
+            continue;
+        }
+
+        let payload = NearDuplicatePayload {
+            files: vec![
+                NearDuplicateFile {
+                    file_id: left.file_id,
+                    path: left.path.clone(),
+                    size: left.size.max(0) as u64,
+                },
+                NearDuplicateFile {
+                    file_id: right.file_id,
+                    path: right.path.clone(),
+                    size: right.size.max(0) as u64,
+                },
+            ],
+            hamming_distance: distance,
+        };
+        let payload_json = serde_json::to_string(&payload)?;
+        if discovery_exists(conn, "near-duplicate-cluster", &payload_json)? {
+            continue;
+        }
+        insert_discovery(
+            conn,
+            &NewDiscovery {
+                kind: "near-duplicate-cluster",
+                payload_json: &payload_json,
+                confidence: confidence_for_distance(distance),
+                potential_bytes_unlocked: left.size.min(right.size).max(0) as u64,
+            },
+        )?;
+        ctx.note_discovery();
     }
     Ok(())
 }
@@ -461,6 +541,129 @@ struct NearDuplicateFile {
 
 #[cfg(test)]
 mod tests {
+
+    /// The banding claim, checked rather than argued: every pair the all-pairs
+    /// scan would report is also produced by the prefilter. If this ever fails,
+    /// the app is silently missing near-duplicates, which is worse than being
+    /// slow.
+    #[test]
+    fn the_prefilter_never_loses_a_pair_the_slow_scan_would_find() {
+        // Deterministic pseudo-random rows, plus deliberate near-neighbours at
+        // a spread of distances around the threshold.
+        let mut rows: Vec<HashRow> = Vec::new();
+        let mut state = 0x2545_F491_4F6C_DD1D_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for id in 0..600_i64 {
+            let phash = next().to_be_bytes();
+            let dhash = next().to_be_bytes();
+            rows.push(HashRow {
+                file_id: id,
+                path: format!("/f{id}"),
+                size: 1000,
+                phash,
+                dhash,
+            });
+        }
+        // Twins, differing by a controlled number of bits at pseudo-random
+        // positions across all 128. Random rather than evenly spread on
+        // purpose: an even spread is a special case, and the point is that no
+        // arrangement of twelve errors can defeat thirteen bands.
+        let mut twins = 0;
+        for offset in 0..40_usize {
+            let flips = 1 + (offset % 13);
+            let base = &rows[offset];
+            let mut phash = base.phash;
+            let mut dhash = base.dhash;
+            let mut placed = 0;
+            while placed < flips {
+                let bit = (next() % 128) as usize;
+                let (bytes, index) = if bit < 64 {
+                    (&mut phash, bit)
+                } else {
+                    (&mut dhash, bit - 64)
+                };
+                let mask = 1_u8 << (index % 8);
+                if bytes[index / 8] & mask == 0 {
+                    bytes[index / 8] |= mask;
+                } else {
+                    bytes[index / 8] &= !mask;
+                }
+                placed += 1;
+            }
+            twins += 1;
+            rows.push(HashRow {
+                file_id: 10_000 + offset as i64,
+                path: format!("/twin{offset}"),
+                size: 1000,
+                phash,
+                dhash,
+            });
+        }
+        assert!(twins > 0);
+
+        // The adversarial case, which random twins essentially never produce:
+        // twelve errors placed one in each band of a *twelve*-band split.
+        // Twelve bands would miss this pair entirely. Thirteen cannot, because
+        // twelve errors cannot touch thirteen groups, and that is the only
+        // reason the band count is what it is.
+        //
+        // Built in fingerprint space rather than in the byte arrays: the two
+        // 64-bit hashes are packed big-endian into one u128, so "bit 42 of the
+        // array" is not "bit 42 of the fingerprint", and placing the errors in
+        // the wrong space produces a fixture that proves nothing.
+        {
+            let base = &rows[7];
+            let mut value = fingerprint(base);
+            for band in 0..12_usize {
+                value ^= 1_u128 << (band * 128 / 12);
+            }
+            rows.push(HashRow {
+                file_id: 20_000,
+                path: "/adversarial".to_string(),
+                size: 1000,
+                phash: ((value >> 64) as u64).to_be_bytes(),
+                dhash: (value as u64).to_be_bytes(),
+            });
+        }
+
+        let mut brute: HashSet<(usize, usize)> = HashSet::new();
+        for left in 0..rows.len() {
+            for right in (left + 1)..rows.len() {
+                let d = hamming_distance(&rows[left].phash, &rows[right].phash)
+                    + hamming_distance(&rows[left].dhash, &rows[right].dhash);
+                if d <= NEAR_DUPLICATE_DISTANCE {
+                    brute.insert((left, right));
+                }
+            }
+        }
+        assert!(
+            brute.len() >= 4,
+            "the fixture must contain pairs to find, found {}",
+            brute.len()
+        );
+
+        let found: HashSet<(usize, usize)> = candidate_pairs(&rows).into_iter().collect();
+        for pair in &brute {
+            assert!(
+                found.contains(pair),
+                "the prefilter dropped a real pair at distance <= {NEAR_DUPLICATE_DISTANCE}: {pair:?}"
+            );
+        }
+
+        // And it must actually be a filter, not a rename for "everything".
+        let all_pairs = rows.len() * (rows.len() - 1) / 2;
+        assert!(
+            found.len() < all_pairs / 4,
+            "the prefilter examined {} of {all_pairs} pairs, which is no saving",
+            found.len()
+        );
+    }
+
     use super::*;
     use image::{ImageFormat, Rgb, RgbImage};
 
