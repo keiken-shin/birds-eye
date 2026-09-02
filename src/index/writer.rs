@@ -1321,6 +1321,24 @@ impl IndexWriter {
             [],
         )?;
 
+        // The ontology names a file by its path, so the row surviving the move
+        // is not enough on its own: the next enrichment run would create a
+        // second entity at the new path and leave everything learned about the
+        // file attached to the first. This is the one place a rename is known,
+        // so it is the one place that can say so.
+        //
+        // OR IGNORE, because a path can already have an entity from an earlier
+        // life. Leaving that alone is worse than merging but far better than
+        // deleting someone else's history to make room. Keying entities by
+        // identity rather than by path is the real answer, tracked separately.
+        self.connection.execute(
+            "UPDATE OR IGNORE ontology_entities
+             SET canonical_id = (SELECT path FROM _renames WHERE old_id = linked_file_id)
+             WHERE kind = 'File'
+               AND linked_file_id IN (SELECT old_id FROM _renames)",
+            [],
+        )?;
+
         self.connection.execute("DROP TABLE _renames", [])?;
         Ok(())
     }
