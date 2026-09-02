@@ -5,6 +5,7 @@ use birds_eye::native::api::{
     index_metadata,
     duplicate_group_files as query_duplicate_group_files, query_index_overview,
     folder_children as query_folder_children,
+    scan_coverage as query_scan_coverage, ScanCoverageRequest,
     scan_issues as query_scan_issues, ScanIssueDto, ScanIssuesRequest,
     retry_scan_issues as do_retry_scan_issues, RetryScanIssuesRequest, RetryScanIssuesResponse,
     file_lock_holders as query_file_lock_holders, FileLockHoldersRequest,
@@ -97,6 +98,13 @@ fn folder_children(request: FolderChildrenRequest) -> Result<Vec<FolderSummaryDt
 }
 
 #[tauri::command(async)]
+fn scan_coverage(
+    request: ScanCoverageRequest,
+) -> Result<birds_eye::index::coverage::ScanCoverage, String> {
+    query_scan_coverage(request)
+}
+
+#[tauri::command]
 fn scan_issues(request: ScanIssuesRequest) -> Result<Vec<ScanIssueDto>, String> {
     query_scan_issues(request)
 }
@@ -468,6 +476,7 @@ fn main() {
             query_index,
             search_files,
             folder_children,
+            scan_coverage,
             scan_issues,
             retry_scan_issues,
             file_lock_holders,

@@ -194,6 +194,27 @@ export async function queryNativeIndex(indexPath: string, limit: number) {
   });
 }
 
+export type NativeScanCoverage = {
+  files_indexed: number;
+  read_fully: number;
+  read_sampled: number;
+  not_needed: number;
+  skipped_offline: number;
+  skipped_locked: number;
+  skipped_denied: number;
+  skipped_changed: number;
+  skipped_failed: number;
+  folders_unreadable: number;
+};
+
+/** What the last scan actually managed to read — so a recommendation can say
+ *  what it rests on, rather than implying it saw everything. */
+export async function scanCoverage(indexPath: string) {
+  return invoke<NativeScanCoverage>("scan_coverage", {
+    request: { index_path: indexPath },
+  });
+}
+
 /** Files and folders the last scan couldn't read (walk) or verify (hash). */
 export async function scanIssues(indexPath: string, limit = 500) {
   return invoke<NativeScanIssue[]>("scan_issues", {

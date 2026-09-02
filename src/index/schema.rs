@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 16;
+pub const CURRENT_SCHEMA_VERSION: u32 = 17;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -808,6 +808,31 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (16, strftime('%s', 'now'));
 "#;
 
+/// Scan coverage: what the scan actually managed to read, kept per scan.
+///
+/// `scan_issues` already records why an individual file went unhashed, but it is
+/// capped, so past the cap the rows simply stop. Counting them would understate
+/// the problem exactly when the problem is largest -- the failure mode that
+/// flatters the scan. These counters are incremented as the hashing pass
+/// commits, independently of whether an issue row was kept.
+///
+/// `kind` on `scan_issues` turns the same classification into data rather than
+/// prose, so a report never has to pattern-match an error message. Rows written
+/// before this migration keep 'failed', which is the honest answer for them:
+/// nobody recorded why.
+pub const MIGRATION_017: &str = r#"
+ALTER TABLE scan_issues ADD COLUMN kind TEXT NOT NULL DEFAULT 'failed';
+
+ALTER TABLE scan_sessions ADD COLUMN skipped_offline INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE scan_sessions ADD COLUMN skipped_locked INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE scan_sessions ADD COLUMN skipped_denied INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE scan_sessions ADD COLUMN skipped_changed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE scan_sessions ADD COLUMN skipped_failed INTEGER NOT NULL DEFAULT 0;
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (17, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -825,6 +850,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (14, MIGRATION_014),
     (15, MIGRATION_015),
     (16, MIGRATION_016),
+    (17, MIGRATION_017),
 ];
 
 #[cfg(test)]
@@ -916,8 +942,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 16);
-        assert_eq!(ALL_MIGRATIONS.len(), 16);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 17);
+        assert_eq!(ALL_MIGRATIONS.len(), 17);
     }
 
     #[test]

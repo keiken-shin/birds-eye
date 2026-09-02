@@ -31,6 +31,7 @@ import { Button, IconButton } from "../ui/Button";
 import { Card, EmptyState, Meter, SectionLabel } from "../ui/Card";
 import { Tag } from "../ui/Chip";
 import { ViewHeader } from "./ViewHeader";
+import { ScanCoveragePanel } from "../ScanCoverage";
 
 /** "2 h ago" style relative time from a unix-seconds stamp. */
 function relTime(ts: number | null): string {
@@ -181,6 +182,8 @@ export function ScansView() {
               </span>
             </div>
           ) : null}
+
+          {activeEntry ? <ScanCoveragePanel indexPath={activeEntry.index_path} /> : null}
 
           {running ? (
             <section className="be-rise">

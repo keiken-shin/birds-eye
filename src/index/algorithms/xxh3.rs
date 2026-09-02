@@ -93,9 +93,58 @@ enum SampleResult {
     Full { full_hash: String },
     /// Hashing failed — the file ends up with no hashes and is excluded from
     /// duplicate detection, so the reason is surfaced to the user as a scan issue.
-    Skipped { reason: String },
+    Skipped { kind: SkipKind, reason: String },
     /// The scan was cancelled mid-hash; not an issue, nothing to report.
     Cancelled,
+}
+
+/// Why a file has no hash. Stored per issue and tallied per scan, because
+/// "we could not open it" and "it was being written while we read it" call for
+/// different things from the person reading the report -- and because the issue
+/// table is capped, so the tally cannot be recovered by counting rows later.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SkipKind {
+    /// Online-only cloud placeholder; the bytes are not on this machine.
+    Offline,
+    /// Something else holds it open (Windows sharing violation).
+    Locked,
+    /// The filesystem refused us.
+    Denied,
+    /// It moved under the read, so any digest would describe nothing real.
+    Changed,
+    /// Anything else, kept separate so it never hides inside a named class.
+    Failed,
+}
+
+impl SkipKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Offline => "offline",
+            Self::Locked => "locked",
+            Self::Denied => "denied",
+            Self::Changed => "changed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+fn classify(error: &std::io::Error) -> SkipKind {
+    const SHARING_VIOLATION: i32 = 32;
+    if error.kind() == std::io::ErrorKind::PermissionDenied {
+        return SkipKind::Denied;
+    }
+    if error.raw_os_error() == Some(SHARING_VIOLATION) {
+        return SkipKind::Locked;
+    }
+    let message = error.to_string();
+    if message == CHANGED_DURING_READ || message == CHANGED_SIZE {
+        return SkipKind::Changed;
+    }
+    SkipKind::Failed
+}
+
+fn skipped(error: &std::io::Error) -> SampleResult {
+    SampleResult::Skipped { kind: classify(error), reason: error.to_string() }
 }
 
 fn update_partial_hashes_for_duplicate_candidates<F, C>(
@@ -147,29 +196,37 @@ where
                 return (
                     id,
                     path,
-                    SampleResult::Skipped { reason: CLOUD_PLACEHOLDER_REASON.to_owned() },
+                    SampleResult::Skipped {
+                        kind: SkipKind::Offline,
+                        reason: CLOUD_PLACEHOLDER_REASON.to_owned(),
+                    },
                 );
             }
             let result = if sample_chunk_plan(size as u64).is_empty() {
                 // Small file: hash it whole.
                 match with_lock_retry(|| full_file_hash(Path::new(&path))) {
                     Ok(full_hash) => SampleResult::Full { full_hash },
-                    Err(error) => SampleResult::Skipped { reason: error.to_string() },
+                    Err(error) => skipped(&error),
                 }
             } else {
                 match with_lock_retry(|| sample_file_hash(Path::new(&path), size as u64)) {
                     Ok(sample_hash) => {
                         match with_lock_retry(|| partial_file_hash(Path::new(&path), size as u64)) {
                             Ok(partial_hash) => SampleResult::Sampled { partial_hash, sample_hash },
-                            Err(error) => SampleResult::Skipped { reason: error.to_string() },
+                            Err(error) => skipped(&error),
                         }
                     }
-                    Err(error) => SampleResult::Skipped { reason: error.to_string() },
+                    Err(error) => skipped(&error),
                 }
             };
             (id, path, result)
         })
         .collect();
+
+    // Counted here rather than recovered from `scan_issues` later: that table is
+    // capped, so past the cap the rows stop and the count would quietly go wrong
+    // in the direction that flatters the scan.
+    let mut tally: std::collections::HashMap<&'static str, i64> = std::collections::HashMap::new();
 
     let tx = connection.transaction()?;
     for (index, (id, path, result)) in results.into_iter().enumerate() {
@@ -192,13 +249,22 @@ where
                     params![full_hash, "xxh3-full-v1", id],
                 )?;
             }
-            SampleResult::Skipped { reason } => {
-                crate::index::writer::insert_scan_issue(&tx, scan_id, "hash", &path, &reason)?;
+            SampleResult::Skipped { kind, reason } => {
+                *tally.entry(kind.as_str()).or_insert(0) += 1;
+                crate::index::writer::insert_scan_issue(
+                    &tx,
+                    scan_id,
+                    "hash",
+                    kind.as_str(),
+                    &path,
+                    &reason,
+                )?;
             }
             SampleResult::Cancelled => {}
         }
         emit_counted_progress(progress, "Sampling duplicate candidates", index as u64 + 1, total);
     }
+    crate::index::writer::add_scan_skips(&tx, scan_id, &tally)?;
     tx.commit()?;
     Ok(())
 }
@@ -320,8 +386,14 @@ fn stamp(file: &File) -> std::io::Result<ReadStamp> {
     })
 }
 
+/// Named, because the coverage tally has to tell "it was moving" apart from
+/// "it was locked" and matching loose prose would drift the moment someone
+/// rewords an error.
+pub(crate) const CHANGED_DURING_READ: &str = "the file changed while it was being read";
+pub(crate) const CHANGED_SIZE: &str = "the file changed size since it was scanned";
+
 fn changed_while_reading() -> std::io::Error {
-    std::io::Error::other("the file changed while it was being read")
+    std::io::Error::other(CHANGED_DURING_READ)
 }
 
 /// The scanner records a file's size and timestamps during directory
@@ -347,9 +419,7 @@ fn stable_read<T>(
     // and seeking into it would hash whatever now occupies those offsets.
     if let Some(expected) = expected_len {
         if before.len != expected {
-            return Err(std::io::Error::other(
-                "the file changed size since it was scanned",
-            ));
+            return Err(std::io::Error::other(CHANGED_SIZE));
         }
     }
 

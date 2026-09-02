@@ -42,3 +42,23 @@ export function splitByEvidence(groups: readonly WithEvidence[]): Record<Evidenc
   }
   return out;
 }
+
+/**
+ * How much of what needed reading was read, as a label.
+ *
+ * Rounding must never manufacture completeness. 99.98% read is not 100% read,
+ * and someone deciding what to delete is entitled to know a file was missed, so
+ * "100%" appears only when nothing at all was skipped and every other value
+ * rounds down.
+ *
+ * `null` when nothing needed reading: there is no honest percentage over an
+ * empty denominator, and "100%" would be the most confident possible way of
+ * saying nothing.
+ */
+export function readShareLabel(read: number, skipped: number): string | null {
+  const attempted = read + skipped;
+  if (attempted <= 0) return null;
+  if (skipped === 0) return "100%";
+  const share = read / attempted;
+  return `${Math.min(99.9, Math.floor(share * 1000) / 10).toFixed(1)}%`;
+}

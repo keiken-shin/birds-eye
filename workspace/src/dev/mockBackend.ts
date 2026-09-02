@@ -1034,6 +1034,24 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
       return done(DRIVES);
     case "scan_issues":
       return done(SCAN_ISSUES[String(request.index_path)] ?? []);
+    case "scan_coverage": {
+      // Deliberately not a perfect scan: the panel is only worth anything when
+      // it has something uncomfortable to report.
+      const issues = SCAN_ISSUES[String(request.index_path)] ?? [];
+      const hashIssues = issues.filter((i) => i.phase === "hash").length;
+      return done({
+        files_indexed: 391_208,
+        read_fully: 48_902,
+        read_sampled: 1_431,
+        not_needed: 340_875,
+        skipped_offline: Math.max(1, hashIssues),
+        skipped_locked: 3,
+        skipped_denied: 2,
+        skipped_changed: 5,
+        skipped_failed: 1,
+        folders_unreadable: issues.filter((i) => i.phase === "walk").length,
+      });
+    }
     case "retry_scan_issues": {
       // Simulate a retry where everything heals except the cloud placeholder
       // (it stays online-only until the user hydrates it).

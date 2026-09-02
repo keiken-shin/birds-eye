@@ -344,6 +344,18 @@ impl IndexWriter {
     /// Issues from the most recent scan session: what couldn't be read (walk)
     /// or content-verified (hash), with the OS error message. Detail rows are
     /// capped at `SCAN_ISSUES_CAP` per scan.
+    /// Coverage for the most recent scan. A fresh index with no scan row yet
+    /// reports zeroes rather than an error -- "nothing has been read" is a true
+    /// statement about it, and the caller should be able to say so.
+    pub fn scan_coverage(&self) -> Result<crate::index::coverage::ScanCoverage, IndexError> {
+        let scan_id = match self.current_scan_session_id() {
+            Ok(id) => id,
+            Err(IndexError::MissingSession) => -1,
+            Err(e) => return Err(e),
+        };
+        crate::index::coverage::scan_coverage(&self.connection, scan_id)
+    }
+
     pub fn scan_issues(&self, limit: usize) -> Result<Vec<ScanIssueSummary>, IndexError> {
         let scan_id = match self.current_scan_session_id() {
             Ok(id) => id,
@@ -1112,7 +1124,9 @@ impl IndexWriter {
 
     fn record_scan_issue(&mut self, phase: &str, path: &str, message: &str) -> Result<(), IndexError> {
         let scan_id = self.current_scan_session_id()?;
-        insert_scan_issue(&self.connection, scan_id, phase, path, message)
+        // Walk failures are not classified yet -- the walker reports a message,
+        // not an error kind. 'failed' is the honest answer until it does.
+        insert_scan_issue(&self.connection, scan_id, phase, "failed", path, message)
     }
 
     fn current_scan_session_id(&self) -> Result<i64, IndexError> {
@@ -1541,15 +1555,45 @@ pub(crate) fn insert_scan_issue(
     connection: &Connection,
     scan_id: i64,
     phase: &str,
+    kind: &str,
     path: &str,
     message: &str,
 ) -> Result<(), IndexError> {
     connection.execute(
-        "INSERT INTO scan_issues (scan_id, phase, path, message, created_at)
-         SELECT ?1, ?2, ?3, ?4, ?5
-         WHERE (SELECT COUNT(*) FROM scan_issues WHERE scan_id = ?1) < ?6",
-        params![scan_id, phase, path, message, now_millis(), SCAN_ISSUES_CAP],
+        "INSERT INTO scan_issues (scan_id, phase, kind, path, message, created_at)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6
+         WHERE (SELECT COUNT(*) FROM scan_issues WHERE scan_id = ?1) < ?7",
+        params![scan_id, phase, kind, path, message, now_millis(), SCAN_ISSUES_CAP],
     )?;
+    Ok(())
+}
+
+/// Add this pass's skip counts to the scan's running totals.
+///
+/// Separate from `insert_scan_issue` on purpose. That one stops writing at
+/// `SCAN_ISSUES_CAP`, which is right for a list a person reads and wrong for a
+/// count a person trusts -- capping the count would understate the damage
+/// exactly when there is most of it.
+pub(crate) fn add_scan_skips(
+    connection: &Connection,
+    scan_id: i64,
+    tally: &std::collections::HashMap<&'static str, i64>,
+) -> Result<(), IndexError> {
+    for (kind, count) in tally {
+        let column = match *kind {
+            "offline" => "skipped_offline",
+            "locked" => "skipped_locked",
+            "denied" => "skipped_denied",
+            "changed" => "skipped_changed",
+            // An unrecognised kind is counted rather than dropped: a silent zero
+            // is the one answer a coverage report must never give.
+            _ => "skipped_failed",
+        };
+        connection.execute(
+            &format!("UPDATE scan_sessions SET {column} = {column} + ?2 WHERE id = ?1"),
+            params![scan_id, count],
+        )?;
+    }
     Ok(())
 }
 

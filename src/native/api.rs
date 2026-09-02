@@ -1183,6 +1183,19 @@ pub struct ScanIssueDto {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScanCoverageRequest {
+    pub index_path: PathBuf,
+}
+
+/// What the index actually read, so a recommendation can say what it rests on.
+pub fn scan_coverage(
+    request: ScanCoverageRequest,
+) -> Result<crate::index::coverage::ScanCoverage, String> {
+    let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
+    writer.scan_coverage().map_err(|error| format!("{error:?}"))
+}
+
 pub fn scan_issues(request: ScanIssuesRequest) -> Result<Vec<ScanIssueDto>, String> {
     let writer = IndexWriter::open(request.index_path).map_err(|error| format!("{error:?}"))?;
     Ok(writer
