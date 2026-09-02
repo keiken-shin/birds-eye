@@ -131,8 +131,15 @@ fn verify_group_membership(
 
     // The complete read. Hash this file once, then each survivor until one
     // matches, so the common case costs two files rather than the whole group.
-    let Ok(mine) = full_file_hash(Path::new(path)) else {
-        return Some("the file could not be read completely, so it cannot be verified".to_string());
+    // `full_file_hash` refuses rather than returning a digest when the file
+    // changes under the read, so this branch covers "unreadable" and "someone is
+    // writing to it right now" alike. Both mean the same thing here: no
+    // verification, so no deletion.
+    let mine = match full_file_hash(Path::new(path)) {
+        Ok(hash) => hash,
+        Err(error) => {
+            return Some(format!("it could not be verified -- {error}"));
+        }
     };
     store_full_hash(conn, row.id, &mine);
 

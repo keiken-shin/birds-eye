@@ -303,49 +303,120 @@ fn sample_file_hash(path: &Path, size: u64) -> std::io::Result<String> {
     hash_file_chunks(path, size, &plan)
 }
 
+/// Length and last-modified, read from the open handle rather than the path, so
+/// the stamp describes the object being read and not whatever the name points at
+/// by the time we ask again.
+#[derive(PartialEq, Eq)]
+struct ReadStamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+fn stamp(file: &File) -> std::io::Result<ReadStamp> {
+    let meta = file.metadata()?;
+    Ok(ReadStamp {
+        len: meta.len(),
+        modified: meta.modified().ok(),
+    })
+}
+
+fn changed_while_reading() -> std::io::Error {
+    std::io::Error::other("the file changed while it was being read")
+}
+
+/// The scanner records a file's size and timestamps during directory
+/// enumeration. Hashing happens in a later phase, possibly minutes later. If
+/// another process writes the file in between, the digest describes a version of
+/// the file that never existed at rest.
+///
+/// So every read is bracketed: stamp the open handle, read, stamp again, and
+/// refuse to return a digest unless the two agree. An unstable read yields an
+/// error, which the caller records as a scan issue -- the file then carries no
+/// hash and takes no part in duplicate detection, which is the safe direction.
+/// A digest that is silently wrong is worse than no digest.
+fn stable_read<T>(
+    path: &Path,
+    expected_len: Option<u64>,
+    read: impl FnOnce(&mut File, &ReadStamp) -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    let mut file = File::open(path)?;
+    let before = stamp(&file)?;
+
+    // The caller's chunk plan was computed from the size the scanner recorded.
+    // If the file is no longer that size the plan describes a different file,
+    // and seeking into it would hash whatever now occupies those offsets.
+    if let Some(expected) = expected_len {
+        if before.len != expected {
+            return Err(std::io::Error::other(
+                "the file changed size since it was scanned",
+            ));
+        }
+    }
+
+    let value = read(&mut file, &before)?;
+
+    let after = stamp(&file)?;
+    if before != after {
+        return Err(changed_while_reading());
+    }
+    Ok(value)
+}
+
 /// Complete-content digest. Public because verification before a destructive
 /// action needs it on demand, for files far above the eager hashing cap.
 pub fn full_file_hash(path: &Path) -> std::io::Result<String> {
     const BLOCK_SIZE: usize = 128 * 1024;
 
-    let mut file = File::open(path)?;
-    let mut hasher = Xxh3::new();
-    let mut buffer = vec![0_u8; BLOCK_SIZE];
+    stable_read(path, None, |file, before| {
+        let mut hasher = Xxh3::new();
+        let mut buffer = vec![0_u8; BLOCK_SIZE];
+        let mut total = 0_u64;
 
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
+        loop {
+            let read = file.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            total += read as u64;
+            hasher.update(&buffer[..read]);
         }
 
-        hasher.update(&buffer[..read]);
-    }
+        // Reaching EOF early is not an error from `read`, so a file truncated
+        // mid-pass would otherwise produce a confident digest of a prefix.
+        if total != before.len {
+            return Err(changed_while_reading());
+        }
 
-    Ok(format!("{:032x}", hasher.digest128()))
+        Ok(format!("{:032x}", hasher.digest128()))
+    })
 }
 
 fn hash_file_chunks(path: &Path, size: u64, chunks: &[(u64, usize)]) -> std::io::Result<String> {
-    let mut file = File::open(path)?;
-    let mut hasher = Xxh3::new();
-    let mut buffer = vec![0_u8; chunks.iter().map(|(_, len)| *len).max().unwrap_or(0)];
+    stable_read(path, Some(size), |file, _| {
+        let mut hasher = Xxh3::new();
+        let mut buffer = vec![0_u8; chunks.iter().map(|(_, len)| *len).max().unwrap_or(0)];
 
-    hasher.update(&size.to_le_bytes());
+        hasher.update(&size.to_le_bytes());
 
-    for (offset, requested_len) in chunks {
-        if *requested_len == 0 || *offset >= size {
-            continue;
+        for (offset, requested_len) in chunks {
+            if *requested_len == 0 || *offset >= size {
+                continue;
+            }
+
+            let read_len = (*requested_len).min((size - *offset) as usize);
+            file.seek(SeekFrom::Start(*offset))?;
+            let read = file.read(&mut buffer[..read_len])?;
+            if read != read_len {
+                return Err(changed_while_reading());
+            }
+
+            hasher.update(&offset.to_le_bytes());
+            hasher.update(&(read as u64).to_le_bytes());
+            hasher.update(&buffer[..read]);
         }
 
-        let read_len = (*requested_len).min((size - *offset) as usize);
-        file.seek(SeekFrom::Start(*offset))?;
-        let read = file.read(&mut buffer[..read_len])?;
-
-        hasher.update(&offset.to_le_bytes());
-        hasher.update(&(read as u64).to_le_bytes());
-        hasher.update(&buffer[..read]);
-    }
-
-    Ok(format!("{:032x}", hasher.digest128()))
+        Ok(format!("{:032x}", hasher.digest128()))
+    })
 }
 
 #[cfg(test)]
@@ -382,6 +453,54 @@ mod tests {
     fn huge_files_use_five_points() {
         let plan = sample_chunk_plan(1024 * 1024 * 1024);
         assert_eq!(plan.len(), 5, ">512MiB uses 5-point sampling");
+    }
+
+    /// The race this bracket exists for: the scanner recorded the file minutes
+    /// ago, and something rewrites it while the hasher is mid-pass. The digest
+    /// would describe a version of the file that never existed at rest.
+    #[test]
+    fn a_file_rewritten_during_the_read_yields_no_digest() {
+        let path = write_temp("grows-mid-read.bin", b"hello");
+        let inner = path.clone();
+        let error = stable_read(&path, None, move |_file, _before| {
+            std::fs::write(&inner, b"hello, considerably longer now")?;
+            Ok(())
+        })
+        .expect_err("an unstable read must not return a value");
+        assert!(
+            error.to_string().contains("changed while it was being read"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_stable_read_returns_its_value() {
+        let path = write_temp("stable.bin", b"hello");
+        let value = stable_read(&path, None, |_file, before| Ok(before.len)).expect("stable read");
+        assert_eq!(value, 5);
+    }
+
+    /// The chunk plan is computed from the size the scanner recorded. If the
+    /// file is no longer that size, seeking into it hashes whatever now occupies
+    /// those offsets -- a confident digest of a different file.
+    #[test]
+    fn sampling_refuses_when_the_file_is_no_longer_the_size_that_was_scanned() {
+        let size = 4 * 1024 * 1024_usize;
+        let path = write_temp("resized.bin", &vec![3_u8; size]);
+        let stale_size = (size + 4096) as u64;
+        let plan = sample_chunk_plan(stale_size);
+        let error = hash_file_chunks(&path, stale_size, &plan)
+            .expect_err("a size disagreement must refuse");
+        assert!(error.to_string().contains("changed size"), "{error}");
+    }
+
+    /// And the honest case still works, so the guard above is not simply
+    /// refusing everything.
+    #[test]
+    fn sampling_succeeds_when_the_size_still_agrees() {
+        let size = 4 * 1024 * 1024_usize;
+        let path = write_temp("agrees.bin", &vec![3_u8; size]);
+        assert!(sample_file_hash(&path, size as u64).is_ok());
     }
 
     #[test]
