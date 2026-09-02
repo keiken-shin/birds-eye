@@ -1,4 +1,3 @@
-use crate::index::schema::ALL_MIGRATIONS;
 use crate::scanner::{FileRecord, FolderRecord, ScanEvent, ScanStats};
 use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -213,6 +212,9 @@ impl IndexWriter {
 
     pub fn open_in_memory() -> Result<Self, IndexError> {
         let connection = Connection::open_in_memory()?;
+        // The same connection pragmas `open_index_connection` sets, so a
+        // memory-backed writer behaves like a file-backed one.
+        connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL;")?;
         let writer = Self {
             connection,
             session_id: None,
@@ -1075,29 +1077,11 @@ impl IndexWriter {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Delegates to the shared migrator. Open-in-memory writers are the only
+    /// connections that do not come through `open_index_connection`, so this
+    /// stays for them.
     fn migrate(&self) -> Result<(), IndexError> {
-        self.connection.execute_batch(
-            "CREATE TABLE IF NOT EXISTS schema_migrations (
-              version INTEGER PRIMARY KEY,
-              applied_at INTEGER NOT NULL
-            );",
-        )?;
-
-        for (version, migration) in ALL_MIGRATIONS {
-            let already_applied = self
-                .connection
-                .query_row(
-                    "SELECT 1 FROM schema_migrations WHERE version = ?1",
-                    params![*version as i64],
-                    |_| Ok(()),
-                )
-                .optional()?
-                .is_some();
-
-            if !already_applied {
-                self.connection.execute_batch(migration)?;
-            }
-        }
+        crate::index::migrate(&self.connection)?;
         Ok(())
     }
 

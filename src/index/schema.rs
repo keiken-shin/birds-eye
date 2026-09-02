@@ -1,10 +1,13 @@
 pub const CURRENT_SCHEMA_VERSION: u32 = 26;
 
+// The connection pragmas that used to sit here now live in
+// `open_index_connection`. They were never schema: `foreign_keys` and
+// `synchronous` are per-connection settings, so setting them in migration 001
+// applied them to exactly one connection -- the one that created the index --
+// and every later connection ran at the SQLite defaults. Moving them also makes
+// every migration pure DDL, which is what lets `apply_migrations` wrap each one
+// in a savepoint: a PRAGMA cannot run inside a transaction.
 pub const MIGRATION_001: &str = r#"
-PRAGMA foreign_keys = ON;
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version INTEGER PRIMARY KEY,
   applied_at INTEGER NOT NULL
