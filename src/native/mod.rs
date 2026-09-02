@@ -1,5 +1,7 @@
 pub mod api;
+pub mod dir_ids;
 pub mod drives;
+pub mod file_id;
 pub mod jobs;
 pub mod lockinfo;
 pub mod phase_timer;

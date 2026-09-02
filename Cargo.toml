@@ -18,7 +18,7 @@ image = { version = "0.25.10", default-features = false, features = ["jpeg", "pn
 [target.'cfg(windows)'.dependencies]
 # Restart Manager: name the processes holding a locked file.
 # Storage.FileSystem: enumerate fixed drives and their capacity.
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_RestartManager", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_RestartManager", "Win32_Storage_FileSystem", "Win32_Security"] }
 
 [lib]
 name = "birds_eye"
