@@ -77,7 +77,13 @@ pub struct ScanIssueSummary {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileSummary {
     pub path: String,
+    /// What it costs the disk. This is the number every total, rectangle and
+    /// ordering uses, because it is the one the drive charges.
     pub size: i64,
+    /// How much data it addresses. The same as `size` for almost every file,
+    /// and wildly larger for a sparse or compressed one -- which is a true
+    /// thing worth showing on a file's own panel, and a lie in any total.
+    pub logical_size: i64,
     pub extension: Option<String>,
     pub media_kind: String,
     pub modified_at: Option<i64>,
@@ -240,6 +246,7 @@ impl IndexWriter {
                 self.mark_shared_byte_links()?;
                 self.commit_scan_transaction()?;
                 self.recompute_folder_rollups(&mut progress)?;
+                self.rewrite_session_bytes_from_index()?;
                 progress_stage(&mut progress, "Building extension statistics", 0, 1);
                 self.rebuild_extension_stats()?;
                 progress_stage(&mut progress, "Building extension statistics", 1, 1);
@@ -568,10 +575,10 @@ impl IndexWriter {
 
     pub fn largest_files(&self, limit: usize) -> Result<Vec<FileSummary>, IndexError> {
         let mut statement = self.connection.prepare(
-            "SELECT path, size, extension, media_kind, modified_at, id
+            "SELECT path, disk_bytes, extension, media_kind, modified_at, id, size
              FROM files
              WHERE deleted_at IS NULL
-             ORDER BY size DESC
+             ORDER BY disk_bytes DESC
              LIMIT ?1",
         )?;
         let rows = statement.query_map(params![limit as i64], |row| {
@@ -582,6 +589,7 @@ impl IndexWriter {
                 media_kind: row.get(3)?,
                 modified_at: row.get(4)?,
                 id: row.get(5)?,
+                logical_size: row.get(6)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -603,7 +611,7 @@ impl IndexWriter {
         } else {
             "SELECT strftime('%Y-%m', modified_at, 'unixepoch') AS bucket,
                     COUNT(*) AS file_count,
-                    SUM(size) AS total_bytes
+                    SUM(disk_bytes) AS total_bytes
              FROM files
              WHERE deleted_at IS NULL
                AND modified_at IS NOT NULL
@@ -652,10 +660,10 @@ impl IndexWriter {
                       ELSE 'gt2yr'
                     END AS bucket,
                     COUNT(*) AS file_count,
-                    SUM(size) AS total_bytes
+                    SUM(disk_bytes) AS total_bytes
              FROM (
                SELECT modified_at,
-                      size,
+                      disk_bytes,
                       CAST(strftime('%s', 'now') AS INTEGER) - modified_at AS age
                FROM files
                WHERE deleted_at IS NULL
@@ -685,11 +693,11 @@ impl IndexWriter {
         let escaped_query = escape_like_pattern(trimmed_query);
         let pattern = format!("%{escaped_query}%");
         let mut statement = self.connection.prepare(
-            "SELECT path, name, size, extension, media_kind, modified_at, id
+            "SELECT path, name, disk_bytes, extension, media_kind, modified_at, id
              FROM files
              WHERE deleted_at IS NULL
                AND (name LIKE ?1 ESCAPE '\\' OR path LIKE ?1 ESCAPE '\\')
-             ORDER BY size DESC, modified_at DESC
+             ORDER BY disk_bytes DESC, modified_at DESC
              LIMIT ?2",
         )?;
         let rows = statement.query_map(params![pattern, limit as i64], |row| {
@@ -780,14 +788,15 @@ impl IndexWriter {
             }
         }
 
-        // Size range
+        // Size range, on what the file costs -- the same number the column
+        // beside it shows, so a filter never hides a row that reads as matching.
         if let Some(min) = min_bytes {
-            conditions.push(format!("size >= ?{param_index}"));
+            conditions.push(format!("disk_bytes >= ?{param_index}"));
             params.push(Box::new(min as i64));
             param_index += 1;
         }
         if let Some(max) = max_bytes {
-            conditions.push(format!("size <= ?{param_index}"));
+            conditions.push(format!("disk_bytes <= ?{param_index}"));
             params.push(Box::new(max as i64));
             param_index += 1;
         }
@@ -799,10 +808,10 @@ impl IndexWriter {
             format!(" LIMIT ?{param_index}")
         };
         let sql = format!(
-            "SELECT path, name, size, extension, media_kind, modified_at, id
+            "SELECT path, name, disk_bytes, extension, media_kind, modified_at, id
              FROM files
              WHERE {where_clause}
-             ORDER BY size DESC, modified_at DESC{limit_clause}"
+             ORDER BY disk_bytes DESC, modified_at DESC{limit_clause}"
         );
         if regex.is_none() {
             params.push(Box::new(limit as i64));
@@ -947,7 +956,7 @@ impl IndexWriter {
         tx.execute_batch(
             "DELETE FROM media_stats;
              INSERT INTO media_stats (media_kind, file_count, total_bytes)
-             SELECT media_kind, COUNT(*), COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN size ELSE 0 END), 0)
+             SELECT media_kind, COUNT(*), COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN disk_bytes ELSE 0 END), 0)
              FROM files
              WHERE deleted_at IS NULL
              GROUP BY media_kind;
@@ -956,7 +965,7 @@ impl IndexWriter {
              INSERT INTO folder_media_stats (folder_path, media_kind, total_bytes)
              SELECT f.path, files.media_kind,
                     COALESCE(SUM(CASE WHEN files.shares_bytes_with IS NULL
-                                      THEN files.size ELSE 0 END), 0)
+                                      THEN files.disk_bytes ELSE 0 END), 0)
              FROM files
              JOIN folders f ON f.id = files.folder_id
              WHERE files.deleted_at IS NULL
@@ -966,7 +975,7 @@ impl IndexWriter {
              INSERT INTO month_stats (bucket, file_count, total_bytes)
              SELECT COALESCE(strftime('%Y-%m', modified_at, 'unixepoch'), 'unknown'),
                     COUNT(*),
-                    COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN size ELSE 0 END), 0)
+                    COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN disk_bytes ELSE 0 END), 0)
              FROM files
              WHERE deleted_at IS NULL
              GROUP BY 1;
@@ -983,10 +992,10 @@ impl IndexWriter {
                       ELSE 'gt2yr'
                     END AS bucket,
                     COUNT(*),
-                    COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN size ELSE 0 END), 0)
+                    COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN disk_bytes ELSE 0 END), 0)
              FROM (
                SELECT modified_at,
-                      size,
+                      disk_bytes,
                       shares_bytes_with,
                       CAST(strftime('%s', 'now') AS INTEGER) - modified_at AS age
                FROM files
@@ -1013,11 +1022,11 @@ impl IndexWriter {
              FROM media_stats
              ORDER BY total_bytes DESC"
         } else {
-            "SELECT media_kind, COUNT(*), COALESCE(SUM(size), 0)
+            "SELECT media_kind, COUNT(*), COALESCE(SUM(disk_bytes), 0)
              FROM files
              WHERE deleted_at IS NULL
              GROUP BY media_kind
-             ORDER BY SUM(size) DESC"
+             ORDER BY SUM(disk_bytes) DESC"
         };
         let mut statement = self.connection.prepare(sql)?;
         let rows = statement.query_map([], |row| {
@@ -1040,7 +1049,7 @@ impl IndexWriter {
              ORDER BY total_bytes DESC
              LIMIT ?1"
         } else {
-            "SELECT f.path, files.media_kind, COALESCE(SUM(files.size), 0) AS total_bytes
+            "SELECT f.path, files.media_kind, COALESCE(SUM(files.disk_bytes), 0) AS total_bytes
              FROM files
              JOIN folders f ON f.id = files.folder_id
              WHERE files.deleted_at IS NULL
@@ -1467,9 +1476,33 @@ impl IndexWriter {
     /// rather than from the walk's running tally. The tally adds a file's size
     /// once per directory entry, so a hard link puts bytes on the chart that
     /// are not on the disk -- 742 MB of them in `C:\Program Files` alone.
+    /// Replace the session's byte total with what the index actually holds.
+    ///
+    /// The walker's running tally is the sum of what each directory entry
+    /// claimed: logical length, counted once per name. That overstates a sparse
+    /// or compressed file by however much it does not occupy, and counts a hard
+    /// link's bytes once for every name it wears. The index knows better by the
+    /// time the rollups are done, and this is the number on the header of every
+    /// screen, so it has to be the one the disk would agree with.
+    ///
+    /// Runs after `recompute_folder_rollups`, which is what makes the root
+    /// folder's total true.
+    fn rewrite_session_bytes_from_index(&mut self) -> Result<(), IndexError> {
+        let session_id = self.session_id.ok_or(IndexError::MissingSession)?;
+        self.connection.execute(
+            "UPDATE scan_sessions
+             SET bytes_scanned = COALESCE(
+                   (SELECT f.total_bytes FROM folders f WHERE f.path = scan_sessions.root_path),
+                   bytes_scanned)
+             WHERE id = ?1",
+            params![session_id],
+        )?;
+        Ok(())
+    }
+
     fn capture_timeline(&self, root: &Path, stats: &ScanStats) -> Result<(), IndexError> {
         let total_bytes: i64 = self.connection.query_row(
-            "SELECT COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN size ELSE 0 END), 0)
+            "SELECT COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN disk_bytes ELSE 0 END), 0)
              FROM files WHERE deleted_at IS NULL",
             [],
             |row| row.get(0),
@@ -1493,7 +1526,7 @@ impl IndexWriter {
         tx.execute("DELETE FROM extension_stats", [])?;
         tx.execute(
             "INSERT INTO extension_stats (extension, file_count, total_bytes, updated_at)
-             SELECT extension, COUNT(*), COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN size ELSE 0 END), 0), ?1
+             SELECT extension, COUNT(*), COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN disk_bytes ELSE 0 END), 0), ?1
              FROM files
              WHERE deleted_at IS NULL AND extension IS NOT NULL
              GROUP BY extension",
@@ -1608,7 +1641,7 @@ impl IndexWriter {
                     -- Every name is a file and is counted as one. Only the name
                     -- that carries the bytes contributes them, so a hard link
                     -- does not inflate the folder it also appears in.
-                    COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN size ELSE 0 END), 0)
+                    COALESCE(SUM(CASE WHEN shares_bytes_with IS NULL THEN disk_bytes ELSE 0 END), 0)
                       AS direct_bytes
              FROM files
              WHERE deleted_at IS NULL
@@ -2072,11 +2105,36 @@ mod tests {
             )
             .expect("failed to read root rollup");
 
+        // What the two files occupy, not what they claim. On NTFS even a
+        // five-byte file is charged in whole units, so this is read from the
+        // index rather than written down -- a hard-coded figure here would be
+        // asserting this machine's allocation unit, not the rollup.
+        let occupied: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT COALESCE(SUM(disk_bytes), 0) FROM files WHERE deleted_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("failed to sum disk bytes");
+        let logical: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT COALESCE(SUM(size), 0) FROM files WHERE deleted_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("failed to sum logical bytes");
+
         assert_eq!(file_count, 2);
         assert_eq!(session_status, "complete");
         assert_eq!(timeline_count, 1);
         assert_eq!(duplicate_group_count, 0);
-        assert_eq!(root_total_bytes, 133);
+        assert_eq!(logical, 133, "the two files address 133 bytes between them");
+        assert_eq!(
+            root_total_bytes, occupied,
+            "the rollup must be what the files cost the disk, not what they address"
+        );
         cleanup(&root);
     }
 
@@ -3249,8 +3307,30 @@ mod tests {
             )
             .expect("query root folder");
 
+        // Totals are what the files occupy, and a small file is charged in
+        // whole allocation units. So the expected figure is read from the rows
+        // being rolled up -- what is under test is the arithmetic, not this
+        // machine's allocation unit.
+        let occupied = |where_clause: &str| -> i64 {
+            writer
+                .connection()
+                .query_row(
+                    &format!(
+                        "SELECT COALESCE(SUM(disk_bytes), 0) FROM files
+                         WHERE deleted_at IS NULL AND {where_clause}"
+                    ),
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("sum disk bytes")
+        };
+
         assert_eq!(root_files, 3, "root should roll up all 3 files");
-        assert_eq!(root_bytes, 600, "root should roll up 100+200+300 bytes");
+        assert_eq!(
+            root_bytes,
+            occupied("1 = 1"),
+            "root should roll up what all three files occupy"
+        );
 
         let (child_files, child_bytes): (i64, i64) = writer
             .connection()
@@ -3262,7 +3342,15 @@ mod tests {
             .expect("query child folder");
 
         assert_eq!(child_files, 2, "child should roll up 2 files (its own + grandchild)");
-        assert_eq!(child_bytes, 500, "child should roll up 200+300 bytes");
+        assert_eq!(
+            child_bytes,
+            occupied("size IN (200, 300)"),
+            "child should roll up what its own file and the grandchild's occupy"
+        );
+        assert!(
+            child_bytes < root_bytes,
+            "and the 100-byte file at the root must not be in it"
+        );
         cleanup(&root);
     }
 }

@@ -44,7 +44,10 @@ export type NativeJobEvent = {
 
 export type NativeOverviewFile = {
   path: string;
+  /** What the file costs the disk. Every total and every rectangle uses this. */
   size: number;
+  /** What it addresses. Larger than `size` only for sparse and compressed files. */
+  logical_size: number;
   extension: string | null;
   media_kind: string;
   modified_at: number | null;

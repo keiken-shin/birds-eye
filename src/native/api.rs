@@ -94,7 +94,11 @@ pub struct FolderSummaryDto {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct FileSummaryDto {
     pub path: String,
+    /// What the file costs the disk.
     pub size: i64,
+    /// What it addresses. Differs only for sparse and compressed files, and
+    /// only the file's own panel should ever show it.
+    pub logical_size: i64,
     pub extension: Option<String>,
     pub media_kind: String,
     pub modified_at: Option<i64>,
@@ -1017,6 +1021,7 @@ pub fn query_index_overview(request: IndexQueryRequest) -> Result<IndexOverviewD
             .map(|file| FileSummaryDto {
                 path: file.path,
                 size: file.size,
+                logical_size: file.logical_size,
                 extension: file.extension,
                 media_kind: file.media_kind,
                 modified_at: file.modified_at,

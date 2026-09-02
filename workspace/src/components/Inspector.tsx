@@ -99,6 +99,16 @@ export function Inspector() {
     [overview, selected, isFile]
   );
 
+  /**
+   * A sparse or compressed file holds more data than it takes up. Everything
+   * else on screen is what it takes up, because that is what the drive charges
+   * -- but on the file's own panel the other number is worth saying, or the
+   * person wonders why a 40 GB disk image reads as 2 GB. The tenth is there so
+   * ordinary cluster rounding does not add a line to every file.
+   */
+  const dataInside =
+    fileMeta && fileMeta.logical_size > fileMeta.size * 1.1 ? fileMeta.logical_size : null;
+
   /** Category composition of the selected folder (base index data, no ontology needed). */
   const composition: Segment[] = useMemo(() => {
     if (!selected || isFile) return [];
@@ -196,12 +206,15 @@ export function Inspector() {
 
             {/* Facts */}
             <div className="mb-3.5 grid grid-cols-2 gap-2">
-              <Fact label="Size" value={formatBytes(selected.bytes)} />
+              <Fact label="On disk" value={formatBytes(selected.bytes)} />
               {isFile
                 ? fileMeta?.modified_at != null && (
                     <Fact label="Modified" value={fmtDate(fileMeta.modified_at)} />
                   )
                 : <Fact label="Files" value={node ? formatCount(node.files) : "—"} />}
+              {dataInside != null ? (
+                <Fact label="Data inside" value={formatBytes(dataInside)} />
+              ) : null}
             </div>
 
             {isFile ? (

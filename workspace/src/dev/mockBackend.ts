@@ -1014,7 +1014,13 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
     case "query_index":
       return done({
         folders: FOLDERS,
-        files: FILES.map((f) => ({ ...f, file_id: mockFileId(f.path) })),
+        files: FILES.map((f, i) => ({
+          ...f,
+          file_id: mockFileId(f.path),
+          // Every fourth mock file addresses three times what it occupies, so
+          // the sparse-file panel is reachable in browser dev.
+          logical_size: i % 4 === 0 ? f.size * 3 : f.size,
+        })),
         extensions: EXTENSIONS,
         duplicate_groups: DUP_GROUPS.map(({ files, ...group }) => ({
           ...group,

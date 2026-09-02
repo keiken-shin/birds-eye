@@ -403,8 +403,23 @@ fn a_hard_link_is_counted_once_and_is_not_offered_as_a_duplicate() {
             |r| r.get(0),
         )
         .unwrap();
+    // What one copy occupies, read from the row rather than written down: a
+    // 100,000-byte file is charged whole clusters, and the number of them is
+    // this volume's business, not this test's. What is under test is that the
+    // second name adds nothing.
+    let one_copy: i64 = conn
+        .query_row(
+            "SELECT disk_bytes FROM files WHERE shares_bytes_with IS NULL AND deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        one_copy >= 100_000,
+        "the file occupies at least what it addresses: {one_copy}"
+    );
     assert_eq!(
-        folder_bytes, 100_000,
+        folder_bytes, one_copy,
         "the folder holds one file's worth of disk, not two"
     );
 
@@ -582,5 +597,73 @@ fn a_root_that_has_gone_away_does_not_mark_everything_on_it_deleted() {
     assert_eq!(
         live_after, 5,
         "an unreachable root means unknown, not deleted: {live_after} of 5 files survived"
+    );
+}
+
+/// A sparse file addresses far more than it occupies. The treemap draws
+/// rectangles from folder totals, so a folder total built on the logical length
+/// draws a 64 MB rectangle for something costing 128 KB -- and the person
+/// looking at it goes and deletes the wrong thing.
+#[cfg(windows)]
+#[test]
+fn a_sparse_file_takes_up_what_it_occupies_not_what_it_addresses() {
+    let rig = Rig::new("sparse-rollup");
+    let dir = rig.root.join("data");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("image.vhd");
+    std::fs::write(&path, b"x").unwrap();
+
+    let marked = std::process::Command::new("fsutil")
+        .args(["sparse", "setflag", &path.display().to_string()])
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false);
+    if !marked {
+        return; // No sparse support on this volume; there is nothing to prove.
+    }
+    {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.seek(SeekFrom::Start(64 * 1024 * 1024)).unwrap();
+        file.write_all(b"end").unwrap();
+    }
+
+    rig.scan();
+    let conn = birds_eye::index::open_index_connection(&rig.index).expect("open index");
+    let (logical, occupied): (i64, i64) = conn
+        .query_row(
+            "SELECT size, disk_bytes FROM files WHERE name = 'image.vhd'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("the sparse file must be indexed");
+    assert!(logical > 64 * 1024 * 1024, "the file claims to be large");
+    assert!(
+        occupied < logical / 100,
+        "it occupies {occupied}, and that is what everything on screen must use,          not the {logical} it addresses"
+    );
+
+    let folder_bytes: i64 = conn
+        .query_row(
+            "SELECT direct_bytes FROM folders WHERE path = ?1",
+            rusqlite::params![dir.to_string_lossy().replace('/', "\\")],
+            |r| r.get(0),
+        )
+        .expect("the folder must have a rollup");
+    assert_eq!(
+        folder_bytes, occupied,
+        "the folder total is the cost of what is in it"
+    );
+
+    let session_bytes: i64 = conn
+        .query_row(
+            "SELECT bytes_scanned FROM scan_sessions ORDER BY id DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .expect("the session must record a total");
+    assert!(
+        session_bytes < logical / 100,
+        "the headline figure is the disk's, not the file's opinion of itself:          {session_bytes}"
     );
 }

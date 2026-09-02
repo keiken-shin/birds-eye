@@ -89,6 +89,7 @@ describe("stale files", () => {
   const file = (path: string, size: number, modified_at: number | null) => ({
     path,
     size,
+    logical_size: size,
     extension: null,
     media_kind: "other",
     modified_at,

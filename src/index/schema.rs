@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 23;
+pub const CURRENT_SCHEMA_VERSION: u32 = 24;
 
 pub const MIGRATION_001: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -958,6 +958,28 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (23, strftime('%s', 'now'));
 "#;
 
+/// What a file costs the disk, as opposed to how much data it addresses.
+///
+/// These are the same number for almost every file and wildly different for a
+/// few: a sparse disk image can address 40 GB and occupy 2, and a compressed
+/// folder of zeros occupies none at all. Every rectangle, folder total and
+/// "you have used X" claim is about cost, so they all read this column.
+///
+/// `size` stays exactly as it is. It is what a duplicate group keys on -- two
+/// identical files have identical logical length, while their allocation can
+/// differ by compression -- and it is what the file detail panel calls the data
+/// size. Two true numbers, each used where it is the true one.
+///
+/// Generated and virtual, so it costs nothing to store and cannot drift from
+/// the two columns it is derived from.
+pub const MIGRATION_024: &str = r#"
+ALTER TABLE files ADD COLUMN disk_bytes INTEGER
+    GENERATED ALWAYS AS (COALESCE(allocated_size, size)) VIRTUAL;
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (24, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -982,6 +1004,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (21, MIGRATION_021),
     (22, MIGRATION_022),
     (23, MIGRATION_023),
+    (24, MIGRATION_024),
 ];
 
 #[cfg(test)]
@@ -1073,8 +1096,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 23);
-        assert_eq!(ALL_MIGRATIONS.len(), 23);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 24);
+        assert_eq!(ALL_MIGRATIONS.len(), 24);
     }
 
     #[test]
