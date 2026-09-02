@@ -20,6 +20,20 @@ pub struct NewAssertion<'a> {
     pub key: &'a str,
     pub value: &'a str,
     pub source: &'a str,
+    /// Heuristic strength, not probability.
+    ///
+    /// 0.9 does not mean "there is a 90% chance this is true". It is an ordering
+    /// value: it decides which of several assertions about the same key wins,
+    /// how a card is ranked, and whether a file clears the conservative gates in
+    /// `v_cleanup_candidates` (scratch files need `role_conf >= 0.9`). Those
+    /// numbers were chosen so that a rule with weak evidence loses to one with
+    /// strong evidence, and nothing calibrated them against outcomes.
+    ///
+    /// So: use it to sort and to gate. Never render it, and never render
+    /// anything derived from it that reads as a percentage -- "92% confident"
+    /// beside a delete button is a promise this number cannot keep. Where the
+    /// UI needs to say how good the evidence is, it says it in words, the way
+    /// the duplicates view says VERIFIED / SAMPLED / SIZE MATCH.
     pub confidence: f32,
     pub display_in_global_views: bool,
 }
