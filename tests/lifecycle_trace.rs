@@ -459,3 +459,38 @@ fn hashing_covers_every_candidate_past_one_batch() {
         .unwrap();
     assert_eq!(indexed, FILES as i64);
 }
+
+/// The scan log is a file a person may hand to someone else when something
+/// breaks. It must not be a list of every folder they own.
+#[test]
+fn the_scan_log_does_not_name_the_folders_it_walked() {
+    let rig = Rig::new("log-privacy");
+    let telling = rig.root.join("Divorce-papers-2026");
+    std::fs::create_dir_all(&telling).expect("create folder");
+    std::fs::write(telling.join("draft.docx"), vec![1u8; 500]).expect("write");
+    rig.scan();
+
+    let base = rig.root.parent().expect("base dir");
+    let logs: Vec<std::path::PathBuf> = std::fs::read_dir(base)
+        .expect("read base")
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "log").unwrap_or(false))
+        .collect();
+    assert!(!logs.is_empty(), "the scan must write a log to check");
+
+    for log in logs {
+        let text = std::fs::read_to_string(&log).expect("read log");
+        assert!(
+            !text.contains("Divorce-papers-2026"),
+            "the log named a folder it walked:
+{text}"
+        );
+        // The token form is what should be there instead.
+        assert!(
+            text.contains("dir=#"),
+            "the log should still say which folder, as a token:
+{text}"
+        );
+    }
+}

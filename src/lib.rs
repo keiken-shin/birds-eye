@@ -1,3 +1,4 @@
+pub mod redact;
 pub mod index;
 pub mod native;
 pub mod ontology;

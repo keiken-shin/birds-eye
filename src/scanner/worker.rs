@@ -279,7 +279,7 @@ impl WorkerContext {
             message: format!(
                 "[worker {}] scanning dir={} queue_depth={}",
                 self.id,
-                dir.display(),
+                crate::redact::path_token(dir),
                 self.queue.len()
             ),
         });
@@ -384,7 +384,7 @@ impl WorkerContext {
             message: format!(
                 "[worker {}] dir done path={} files_found={} elapsed={}ms",
                 self.id,
-                dir.display(),
+                crate::redact::path_token(dir),
                 direct_files,
                 elapsed_ms
             ),
@@ -395,6 +395,20 @@ impl WorkerContext {
             let _ = self.events_tx.send(ScanEvent::Progress(snapshot));
         }
     }
+}
+
+/// What the platform's own metadata says a file occupies, for the folders and
+/// platforms the bulk listing does not cover. Windows has no such field on
+/// `Metadata`, so it returns `None` and the logical size stands in.
+#[cfg(unix)]
+fn allocated_bytes(meta: &std::fs::Metadata) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    Some(meta.blocks() * 512)
+}
+
+#[cfg(not(unix))]
+fn allocated_bytes(_meta: &std::fs::Metadata) -> Option<u64> {
+    None
 }
 
 #[cfg(test)]
@@ -523,18 +537,4 @@ mod tests {
             fs::remove_dir_all(root).expect("failed to remove test folder");
         }
     }
-}
-
-/// What the platform's own metadata says a file occupies, for the folders and
-/// platforms the bulk listing does not cover. Windows has no such field on
-/// `Metadata`, so it returns `None` and the logical size stands in.
-#[cfg(unix)]
-fn allocated_bytes(meta: &std::fs::Metadata) -> Option<u64> {
-    use std::os::unix::fs::MetadataExt;
-    Some(meta.blocks() * 512)
-}
-
-#[cfg(not(unix))]
-fn allocated_bytes(_meta: &std::fs::Metadata) -> Option<u64> {
-    None
 }
