@@ -416,3 +416,46 @@ fn a_hard_link_is_counted_once_and_is_not_offered_as_a_duplicate() {
         "two names for one file are not a duplicate pair -- deleting one frees nothing"
     );
 }
+
+/// More candidates than one hashing page. The passes read, hash and write in
+/// fixed-size batches now, so this proves the paging advances and terminates
+/// rather than re-handing the same rows forever.
+#[test]
+fn hashing_covers_every_candidate_past_one_batch() {
+    const FILES: usize = 5_000;
+    let rig = Rig::new("paging");
+    std::fs::create_dir_all(rig.root.join("many")).expect("create folder");
+    // Two sizes, so every file has at least one same-size peer and therefore
+    // every file is a candidate.
+    for i in 0..FILES {
+        let size = if i % 2 == 0 { 800 } else { 900 };
+        std::fs::write(
+            rig.root.join("many").join(format!("f{i:05}.bin")),
+            vec![(i % 251) as u8; size],
+        )
+        .expect("write");
+    }
+
+    rig.scan();
+
+    let conn = rig.conn();
+    let unhashed: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL AND sample_hash IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        unhashed, 0,
+        "every candidate must be hashed, not just the first page"
+    );
+    let indexed: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(indexed, FILES as i64);
+}

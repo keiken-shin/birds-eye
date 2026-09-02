@@ -26,6 +26,19 @@ where
     update_full_hashes_for_partial_matches(connection, cancel, progress)
 }
 
+/// How many candidates are read, hashed and written before the next page.
+///
+/// Both passes used to read every candidate into memory, hash them all, keep
+/// every result, and write them in one transaction. At a million files that is
+/// hundreds of megabytes of ids and paths held before a single byte is hashed,
+/// and one transaction long enough that a crash loses the whole pass.
+///
+/// Paged by row id, so a file that fails to hash -- and therefore still matches
+/// the candidate query -- cannot be handed back forever. Big enough that the
+/// thread pool always has work, small enough that memory does not scale with
+/// the volume.
+const HASH_BATCH: usize = 4096;
+
 fn update_full_hashes_for_partial_matches<F, C>(
     connection: &mut Connection,
     cancel: &C,
@@ -36,10 +49,7 @@ where
     C: Fn() -> bool + Sync,
 {
     const EAGER_FULL_HASH_MAX_BYTES: i64 = 64 * 1024 * 1024;
-    let candidates = {
-        let mut statement = connection.prepare(
-            "SELECT id, path
-             FROM files
+    const CANDIDATES: &str = "FROM files
              WHERE deleted_at IS NULL
                AND size <= ?1
                AND sample_hash IS NOT NULL
@@ -49,48 +59,65 @@ where
                  WHERE deleted_at IS NULL AND sample_hash IS NOT NULL AND size <= ?1
                  GROUP BY size, sample_hash
                  HAVING COUNT(*) > 1
-               )",
-        )?;
-        let rows = statement.query_map(params![EAGER_FULL_HASH_MAX_BYTES], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
+               )";
 
-    let total = candidates.len() as u64;
+    let total: u64 = connection.query_row(
+        &format!("SELECT COUNT(*) {CANDIDATES}"),
+        params![EAGER_FULL_HASH_MAX_BYTES],
+        |row| row.get::<_, i64>(0),
+    )? as u64;
     progress_stage(progress, "Full hashing strong matches", 0, total);
 
-    let results: Vec<(i64, Option<String>)> = candidates
-        .into_par_iter()
-        .map(|(id, path)| {
-            // A cancelled scan stops hashing right away; remaining files drain
-            // as no-ops so the pool winds down within one file's worth of work.
-            if cancel() {
-                return (id, None);
-            }
-            // A failure here is not a scan issue: the file keeps its sample
-            // hash and stays in duplicate detection at sampled confidence.
-            (id, full_file_hash(Path::new(&path)).ok())
-        })
-        .collect();
-
-    let tx = connection.transaction()?;
-    for (index, (id, full_hash)) in results.into_iter().enumerate() {
-        if let Some(full_hash) = full_hash {
-            tx.execute(
-                "UPDATE files SET full_hash = ?1, hash_algorithm = ?2, hash_state = 4 WHERE id = ?3",
-                params![full_hash, "xxh3-full-v1", id],
-            )?;
+    let mut done = 0_u64;
+    let mut after_id = 0_i64;
+    loop {
+        if cancel() {
+            return Ok(());
         }
-        emit_counted_progress(
-            progress,
-            "Full hashing strong matches",
-            index as u64 + 1,
-            total,
-        );
+
+        let batch: Vec<(i64, String)> = {
+            let mut statement = connection.prepare(&format!(
+                "SELECT id, path {CANDIDATES} AND id > ?2 ORDER BY id LIMIT ?3"
+            ))?;
+            let rows = statement.query_map(
+                params![EAGER_FULL_HASH_MAX_BYTES, after_id, HASH_BATCH as i64],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let Some((last_id, _)) = batch.last() else {
+            return Ok(());
+        };
+        after_id = *last_id;
+
+        let results: Vec<(i64, Option<String>)> = batch
+            .into_par_iter()
+            .map(|(id, path)| {
+                // A cancelled scan stops hashing right away; remaining files
+                // drain as no-ops so the pool winds down within one file's
+                // worth of work.
+                if cancel() {
+                    return (id, None);
+                }
+                // A failure here is not a scan issue: the file keeps its sample
+                // hash and stays in duplicate detection at sampled confidence.
+                (id, full_file_hash(Path::new(&path)).ok())
+            })
+            .collect();
+
+        let tx = connection.transaction()?;
+        for (id, full_hash) in results {
+            if let Some(full_hash) = full_hash {
+                tx.execute(
+                    "UPDATE files SET full_hash = ?1, hash_algorithm = ?2, hash_state = 4 WHERE id = ?3",
+                    params![full_hash, "xxh3-full-v1", id],
+                )?;
+            }
+            done += 1;
+            emit_counted_progress(progress, "Full hashing strong matches", done, total);
+        }
+        tx.commit()?;
     }
-    tx.commit()?;
-    Ok(())
 }
 
 enum SampleResult {
@@ -173,10 +200,7 @@ where
     F: FnMut(FinalizationProgress),
     C: Fn() -> bool + Sync,
 {
-    let candidates = {
-        let mut statement = connection.prepare(
-            "SELECT id, path, size
-             FROM files
+    const CANDIDATES: &str = "FROM files
              WHERE deleted_at IS NULL
                AND (sample_hash IS NULL OR hash_state < 2 OR hash_algorithm IS NULL OR hash_algorithm NOT LIKE 'xxh3-%')
                AND size IN (
@@ -184,113 +208,136 @@ where
                  WHERE deleted_at IS NULL AND size > 0
                  GROUP BY size
                  HAVING COUNT(*) > 1
-               )",
-        )?;
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-            ))
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
+               )";
 
-    let total = candidates.len() as u64;
+    let total: u64 = connection.query_row(&format!("SELECT COUNT(*) {CANDIDATES}"), [], |row| {
+        row.get::<_, i64>(0)
+    })? as u64;
     progress_stage(progress, "Sampling duplicate candidates", 0, total);
-
-    let results: Vec<(i64, String, SampleResult)> = candidates
-        .into_par_iter()
-        .map(|(id, path, size)| {
-            if cancel() {
-                return (id, path, SampleResult::Cancelled);
-            }
-            // Online-only cloud placeholders would stall for the provider's
-            // timeout and then fail anyway — classify them up front with the
-            // fix in the message instead of a cryptic OS error.
-            if is_cloud_placeholder(Path::new(&path)) {
-                return (
-                    id,
-                    path,
-                    SampleResult::Skipped {
-                        kind: SkipKind::Offline,
-                        reason: CLOUD_PLACEHOLDER_REASON.to_owned(),
-                    },
-                );
-            }
-            let result = if sample_chunk_plan(size as u64).is_empty() {
-                // Small file: hash it whole.
-                match with_lock_retry(|| full_file_hash(Path::new(&path))) {
-                    Ok(full_hash) => SampleResult::Full { full_hash },
-                    Err(error) => skipped(&error),
-                }
-            } else {
-                match with_lock_retry(|| sample_file_hash(Path::new(&path), size as u64)) {
-                    Ok(sample_hash) => {
-                        match with_lock_retry(|| partial_file_hash(Path::new(&path), size as u64)) {
-                            Ok(partial_hash) => SampleResult::Sampled {
-                                partial_hash,
-                                sample_hash,
-                            },
-                            Err(error) => skipped(&error),
-                        }
-                    }
-                    Err(error) => skipped(&error),
-                }
-            };
-            (id, path, result)
-        })
-        .collect();
 
     // Counted here rather than recovered from `scan_issues` later: that table is
     // capped, so past the cap the rows stop and the count would quietly go wrong
     // in the direction that flatters the scan.
     let mut tally: std::collections::HashMap<&'static str, i64> = std::collections::HashMap::new();
+    let mut done = 0_u64;
+    let mut after_id = 0_i64;
 
-    let tx = connection.transaction()?;
-    for (index, (id, path, result)) in results.into_iter().enumerate() {
-        match result {
-            SampleResult::Sampled {
-                partial_hash,
-                sample_hash,
-            } => {
-                tx.execute(
-                    "UPDATE files
+    loop {
+        if cancel() {
+            break;
+        }
+
+        // Paged by row id rather than by re-running the predicate: a file that
+        // fails to hash keeps its NULL hashes and so still matches, and would
+        // otherwise be handed back on every page forever.
+        let batch: Vec<(i64, String, i64)> = {
+            let mut statement = connection.prepare(&format!(
+                "SELECT id, path, size {CANDIDATES} AND id > ?1 ORDER BY id LIMIT ?2"
+            ))?;
+            let rows = statement.query_map(params![after_id, HASH_BATCH as i64], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let Some((last_id, _, _)) = batch.last() else {
+            break;
+        };
+        after_id = *last_id;
+
+        let results: Vec<(i64, String, SampleResult)> = batch
+            .into_par_iter()
+            .map(|(id, path, size)| {
+                if cancel() {
+                    return (id, path, SampleResult::Cancelled);
+                }
+                // Online-only cloud placeholders would stall for the provider's
+                // timeout and then fail anyway — classify them up front with the
+                // fix in the message instead of a cryptic OS error.
+                if is_cloud_placeholder(Path::new(&path)) {
+                    return (
+                        id,
+                        path,
+                        SampleResult::Skipped {
+                            kind: SkipKind::Offline,
+                            reason: CLOUD_PLACEHOLDER_REASON.to_owned(),
+                        },
+                    );
+                }
+                let result = if sample_chunk_plan(size as u64).is_empty() {
+                    // Small file: hash it whole.
+                    match with_lock_retry(|| full_file_hash(Path::new(&path))) {
+                        Ok(full_hash) => SampleResult::Full { full_hash },
+                        Err(error) => skipped(&error),
+                    }
+                } else {
+                    match with_lock_retry(|| sample_file_hash(Path::new(&path), size as u64)) {
+                        Ok(sample_hash) => {
+                            match with_lock_retry(|| {
+                                partial_file_hash(Path::new(&path), size as u64)
+                            }) {
+                                Ok(partial_hash) => SampleResult::Sampled {
+                                    partial_hash,
+                                    sample_hash,
+                                },
+                                Err(error) => skipped(&error),
+                            }
+                        }
+                        Err(error) => skipped(&error),
+                    }
+                };
+                (id, path, result)
+            })
+            .collect();
+
+        let tx = connection.transaction()?;
+        for (id, path, result) in results {
+            match result {
+                SampleResult::Sampled {
+                    partial_hash,
+                    sample_hash,
+                } => {
+                    tx.execute(
+                        "UPDATE files
                      SET partial_hash = ?1, sample_hash = ?2, full_hash = NULL,
                          hash_algorithm = ?3, hash_state = 2
                      WHERE id = ?4",
-                    params![partial_hash, sample_hash, "xxh3-sample-v1", id],
-                )?;
-            }
-            SampleResult::Full { full_hash } => {
-                tx.execute(
-                    "UPDATE files
+                        params![partial_hash, sample_hash, "xxh3-sample-v1", id],
+                    )?;
+                }
+                SampleResult::Full { full_hash } => {
+                    tx.execute(
+                        "UPDATE files
                      SET partial_hash = ?1, sample_hash = ?1, full_hash = ?1,
                          hash_algorithm = ?2, hash_state = 4
                      WHERE id = ?3",
-                    params![full_hash, "xxh3-full-v1", id],
-                )?;
+                        params![full_hash, "xxh3-full-v1", id],
+                    )?;
+                }
+                SampleResult::Skipped { kind, reason } => {
+                    *tally.entry(kind.as_str()).or_insert(0) += 1;
+                    crate::index::writer::insert_scan_issue(
+                        &tx,
+                        scan_id,
+                        "hash",
+                        kind.as_str(),
+                        &path,
+                        &reason,
+                    )?;
+                }
+                SampleResult::Cancelled => {}
             }
-            SampleResult::Skipped { kind, reason } => {
-                *tally.entry(kind.as_str()).or_insert(0) += 1;
-                crate::index::writer::insert_scan_issue(
-                    &tx,
-                    scan_id,
-                    "hash",
-                    kind.as_str(),
-                    &path,
-                    &reason,
-                )?;
-            }
-            SampleResult::Cancelled => {}
+            done += 1;
+            emit_counted_progress(progress, "Sampling duplicate candidates", done, total);
         }
-        emit_counted_progress(
-            progress,
-            "Sampling duplicate candidates",
-            index as u64 + 1,
-            total,
-        );
+        tx.commit()?;
     }
+
+    // Written once, after every page: the counters describe the pass, not a page.
+    let tx = connection.transaction()?;
     crate::index::writer::add_scan_skips(&tx, scan_id, &tally)?;
     tx.commit()?;
     Ok(())
