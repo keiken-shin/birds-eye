@@ -437,15 +437,27 @@ mod tests {
         let from = root.join("huge.bin");
         let mut conn = migrated_conn();
         seed_file(&conn, 1, &from);
-        // std::env::temp_dir() and the build tree are on different volumes on
-        // this machine; if they ever are not, the crossing check will not fire
-        // and this test says so rather than passing quietly.
-        let to = std::env::temp_dir().join("birdseye-preflight").join("huge.bin");
-        assert_eq!(
-            crate::native::drives::same_volume(&from, &to),
-            Some(false),
-            "this test needs a genuine cross-volume pair"
-        );
+
+        // A genuine crossing or nothing. A machine with one volume -- a CI
+        // runner, most laptops -- cannot exercise this, and pointing the
+        // destination at the same volume would make the test pass through the
+        // rename path instead, proving nothing while looking green.
+        let Some(to) = crate::native::drives::enumerate_fixed_drives()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|drive| {
+                std::path::PathBuf::from(drive.root_path)
+                    .join("birdseye-preflight")
+                    .join("huge.bin")
+            })
+            .find(|candidate| {
+                crate::native::drives::same_volume(&from, candidate) == Some(false)
+            })
+        else {
+            eprintln!("skipped: only one volume on this machine, so nothing crosses");
+            cleanup(&root);
+            return;
+        };
         let plan_id = create_plan(
             &conn,
             &[PlanItem {

@@ -1,0 +1,63 @@
+name: CI
+
+# Everything that has to be true before a change reaches main.
+#
+# Windows, because the scan path is Windows-specific and several tests depend on
+# it: the file-id calls, the real recycle bin, and picking an unused drive
+# letter. Running these on Linux would pass by skipping, which is the worst kind
+# of green.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Clippy is denied at the crate level (see [lints.clippy] in Cargo.toml),
+      # so a warning fails this step without a flag here.
+      - name: Lint
+        run: cargo clippy --all-targets
+      # Plain `cargo test`, not `--all-targets`: that flag builds examples and
+      # benches but silently drops doc tests, and the doc comments in this repo
+      # carry real examples.
+      - name: Test
+        run: cargo test
+      # A second crate, not a cargo workspace member, so it needs its own run.
+      # `clippy` only: a full tauri build needs the frontend bundled and a code
+      # signing story, neither of which belongs in a per-push gate.
+      - name: Lint the desktop shell
+        run: cargo clippy --all-targets
+        working-directory: src-tauri
+
+  workspace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: workspace/package-lock.json
+      - run: npm ci
+        working-directory: workspace
+      - name: Types
+        run: npx tsc --noEmit
+        working-directory: workspace
+      - name: Test
+        run: npx vitest run
+        working-directory: workspace
+      # The words the product refuses to say. Runs from the repo root because it
+      # reads both the workspace and the docs.
+      - name: Copy gate
+        run: node scripts/check-copy.mjs
