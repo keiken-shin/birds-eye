@@ -28,6 +28,12 @@ path = "src/lib.rs"
 name = "birds-eye-scan"
 path = "src/main.rs"
 
+# Builds the benchmark corpora. Not shipped in the app; it exists so scale
+# claims can be measured rather than reasoned about. See issue #60.
+[[bin]]
+name = "birds-eye-bench-corpus"
+path = "src/bin/bench_corpus.rs"
+
 # The gate that stops the warning count creeping back up. It was 24 before
 # anyone counted, which is how a real warning hides. Denying at the crate level
 # means every build gets the gate, rather than only whoever remembers the flag.

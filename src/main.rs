@@ -2,6 +2,8 @@ use birds_eye::index::IndexWriter;
 use birds_eye::scanner::{ScanEvent, ScanOptions, Scanner};
 use std::env;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 fn main() {
     let args = Args::parse();
@@ -54,12 +56,18 @@ fn main() {
                         .refine_duplicates()
                         .expect("failed to refine duplicates");
                 }
+                // Rates, not just totals. Issue #60: every scale claim on the
+                // board was reasoned from reading the code, and a number nobody
+                // prints is a number nobody can check.
                 println!(
-                    "finished files={} folders={} bytes={} elapsed_ms={}",
+                    "finished files={} folders={} bytes={} unreadable={} elapsed_ms={} files_per_sec={:.0} bytes_per_sec={:.0}",
                     report.stats.files_scanned,
                     report.stats.folders_scanned,
                     report.stats.bytes_scanned,
-                    report.stats.elapsed.as_millis()
+                    report.stats.inaccessible_entries,
+                    report.stats.elapsed.as_millis(),
+                    report.stats.files_per_sec,
+                    report.stats.bytes_per_sec
                 );
                 break;
             }
@@ -76,6 +84,28 @@ fn main() {
             ScanEvent::FileIndexed(_) | ScanEvent::FolderIndexed(_) | ScanEvent::Verbose { .. } => {}
         }
     }
+
+    // The analysis phase lives in the app's job path, so its cost was never
+    // measurable from a command line. Without that, "how long does Bird's Eye
+    // take" could only ever be answered for the walk.
+    if args.analyze {
+        let Some(index_path) = args.index_path.as_ref() else {
+            eprintln!("--analyze needs --index");
+            std::process::exit(2);
+        };
+        drop(index_writer);
+        let started = std::time::Instant::now();
+        let ran = birds_eye::ontology::orchestrator::run_phase2(
+            index_path,
+            birds_eye::ontology::populators::BudgetTier::AllOptIn,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect("analysis failed");
+        println!(
+            "analyzed ran={ran} elapsed_ms={}",
+            started.elapsed().as_millis()
+        );
+    }
 }
 
 #[derive(Debug)]
@@ -83,6 +113,7 @@ struct Args {
     command: Command,
     root: PathBuf,
     index_path: Option<PathBuf>,
+    analyze: bool,
 }
 
 #[derive(Debug)]
@@ -108,16 +139,23 @@ impl Args {
                 command: Command::Query { index_path, limit },
                 root: env::current_dir().expect("failed to resolve current directory"),
                 index_path: None,
+                analyze: false,
             };
         }
 
         let mut root = None;
         let mut index_path = None;
+        let mut analyze = false;
         let mut args = env::args().skip(1);
 
         while let Some(arg) = args.next() {
             if arg == "--index" {
                 index_path = args.next().map(PathBuf::from);
+                continue;
+            }
+
+            if arg == "--analyze" {
+                analyze = true;
                 continue;
             }
 
@@ -130,6 +168,7 @@ impl Args {
             command: Command::Scan,
             root: root.unwrap_or_else(|| env::current_dir().expect("failed to resolve current directory")),
             index_path,
+            analyze,
         }
     }
 }
