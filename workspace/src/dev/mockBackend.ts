@@ -1473,7 +1473,13 @@ export function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
         path: "",
         is_pinned: false,
         attrs: [],
-        relations: [],
+        // One of each standing, so whoever builds the evidence panel sees a
+        // stale conclusion in dev rather than discovering the case in the wild.
+        relations: [
+          { predicate: "derivedFrom", object_path: "C:\Work\hero.psd", source: "user", strength: "stated", standing: "holds" },
+          { predicate: "derivedFrom", object_path: "C:\Work\old-hero.psd", source: "rule:sibling-name", strength: "suggested", standing: "source-gone" },
+          { predicate: "backupOf", object_path: "C:\Work\report.docx", source: "rule:backup-folder", strength: "strong", standing: "source-changed" },
+        ],
       });
     case "allow_preview_root":
       return done(ROOT);

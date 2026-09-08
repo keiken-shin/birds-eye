@@ -5,6 +5,7 @@
 //! `docs/develop/architecture.md` carries the design rationale.
 
 pub mod provenance;
+pub mod standing;
 pub mod attrs;
 pub mod catalog;
 pub mod cleanup;

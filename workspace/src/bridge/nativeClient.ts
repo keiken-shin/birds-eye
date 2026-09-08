@@ -519,12 +519,30 @@ export async function runSavedView(
 
 // ---- Ontology: provenance + override + toggle ----
 
+/**
+ * Where a recorded conclusion stands now. Mirrors `RelationStanding` in
+ * `src/ontology/standing.rs`; the API sends the name, never a timestamp.
+ */
+export type RelationStanding = "holds" | "source-gone" | "source-changed";
+
 export type NativeFileProvenance = {
   file_id: number;
   path: string;
   is_pinned: boolean;
   attrs: Array<{ key: string; value: string; source: string; strength: Strength }>;
-  relations: Array<{ predicate: string; object_path: string | null; source: string; strength: Strength }>;
+  relations: Array<{
+    predicate: string;
+    object_path: string | null;
+    source: string;
+    strength: Strength;
+    /**
+     * Whether the conclusion still holds. A relation is written once and never
+     * revisited, so "made from X" outlives X being deleted or rewritten.
+     * Anything rendering a relation must render this beside it: a claim shown
+     * without its standing reads as still true.
+     */
+    standing: RelationStanding;
+  }>;
 };
 
 export async function fileProvenance(indexPath: string, fileId: number) {

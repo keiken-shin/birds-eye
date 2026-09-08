@@ -21,6 +21,7 @@ use crate::ontology::orchestrator::run_phase2;
 use crate::ontology::pinning::{pin_file as pin_file_db, unpin_file as unpin_file_db};
 use crate::ontology::populators::BudgetTier;
 use crate::ontology::relations::outbound;
+use crate::ontology::standing::RelationStanding;
 use crate::ontology::saved_views::{list_saved_views, run_saved_view, SavedView, SavedViewRow, ViewParams};
 use crate::ontology::vocabulary::{keys, predicates, EntityKind};
 use crate::scanner::{ScanEvent, ScanOptions, Scanner};
@@ -1393,6 +1394,10 @@ pub struct RelationFactDto {
     pub source: String,
     /// See [`AttrFactDto::strength`].
     pub strength: crate::index::evidence::Strength,
+    /// Whether the thing this points at is still there and still what it was.
+    /// A conclusion outlives its subject; saying so is the difference between a
+    /// record and a claim. See [`RelationStanding`].
+    pub standing: RelationStanding,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -1403,6 +1408,9 @@ pub struct FileProvenanceDto {
     pub attrs: Vec<AttrFactDto>,
     pub relations: Vec<RelationFactDto>,
 }
+
+/// `(path, linked_file_id, deleted_at, modified_at)` for a relation's object.
+type ObjectDiskState = (Option<String>, Option<i64>, Option<i64>, Option<i64>);
 
 const PROVENANCE_KEYS: &[&str] = &[keys::ROLE, keys::REPLACEABILITY, keys::SENSITIVITY, keys::ORIGIN, keys::MEDIA_TYPE, keys::LANGUAGE];
 const PROVENANCE_PREDS: &[&str] = &[predicates::DERIVED_FROM, predicates::BACKUP_OF, predicates::PART_OF, predicates::IN_FOLDER];
@@ -1438,17 +1446,34 @@ pub fn file_provenance(request: FileProvenanceRequest) -> Result<FileProvenanceD
         }
         for pred in PROVENANCE_PREDS {
             for r in outbound(&conn, entity.id, pred).map_err(|e| e.to_string())? {
-                let object_path: Option<String> = conn
+                // One read for the path and the disk state behind it: judging
+                // the conclusion needs both, and fetching them apart would let
+                // them disagree.
+                let object: Option<ObjectDiskState> = conn
                     .query_row(
-                        "SELECT f.path FROM ontology_entities oe
+                        "SELECT f.path, oe.linked_file_id, f.deleted_at, f.modified_at
+                         FROM ontology_entities oe
                          LEFT JOIN files f ON f.id = oe.linked_file_id
                          WHERE oe.id = ?1",
                         [r.object_id],
-                        |row| row.get::<_, Option<String>>(0),
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                     )
                     .optional()
-                    .map_err(|e| e.to_string())?
-                    .flatten();
+                    .map_err(|e| e.to_string())?;
+                let (object_path, linked_file_id, deleted_at, modified_at) =
+                    object.unwrap_or((None, None, None, None));
+                // An entity that names a file but has no row for it is a file
+                // that went away, not a file that is fine.
+                let deleted_at = match (linked_file_id, object_path.as_ref()) {
+                    (Some(_), None) => Some(0),
+                    _ => deleted_at,
+                };
+                let standing = RelationStanding::of(
+                    r.asserted_at,
+                    linked_file_id.is_some(),
+                    deleted_at,
+                    modified_at,
+                );
                 relations.push(RelationFactDto {
                     strength: crate::index::evidence::Strength::of(
                         &r.source,
@@ -1457,6 +1482,7 @@ pub fn file_provenance(request: FileProvenanceRequest) -> Result<FileProvenanceD
                     predicate: r.predicate,
                     object_path,
                     source: r.source,
+                    standing,
                 });
             }
         }
@@ -2588,6 +2614,114 @@ mod tests {
         assert_eq!(prov.path, "/a/x.png");
         assert!(prov.attrs.iter().any(|a| a.key == "role" && a.value == "scratch" && a.source == "user"));
         assert!(!prov.is_pinned);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A conclusion outlives the thing it was drawn from. "Made from X" stays
+    /// on screen after X is deleted or rewritten, and someone deciding what to
+    /// throw away reads it as still true.
+    #[test]
+    fn a_relation_says_so_when_its_source_is_gone_or_changed() {
+        use crate::index::schema::ALL_MIGRATIONS;
+        use crate::ontology::entities::upsert_entity;
+        use crate::ontology::relations::{assert_relation, NewRelation};
+        use crate::ontology::vocabulary::{predicates, EntityKind};
+        use rusqlite::Connection;
+
+        let dir = std::env::temp_dir().join(format!("be_stale_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let index_path = dir.join("idx.sqlite");
+        let _ = std::fs::remove_file(&index_path);
+
+        // Three sources, one derivative. asserted_at is unix seconds, and so is
+        // files.modified_at -- checked on a real index before relying on it.
+        let asserted_at = {
+            let conn = Connection::open(&index_path).unwrap();
+            for (_, sql) in ALL_MIGRATIONS {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, path, name, depth, indexed_at)
+                 VALUES (1, NULL, '/a', 'a', 0, 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, modified_at, indexed_at)
+                 VALUES (1, 1, '/a/out.png',   'out.png',   10, 1000, 0),
+                        (2, 1, '/a/here.psd',  'here.psd',  20, 1000, 0),
+                        (3, 1, '/a/gone.psd',  'gone.psd',  20, 1000, 0),
+                        (4, 1, '/a/moved.psd', 'moved.psd', 20, 1000, 0)",
+                [],
+            )
+            .unwrap();
+            let derivative =
+                upsert_entity(&conn, EntityKind::File, "/a/out.png", Some(1), None, None).unwrap();
+            for (source_id, source_path) in
+                [(2_i64, "/a/here.psd"), (3, "/a/gone.psd"), (4, "/a/moved.psd")]
+            {
+                let object =
+                    upsert_entity(&conn, EntityKind::File, source_path, Some(source_id), None, None)
+                        .unwrap();
+                assert_relation(
+                    &conn,
+                    &NewRelation {
+                        subject_id: derivative.id,
+                        predicate: predicates::DERIVED_FROM,
+                        object_id: object.id,
+                        source: "user",
+                        confidence: 1.0,
+                    },
+                )
+                .unwrap();
+            }
+            let asserted_at: i64 = conn
+                .query_row("SELECT MIN(asserted_at) FROM ontology_relations", [], |r| r.get(0))
+                .unwrap();
+
+            // A rescan finds one source deleted and one rewritten after we drew
+            // the conclusion. The third is untouched.
+            conn.execute("UPDATE files SET deleted_at = 1 WHERE id = 3", []).unwrap();
+            conn.execute(
+                "UPDATE files SET modified_at = ?1 WHERE id = 4",
+                rusqlite::params![asserted_at + 60],
+            )
+            .unwrap();
+            asserted_at
+        };
+        assert!(asserted_at > 0, "asserted_at must be a real unix second");
+
+        let prov =
+            file_provenance(FileProvenanceRequest { index_path: index_path.clone(), file_id: 1 })
+                .unwrap();
+        let standing_of = |path: &str| {
+            prov.relations
+                .iter()
+                .find(|r| r.object_path.as_deref() == Some(path))
+                .unwrap_or_else(|| panic!("no relation for {path}"))
+                .standing
+        };
+
+        assert_eq!(
+            standing_of("/a/here.psd"),
+            RelationStanding::Holds,
+            "an untouched source keeps the conclusion true"
+        );
+        assert_eq!(
+            standing_of("/a/gone.psd"),
+            RelationStanding::SourceGone,
+            "a deleted source must not read as still there"
+        );
+        assert_eq!(
+            standing_of("/a/moved.psd"),
+            RelationStanding::SourceChanged,
+            "a source rewritten after the conclusion was drawn is no longer what it was drawn from"
+        );
+
+        // The relation is still listed. Hiding it would throw away the only
+        // record that the derivative came from somewhere.
+        assert_eq!(prov.relations.len(), 3, "nothing is hidden, only labelled");
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 
