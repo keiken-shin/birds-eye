@@ -388,9 +388,18 @@ impl IndexWriter {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    /// (walk, hash) issue counts for the most recent scan session. The walk
-    /// count comes from the session's uncapped `inaccessible_entries` tally;
-    /// the hash count from the (capped) issue rows.
+    /// (walk, hash) issue counts for the most recent scan session.
+    ///
+    /// Both come from uncapped tallies on the session row. The hash half used
+    /// to count `scan_issues`, which stops at `SCAN_ISSUES_CAP` -- so with
+    /// 1,000 locked files it reported 500, and if the walk had already filled
+    /// the cap it reported **zero**, which is not an undercount but the
+    /// opposite of the truth. Measured on 1,000 files held open by another
+    /// process: every one failed to hash, `skipped_locked` said 1000, the rows
+    /// said 500.
+    ///
+    /// The rows remain what they are: a sample someone reads. This is the
+    /// count someone trusts, and the two must not share a source.
     pub fn scan_issue_counts(&self) -> Result<(i64, i64), IndexError> {
         let scan_id = match self.current_scan_session_id() {
             Ok(id) => id,
@@ -403,7 +412,9 @@ impl IndexWriter {
             |row| row.get(0),
         )?;
         let hash: i64 = self.connection.query_row(
-            "SELECT COUNT(*) FROM scan_issues WHERE scan_id = ?1 AND phase = 'hash'",
+            "SELECT skipped_offline + skipped_locked + skipped_denied
+                    + skipped_changed + skipped_failed
+             FROM scan_sessions WHERE id = ?1",
             params![scan_id],
             |row| row.get(0),
         )?;
@@ -3114,6 +3125,63 @@ mod tests {
             after[0], before[0],
             "the original group kept its id and its size"
         );
+    }
+
+    /// A coverage figure that shrinks as coverage gets worse is worse than no
+    /// figure, because a person acts on it.
+    ///
+    /// Measured on 1,000 files held open by another process: all 1,000 failed
+    /// to hash, the uncapped tally said 1000, and the capped rows said 500 --
+    /// which is what the UI was shown. Worse, the cap is on total issues, so a
+    /// walk that filled it first left the hash count reading zero.
+    #[test]
+    fn the_hash_failure_count_survives_the_issue_row_cap() {
+        let root = test_root("issue-cap");
+        fs::create_dir_all(&root).expect("failed to create folder");
+        write_file(&root.join("a.bin"), &[1; 32]);
+
+        let mut writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        scan_into_index(&root, &mut writer);
+        let scan_id = writer.current_scan_session_id().expect("session");
+
+        // More failures than the cap, and the walk fills the cap first so that
+        // not one hash row can be stored.
+        let mut tally = std::collections::HashMap::new();
+        tally.insert("locked", 1_000_i64);
+        add_scan_skips(writer.connection(), scan_id, &tally).expect("tally");
+        for index in 0..(SCAN_ISSUES_CAP + 100) {
+            insert_scan_issue(
+                writer.connection(),
+                scan_id,
+                "walk",
+                "denied",
+                &format!("/x/{index}"),
+                "denied",
+            )
+            .expect("issue");
+        }
+
+        let stored: i64 = writer
+            .connection()
+            .query_row("SELECT COUNT(*) FROM scan_issues", [], |row| row.get(0))
+            .expect("count rows");
+        assert_eq!(stored, SCAN_ISSUES_CAP, "the row list is capped, as intended");
+        let hash_rows: i64 = writer
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM scan_issues WHERE phase = 'hash'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count hash rows");
+        assert_eq!(hash_rows, 0, "no hash row could be stored at all");
+
+        let (_, hash_count) = writer.scan_issue_counts().expect("issue counts");
+        assert_eq!(
+            hash_count, 1_000,
+            "the count must be the truth, not what fitted in the list"
+        );
+        cleanup(&root);
     }
 
     /// The guard for the ten-hour bug.
