@@ -140,7 +140,7 @@ fn images(args: &Args) -> Made {
             // different bytes, the same picture, which is exactly what a
             // perceptual hash exists to catch.
             let base = index & !1;
-            let nudge = u8::from(!index.is_multiple_of(2));
+            let nudge = if index.is_multiple_of(2) { 0 } else { 3 };
             let body = jpeg(base, nudge);
             write_file(&path, &body);
             body.len() as u64
@@ -153,16 +153,36 @@ fn images(args: &Args) -> Made {
     }
 }
 
-/// A 64x64 JPEG whose look is decided by `seed`.
+/// A 64x64 JPEG whose *structure* is decided by `seed`.
+///
+/// Structure, not colour. The first version shifted the red and green channels
+/// by the seed and left the shape of the picture identical, which made every
+/// image in the corpus the same picture to a perceptual hasher -- a phash drops
+/// the DC term precisely so that overall brightness does not count. Measured on
+/// 100,000 generated images: **882 distinct dhash values, one of them covering
+/// 31,213 files**. The analysis pass then tried to relate them all to each
+/// other and was still running 28 hours later.
+///
+/// So the seed now paints an 8x8 block pattern. Each block's brightness comes
+/// from the seed, which is exactly what a DCT hash reads.
 fn jpeg(seed: usize, nudge: u8) -> Vec<u8> {
-    let red = (seed % 251) as u8;
-    let green = ((seed / 251) % 251) as u8;
+    // One brightness per block, drawn from the seed.
+    let mut blocks = [0_u8; 64];
+    let mut state = (seed as u64)
+        .wrapping_mul(6_364_136_223_846_793_005)
+        .wrapping_add(1_442_695_040_888_963_407);
+    for block in blocks.iter_mut() {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        *block = (state >> 33) as u8;
+    }
     let image = image::RgbImage::from_fn(64, 64, |x, y| {
-        image::Rgb([
-            red.wrapping_add(x as u8).wrapping_add(nudge),
-            green.wrapping_add(y as u8),
-            ((x + y) as u8).wrapping_mul(3),
-        ])
+        let block = blocks[((y / 8) * 8 + (x / 8)) as usize];
+        // `nudge` is a small brightness change: enough to alter the compressed
+        // bytes, far too small to change the structure the hash reads.
+        let shade = block.saturating_add(nudge);
+        image::Rgb([shade, shade, shade])
     });
     let mut out = Vec::new();
     image::DynamicImage::ImageRgb8(image)
@@ -377,6 +397,47 @@ mod tests {
         assert_eq!(copies, 999, "about one file in seven must be a copy");
     }
 
+    /// The test that should have existed first.
+    ///
+    /// The original generator varied colour only, so 100,000 images collapsed
+    /// onto 882 distinct dhash values and the analysis pass ran for 28 hours
+    /// trying to relate them. A corpus whose images all look alike does not
+    /// measure perceptual hashing, it measures a pathological cluster.
+    ///
+    /// Structure is what a DCT hash reads, so structure is what this asserts.
+    #[test]
+    fn different_seeds_make_structurally_different_pictures() {
+        let luma = |seed: usize| {
+            image::load_from_memory_with_format(&jpeg(seed, 0), image::ImageFormat::Jpeg)
+                .expect("decode")
+                .to_luma8()
+        };
+        // Coarse stand-in for a perceptual hash: the 8x8 block pattern itself.
+        let signature = |seed: usize| {
+            let image = luma(seed);
+            let mean = |bx: u32, by: u32| {
+                let mut total = 0_u32;
+                for y in 0..8 {
+                    for x in 0..8 {
+                        total += u32::from(image.get_pixel(bx * 8 + x, by * 8 + y).0[0]);
+                    }
+                }
+                total / 64
+            };
+            let cells: Vec<u32> = (0..8).flat_map(|by| (0..8).map(move |bx| (bx, by))).map(|(bx, by)| mean(bx, by)).collect();
+            let average: u32 = cells.iter().sum::<u32>() / 64;
+            cells.iter().map(|c| u64::from(*c > average)).fold(0_u64, |acc, bit| (acc << 1) | bit)
+        };
+
+        let distinct: std::collections::HashSet<u64> =
+            (0..2_000).step_by(2).map(signature).collect();
+        assert!(
+            distinct.len() > 900,
+            "1000 seeds must not collapse onto {} signatures",
+            distinct.len()
+        );
+    }
+
     /// And near-duplicates, or perceptual hashing is timed doing nothing.
     #[test]
     fn image_pairs_are_the_same_picture_with_different_bytes() {
@@ -395,6 +456,6 @@ mod tests {
             .map(|(a, b)| u32::from(a.0[0].abs_diff(b.0[0])))
             .sum::<u32>()
             / (left.pixels().len() as u32);
-        assert!(drift <= 4, "a pair must look alike; mean drift was {drift}");
+        assert!(drift <= 8, "a pair must look alike; mean drift was {drift}");
     }
 }

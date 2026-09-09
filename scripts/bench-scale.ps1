@@ -111,8 +111,24 @@ if ($Analyze) {
   $analyzeMs = Get-Field $third.Lines 'analyzed' 'elapsed_ms'
 }
 
-$row = "| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7} | {8} |" -f `
-  $Label, $files, $bytes, $unreadable, $first.WallMs, $second.WallMs, $firstRate, $secondRate, $analyzeMs
+# A guard, not a nicety. A crashed or killed run still produces a row, and a
+# row with empty cells reads exactly like a measurement.
+if (-not $files) {
+  throw "no 'finished' line from the first scan of $Label - the run failed. Refusing to write a row that looks like a result."
+}
+
+# The end-to-end rate, which is the one a person means by "how fast is it".
+# The scanner's own files_per_sec covers the directory walk only; on the
+# 100k-file corpus that read 398,540 files/sec beside a wall clock of 371
+# seconds, because everything after the walk -- the index write and the
+# duplicate hashing -- is not in it. Printing the walk rate alone would be
+# true and totally misleading.
+$wallRate = [math]::Round([double]$files / [math]::Max($first.WallMs / 1000.0, 0.001), 0)
+$rescanWallRate = [math]::Round([double]$files / [math]::Max($second.WallMs / 1000.0, 0.001), 0)
+
+$row = "| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7} | {8} | {9} | {10} |" -f `
+  $Label, $files, $bytes, $unreadable, $first.WallMs, $second.WallMs, `
+  $wallRate, $rescanWallRate, $firstRate, $secondRate, $analyzeMs
 
 if (-not (Test-Path -LiteralPath $OutFile)) {
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutFile) | Out-Null
@@ -127,8 +143,13 @@ if (-not (Test-Path -LiteralPath $OutFile)) {
     "",
     ("Machine: {0}, {1} logical cores. Recorded {2}." -f $env:COMPUTERNAME, [Environment]::ProcessorCount, (Get-Date -Format 'yyyy-MM-dd')),
     "",
-    "| corpus | files | bytes | unreadable | scan ms | rescan ms | scan files/sec | rescan files/sec | analysis ms |",
-    "|---|---|---|---|---|---|---|---|---|"
+    "Two rates are shown and they are not the same thing.",
+    "**end-to-end** is files divided by wall clock: the whole scan, index write included.",
+    "**walk only** is the scanner's own counter, which covers the directory walk and nothing after it.",
+    "Quote the end-to-end one unless you are specifically talking about the walk.",
+    "",
+    "| corpus | files | bytes | unreadable | scan ms | rescan ms | scan files/sec end-to-end | rescan files/sec end-to-end | scan files/sec walk only | rescan files/sec walk only | analysis ms |",
+    "|---|---|---|---|---|---|---|---|---|---|---|"
   )
   Set-Content -Path $OutFile -Value $header -Encoding utf8
 }
