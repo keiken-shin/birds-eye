@@ -90,7 +90,8 @@ fn small_files(args: &Args) -> Made {
         .into_par_iter()
         .map(|index| {
             let path = leaf_dir(&args.root, index).join(format!("f{index:07}.bin"));
-            let body = filler(content_seed(index), size);
+            let seed = content_seed(index);
+            let body = filler(seed, size_for(seed, size));
             write_file(&path, &body);
             body.len() as u64
         })
@@ -216,6 +217,31 @@ fn content_seed(index: usize) -> usize {
     } else {
         index
     }
+}
+
+/// How big a small file is.
+///
+/// Derived from the content seed, not the index, so a duplicate is the same
+/// size as the file it copies -- otherwise it would not be a duplicate.
+///
+/// Sizes have to vary. The first corpus gave every file exactly 4,096 bytes,
+/// which put all million of them in one size group. Duplicate detection groups
+/// by size first, so that is not a hard case, it is a different case: it made
+/// the corpus measure one pathological group rather than a disk. A real tree
+/// has a spread, so this spans roughly an eighth of the base size to four
+/// times it.
+fn size_for(seed: usize, base: usize) -> usize {
+    let spread = [
+        base / 8,
+        base / 4,
+        base / 2,
+        base,
+        base + base / 3,
+        base * 2,
+        base * 3,
+        base * 4,
+    ];
+    spread[seed % spread.len()].max(1)
 }
 
 /// Bytes that do not compress to nothing, so hashing has something to chew and
@@ -395,6 +421,37 @@ mod tests {
         let distinct: std::collections::HashSet<_> = (0..7_000).map(content_seed).collect();
         let copies = 7_000 - distinct.len();
         assert_eq!(copies, 999, "about one file in seven must be a copy");
+    }
+
+    /// One size group is not a hard case, it is a different case. The first
+    /// corpus gave every file 4,096 bytes, so a million files formed a single
+    /// group and the benchmark measured a pathological cluster rather than a
+    /// disk.
+    #[test]
+    fn small_files_come_in_a_spread_of_sizes() {
+        let sizes: std::collections::HashSet<usize> =
+            (0..1_000).map(|index| size_for(content_seed(index), 4_096)).collect();
+        assert!(
+            sizes.len() >= 6,
+            "a corpus needs a spread of sizes, got {}",
+            sizes.len()
+        );
+    }
+
+    /// And a copy must still be the same size as what it copies, or it is not
+    /// a copy at all.
+    #[test]
+    fn a_duplicate_is_the_same_size_as_its_original() {
+        for index in (0..1_000usize).filter(|i| i.is_multiple_of(DUPLICATE_EVERY) && *i > 0) {
+            let copy = content_seed(index);
+            let original = content_seed(index - 1);
+            assert_eq!(copy, original, "file {index} must copy its neighbour");
+            assert_eq!(
+                size_for(copy, 4_096),
+                size_for(original, 4_096),
+                "a copy that is a different size is not a duplicate"
+            );
+        }
     }
 
     /// The test that should have existed first.
