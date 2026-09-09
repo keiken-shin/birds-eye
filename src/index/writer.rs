@@ -1611,29 +1611,50 @@ impl IndexWriter {
                 "INSERT OR IGNORE INTO still_a_group (id) VALUES (?1)",
                 params![group_id],
             )?;
-            // Members are filtered the same way the group was: a hard link that
-            // matches the hash is still one file with another name, and putting
-            // it in the group would offer a deletion that frees nothing.
-            if let Some(full_hash) = full_hash {
-                tx.execute(
-                    "INSERT INTO duplicate_group_files (group_id, file_id)
-                     SELECT ?1, id FROM files
-                     WHERE deleted_at IS NULL AND size = ?2 AND full_hash = ?3
-                       AND shares_bytes_with IS NULL",
-                    params![group_id, size, full_hash],
-                )?;
-            } else if let Some(sample_hash) = sample_hash {
-                tx.execute(
-                    "INSERT INTO duplicate_group_files (group_id, file_id)
-                     SELECT ?1, id FROM files
-                     WHERE deleted_at IS NULL AND size = ?2 AND sample_hash = ?3
-                       AND shares_bytes_with IS NULL",
-                    params![group_id, size, sample_hash],
-                )?;
-            }
-            // No hash at all never forms a group: the grouping query above
-            // requires a sample hash, so size-only coincidences are excluded.
+            // Membership is filled in one pass below, not here. See the note
+            // above that INSERT.
         }
+
+        // Membership, in one pass over the files instead of one query per
+        // group.
+        //
+        // It used to run `WHERE size = ?  AND full_hash = ?` once per group.
+        // There is no index on `full_hash`, and `idx_files_sample_hash` is
+        // `(size, sample_hash, full_hash)` -- a query that does not constrain
+        // `sample_hash` can only use the `size` prefix. EXPLAIN QUERY PLAN
+        // confirmed it: `SEARCH files USING INDEX idx_files_size (size=?)`.
+        //
+        // So every group scanned every file of that size. Measured on a
+        // 1,000,000-file index where the files happened to share one size: the
+        // hashing finished, and the rebuild then ran for over seven hours
+        // without producing a single group, because it was working through
+        // roughly 143,000 groups times 1,000,000 rows.
+        //
+        // Joining on `group_key` instead turns that into one index seek per
+        // file: the key is unique on `duplicate_groups` (migration 027), and it
+        // is exactly the identity the group was upserted under, so membership
+        // cannot disagree with grouping. Matching all three of size, sample
+        // hash and full hash is no looser than the old pair of queries -- two
+        // files with identical full content cannot have different sample
+        // hashes, since the sample is part of the content.
+        //
+        // Files with no sample hash are excluded here for the same reason the
+        // grouping query excludes them: a size-only coincidence is not a
+        // duplicate. A hard link is excluded because it is one file with two
+        // names, and deleting one of them frees nothing.
+        tx.execute(
+            "INSERT INTO duplicate_group_files (group_id, file_id)
+             SELECT g.id, f.id
+             FROM files f
+             JOIN duplicate_groups g
+               ON g.group_key =
+                  f.size || ':' || COALESCE(f.sample_hash, '') || ':' || COALESCE(f.full_hash, '')
+             WHERE f.deleted_at IS NULL
+               AND f.size > 0
+               AND f.sample_hash IS NOT NULL
+               AND f.shares_bytes_with IS NULL",
+            [],
+        )?;
 
         // A group whose copies were deleted or edited apart is no longer a
         // group. Its members go with it through the cascade.
@@ -3092,6 +3113,51 @@ mod tests {
         assert_eq!(
             after[0], before[0],
             "the original group kept its id and its size"
+        );
+    }
+
+    /// The guard for the ten-hour bug.
+    ///
+    /// Membership used to run one query per group, filtering on `size` and
+    /// `full_hash`. There is no index on `full_hash`, so SQLite fell back to
+    /// the `size` prefix of `idx_files_sample_hash` and scanned every file of
+    /// that size, once per group. On a 1,000,000-file index whose files shared
+    /// a size that measured 0.251s per group across 142,857 groups: ten hours.
+    /// The single join takes 5.9 seconds.
+    ///
+    /// A timing assertion here would be flaky, so this asserts the thing that
+    /// actually made it fast: the join resolves through the unique index on
+    /// `group_key`. Change the join and the plan changes with it.
+    #[test]
+    fn membership_resolves_through_the_group_key_index() {
+        let writer = IndexWriter::open_in_memory().expect("failed to open sqlite index");
+        let plan: Vec<String> = writer
+            .connection()
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT g.id, f.id
+                 FROM files f
+                 JOIN duplicate_groups g
+                   ON g.group_key =
+                      f.size || ':' || COALESCE(f.sample_hash, '') || ':' || COALESCE(f.full_hash, '')
+                 WHERE f.deleted_at IS NULL
+                   AND f.size > 0
+                   AND f.sample_hash IS NOT NULL
+                   AND f.shares_bytes_with IS NULL",
+            )
+            .expect("prepare")
+            .query_map([], |row| row.get::<_, String>(3))
+            .expect("plan")
+            .map(Result::unwrap)
+            .collect();
+        let plan = plan.join(" | ");
+        assert!(
+            plan.contains("idx_duplicate_groups_key"),
+            "the join must resolve through the unique group_key index, plan was: {plan}"
+        );
+        assert!(
+            !plan.contains("SCAN duplicate_groups"),
+            "a scan of duplicate_groups per file is the shape this replaced, plan was: {plan}"
         );
     }
 
