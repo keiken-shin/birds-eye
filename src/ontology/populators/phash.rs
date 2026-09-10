@@ -571,7 +571,7 @@ mod tests {
     /// the way every phone writes a portrait photo.
     ///
     /// Built by hand rather than committed as a fixture so the bytes that make
-    /// the test true are visible: `FFE1`, the segment length, `Exif  `, a
+    /// the test true are visible: `FFE1`, the segment length, `Exif\0\0`, a
     /// big-endian TIFF header, and one IFD entry -- tag 0x0112, type SHORT,
     /// value 6 ("rotate 90 clockwise to display").
     fn jpeg_with_orientation_6(image: &image::DynamicImage) -> Vec<u8> {
@@ -581,8 +581,8 @@ mod tests {
             .expect("encode jpeg");
 
         let mut app1: Vec<u8> = vec![0xFF, 0xE1];
-        let mut payload: Vec<u8> = b"Exif  ".to_vec();
-        payload.extend_from_slice(b"MM *"); // big-endian TIFF magic
+        let mut payload: Vec<u8> = b"Exif\0\0".to_vec();
+        payload.extend_from_slice(b"MM\0*"); // big-endian TIFF magic
         payload.extend_from_slice(&8_u32.to_be_bytes()); // IFD0 starts right here
         payload.extend_from_slice(&1_u16.to_be_bytes()); // one entry
         payload.extend_from_slice(&0x0112_u16.to_be_bytes()); // Orientation
