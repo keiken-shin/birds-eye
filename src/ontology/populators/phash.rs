@@ -40,7 +40,7 @@ use crate::ontology::populators::{
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 
@@ -384,16 +384,32 @@ fn band_value(fingerprint: u128, band: usize) -> u64 {
 /// by only ever comparing rows that share an identical band, which by the
 /// pigeonhole argument above is every pair that could possibly be close enough.
 ///
-/// ponytail: a run of rows sharing one band value is compared all-pairs, capped
-/// at MAX_RUN. Ten thousand byte-identical thumbnails would land in one run and
-/// hit that cap. The fix when it matters is to emit one cluster discovery for
-/// the run instead of a pair per combination, which the payload already allows.
+/// A long run is walked as a chain rather than all-pairs. All-pairs is right
+/// while a run is small and quadratic exactly where it must not be: 20,000
+/// byte-identical thumbnails is 200 million comparisons inside one run.
+///
+/// A run only grows past MAX_RUN when a great many rows share a band exactly,
+/// which in practice means their hashes really are alike, and union-find turns
+/// a chain of neighbours into the one cluster they belong in. Rows that are
+/// *not* alike do not need the chain: they disagree on some other band, and
+/// that band gives them a short run of their own where all-pairs still runs.
+///
+/// ponytail: O(n) per long run, and the ceiling is one outlier in the middle of
+/// a long run splitting a pile into two findings instead of one. That is a
+/// worse-looking answer, not a wrong one. Compare against sampled
+/// representatives as well if a real corpus ever shows it.
 fn candidate_pairs(hashes: &[HashRow]) -> Vec<(usize, usize)> {
     const MAX_RUN: usize = 4096;
 
     let fingerprints: Vec<u128> = hashes.iter().map(fingerprint).collect();
     let mut seen: HashSet<(u32, u32)> = HashSet::new();
     let mut pairs = Vec::new();
+    let mut propose = |left: u32, right: u32, out: &mut Vec<(usize, usize)>| {
+        let key = if left < right { (left, right) } else { (right, left) };
+        if seen.insert(key) {
+            out.push((key.0 as usize, key.1 as usize));
+        }
+    };
     // One band at a time, so only one band's worth of keys is ever resident.
     let mut keyed: Vec<(u64, u32)> = Vec::with_capacity(fingerprints.len());
 
@@ -413,17 +429,22 @@ fn candidate_pairs(hashes: &[HashRow]) -> Vec<(usize, usize)> {
             while end < keyed.len() && keyed[end].0 == keyed[start].0 {
                 end += 1;
             }
-            let run = &keyed[start..end.min(start + MAX_RUN)];
-            for (offset, (_, left)) in run.iter().enumerate() {
-                for (_, right) in run.iter().skip(offset + 1) {
-                    let key = if left < right {
-                        (*left, *right)
-                    } else {
-                        (*right, *left)
-                    };
-                    if seen.insert(key) {
-                        pairs.push((key.0 as usize, key.1 as usize));
+            let run = &keyed[start..end];
+            if run.len() <= MAX_RUN {
+                for (offset, (_, left)) in run.iter().enumerate() {
+                    for (_, right) in run.iter().skip(offset + 1) {
+                        propose(*left, *right, &mut pairs);
                     }
+                }
+            } else {
+                // This used to truncate: `keyed[start..start + MAX_RUN]`, then
+                // skip to the end of the run. On 20,000 copies of one image it
+                // compared the first 4,096 and never looked at the other
+                // 15,904, so the finding named a fifth of the pile and read as
+                // if the rest were unaffected. Silently answering about part of
+                // the disk is worse than being slow about all of it.
+                for window in run.windows(2) {
+                    propose(window[0].1, window[1].1, &mut pairs);
                 }
             }
             start = end;
@@ -433,11 +454,24 @@ fn candidate_pairs(hashes: &[HashRow]) -> Vec<(usize, usize)> {
     pairs
 }
 
+/// Group the near-duplicate edges into clusters and record one discovery each.
+///
+/// It used to record one per *pair*. A set of images that all resemble each
+/// other is not N findings, it is one finding about N files, and writing it as
+/// pairs costs N-squared-over-2 rows. Measured on a corpus of 100,000 images
+/// that a perceptual hash could not tell apart: 772,142 rows written over 28
+/// hours, still climbing when it was killed. Nobody can read 772,142 findings,
+/// so the run was not merely slow, it was producing something useless.
+///
+/// The payload always allowed a list of files; only the writer insisted on two.
 fn emit_near_duplicate_discoveries(
     conn: &Connection,
     ctx: &mut PopulatorContext,
 ) -> Result<(), PopulatorError> {
     let hashes = load_hashes(conn)?;
+    let mut parent: Vec<usize> = (0..hashes.len()).collect();
+    let mut edges: Vec<(usize, usize, u32)> = Vec::new();
+
     for (left_idx, right_idx) in candidate_pairs(&hashes) {
         let left = &hashes[left_idx];
         let right = &hashes[right_idx];
@@ -449,20 +483,78 @@ fn emit_near_duplicate_discoveries(
         if distance > NEAR_DUPLICATE_DISTANCE {
             continue;
         }
+        union(&mut parent, left_idx, right_idx);
+        edges.push((left_idx, right_idx, distance));
+    }
+
+    // The distance recorded for a cluster is its loosest link, so the
+    // confidence attached to it is the weakest claim it rests on rather than
+    // the strongest. A group is only as sure as the pair that barely made it.
+    let mut worst: HashMap<usize, u32> = HashMap::new();
+    for (left_idx, _, distance) in &edges {
+        let root = find(&mut parent, *left_idx);
+        let entry = worst.entry(root).or_insert(0);
+        *entry = (*entry).max(*distance);
+    }
+
+    // Every image assigned to its cluster, walked in index order.
+    //
+    // Deliberately a scan over all of them rather than a walk over the edges.
+    // The edge version needed a `contains` check to avoid adding a file twice,
+    // which is a linear scan inside a loop over edges -- fine for a pair,
+    // quadratic for the very cluster sizes this change exists to survive. It
+    // also inherited its order from whatever order edges happened to arrive in,
+    // so the payload was only stable by luck. `load_hashes` orders by file id,
+    // so scanning indices in order puts the members in ascending file id with
+    // nothing to sort afterwards.
+    let mut members: HashMap<usize, Vec<usize>> = HashMap::new();
+    for index in 0..hashes.len() {
+        let root = find(&mut parent, index);
+        members.entry(root).or_default().push(index);
+    }
+
+    // Deterministic order so re-running produces byte-identical payloads and
+    // the existence check actually recognises its own earlier work.
+    let mut roots: Vec<usize> = members.keys().copied().collect();
+    roots.sort_unstable();
+
+    // No cap on how many clusters are recorded, deliberately.
+    //
+    // There was one, set at 5,000, and it was a mistake worth writing down. On
+    // 100,000 images holding 50,000 genuine pairs it recorded 5,000 findings
+    // and silently dropped 45,000 true ones -- the same failure as reporting a
+    // capped list length as a count. Hiding nine tenths of a correct answer is
+    // not a safeguard.
+    //
+    // Nothing needs capping, because clustering already bounds the output by
+    // the corpus rather than by the square of it: every image belongs to
+    // exactly one cluster, so a run can never write more than half as many
+    // findings as there are images, and a degenerate bucket -- the case that
+    // produced 772,142 rows -- collapses to a single row.
+    for root in roots {
+        let group = members.remove(&root).unwrap_or_default();
+        // Most images belong to no cluster at all.
+        if group.len() < 2 {
+            continue;
+        }
+
+        let files: Vec<NearDuplicateFile> = group
+            .iter()
+            .map(|index| NearDuplicateFile {
+                file_id: hashes[*index].file_id,
+                path: hashes[*index].path.clone(),
+                size: hashes[*index].size.max(0) as u64,
+            })
+            .collect();
+        // Keeping the largest and dropping the rest, which is what the
+        // duplicates view already means by reclaimable. For a two-file cluster
+        // this is the smaller file, exactly as before.
+        let total: u64 = files.iter().map(|f| f.size).sum();
+        let largest: u64 = files.iter().map(|f| f.size).max().unwrap_or(0);
+        let distance = worst.get(&root).copied().unwrap_or(0);
 
         let payload = NearDuplicatePayload {
-            files: vec![
-                NearDuplicateFile {
-                    file_id: left.file_id,
-                    path: left.path.clone(),
-                    size: left.size.max(0) as u64,
-                },
-                NearDuplicateFile {
-                    file_id: right.file_id,
-                    path: right.path.clone(),
-                    size: right.size.max(0) as u64,
-                },
-            ],
+            files,
             hamming_distance: distance,
         };
         let payload_json = serde_json::to_string(&payload)?;
@@ -475,12 +567,32 @@ fn emit_near_duplicate_discoveries(
                 kind: "near-duplicate-cluster",
                 payload_json: &payload_json,
                 confidence: confidence_for_distance(distance),
-                potential_bytes_unlocked: left.size.min(right.size).max(0) as u64,
+                potential_bytes_unlocked: total - largest,
             },
         )?;
         ctx.note_discovery();
     }
     Ok(())
+}
+
+/// Union-find over image indices. Small enough to spell out; a dependency for
+/// forty lines would be the wrong trade.
+fn find(parent: &mut [usize], mut index: usize) -> usize {
+    while parent[index] != index {
+        parent[index] = parent[parent[index]];
+        index = parent[index];
+    }
+    index
+}
+
+fn union(parent: &mut [usize], left: usize, right: usize) {
+    let (left, right) = (find(parent, left), find(parent, right));
+    if left != right {
+        // Lower index wins, so the root of a cluster does not depend on the
+        // order edges happened to arrive in.
+        let (keep, drop) = if left < right { (left, right) } else { (right, left) };
+        parent[drop] = keep;
+    }
 }
 
 fn load_hashes(conn: &Connection) -> Result<Vec<HashRow>, PopulatorError> {
@@ -989,6 +1101,281 @@ mod tests {
             (id, path, format!("file-{id}.{extension}"), extension, size),
         )
         .unwrap();
+    }
+
+    /// Seed N rows that all carry the same hash, without decoding anything.
+    fn seed_identical_hashes(conn: &Connection, count: i64) {
+        for id in 1..=count {
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, indexed_at)
+                 VALUES (?1, 1, ?2, ?3, 1000, 0)",
+                (id, format!("/root/img{id}.jpg"), format!("img{id}.jpg")),
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO ontology_perceptual_hashes (file_id, phash, dhash, computed_at)
+                 VALUES (?1, ?2, ?3, 0)",
+                (id, vec![7_u8; 8], vec![9_u8; 8]),
+            )
+            .unwrap();
+        }
+    }
+
+    /// The 28-hour bug, in miniature.
+    ///
+    /// Images that all resemble each other are one finding about N files, not
+    /// N-squared-over-2 findings about pairs. Writing them as pairs is how a
+    /// 100,000-image corpus produced 772,142 rows and was still going when it
+    /// was killed -- a result nobody could read even if it had finished.
+    #[test]
+    fn a_group_of_alike_images_is_one_finding_not_a_row_per_pair() {
+        let conn = migrated_conn();
+        seed_identical_hashes(&conn, 40);
+
+        emit_near_duplicate_discoveries(&conn, &mut context()).unwrap();
+
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_discoveries", [], |r| r.get(0))
+            .unwrap();
+        // As pairs this would have been 40*39/2 = 780.
+        assert_eq!(rows, 1, "40 alike images are one cluster, not 780 pairs");
+
+        let payload: String = conn
+            .query_row("SELECT payload FROM ontology_discoveries", [], |r| r.get(0))
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        let files = parsed["files"].as_array().unwrap();
+        assert_eq!(files.len(), 40, "every member belongs to the finding");
+
+        // Ascending file id, which is what makes the payload byte-identical
+        // across runs and makes `files[0]` -- the file every relation is
+        // graduated from -- a stable choice rather than a hash-order accident.
+        let ids: Vec<i64> = files.iter().map(|f| f["file_id"].as_i64().unwrap()).collect();
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        assert_eq!(ids, sorted, "members must be listed in a stable order");
+    }
+
+    /// Re-running must recognise its own earlier work. It only can if the
+    /// payload comes out byte-identical, which needs a deterministic member
+    /// order -- the members arrive from a hash map.
+    /// A pile bigger than MAX_RUN must be named in full.
+    ///
+    /// Every one of these rows has the same fingerprint, so they all land in a
+    /// single run of 4,200 -- past the 4,096 all-pairs budget. The old code
+    /// truncated the run there and jumped to its end, so 104 files were never
+    /// compared to anything and the finding quietly described 4,096 of them.
+    /// Measured on disk before this fix: 20,000 identical images produced one
+    /// finding naming 4,096.
+    /// The index that stopped emission being quadratic must stay in use.
+    ///
+    /// `discovery_exists` runs once per candidate finding. Before migration 029
+    /// the only usable index was `(kind, status)`, so SQLite narrowed on kind
+    /// and then compared the payload of every row already carrying it: the
+    /// ten-thousandth discovery read nine thousand nine hundred and ninety-nine
+    /// rows before it could be written. A timing assertion would be flaky. The
+    /// query plan is the thing that actually changed, so assert that.
+    #[test]
+    fn the_already_recorded_check_is_a_lookup_not_a_scan() {
+        let conn = migrated_conn();
+        let plan: Vec<String> = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT 1 FROM ontology_discoveries
+                 WHERE kind = ?1 AND payload = ?2 LIMIT 1",
+            )
+            .unwrap()
+            .query_map(("near-duplicate-cluster", "{}"), |row| {
+                row.get::<_, String>(3)
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let plan = plan.join(" | ");
+        assert!(
+            plan.contains("idx_discoveries_kind_payload"),
+            "the existence check must resolve through the kind+payload index, plan was: {plan}"
+        );
+    }
+
+    #[test]
+    fn a_pile_larger_than_the_all_pairs_budget_is_still_named_in_full() {
+        let conn = migrated_conn();
+        seed_identical_hashes(&conn, 4_200);
+
+        emit_near_duplicate_discoveries(&conn, &mut context()).unwrap();
+
+        let payload: String = conn
+            .query_row("SELECT payload FROM ontology_discoveries", [], |r| r.get(0))
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(
+            parsed["files"].as_array().unwrap().len(),
+            4_200,
+            "the run was truncated and the finding covers only part of the pile"
+        );
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_discoveries", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "one pile is one finding");
+    }
+
+    /// Two piles tangled inside one over-long run are still told apart.
+    ///
+    /// Every row shares a pHash, so the pHash bands put all 4,200 in one run,
+    /// past the all-pairs budget. Their dHashes alternate between two values 64
+    /// bits apart, so neighbours in that run are never alike and the chain
+    /// through it correctly yields nothing.
+    ///
+    /// Banding is what saves this, and that is the point worth pinning: the
+    /// dHash bands give each pile a short run of its own, where all-pairs still
+    /// runs and finds it. Two findings of 2,100, not one blur of 4,200 and not
+    /// the nothing a single over-long run would suggest.
+    #[test]
+    fn two_piles_tangled_in_one_over_long_run_are_still_told_apart() {
+        let conn = migrated_conn();
+        for id in 1..=4_200_i64 {
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, indexed_at)
+                 VALUES (?1, 1, ?2, ?3, 1000, 0)",
+                (id, format!("/root/mix{id}.jpg"), format!("mix{id}.jpg")),
+            )
+            .unwrap();
+            let dhash = if id % 2 == 0 { vec![0x00_u8; 8] } else { vec![0xFF_u8; 8] };
+            conn.execute(
+                "INSERT INTO ontology_perceptual_hashes (file_id, phash, dhash, computed_at)
+                 VALUES (?1, ?2, ?3, 0)",
+                (id, vec![0x0F_u8; 8], dhash),
+            )
+            .unwrap();
+        }
+
+        emit_near_duplicate_discoveries(&conn, &mut context()).unwrap();
+
+        let payloads: Vec<String> = conn
+            .prepare("SELECT payload FROM ontology_discoveries")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(payloads.len(), 2, "each pile is its own finding");
+        for payload in &payloads {
+            let parsed: serde_json::Value = serde_json::from_str(payload).unwrap();
+            assert_eq!(
+                parsed["files"].as_array().unwrap().len(),
+                2_100,
+                "a pile was blurred into the other or cut short"
+            );
+        }
+    }
+
+    #[test]
+    fn running_twice_does_not_write_the_cluster_again() {
+        let conn = migrated_conn();
+        seed_identical_hashes(&conn, 12);
+
+        emit_near_duplicate_discoveries(&conn, &mut context()).unwrap();
+        emit_near_duplicate_discoveries(&conn, &mut context()).unwrap();
+
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_discoveries", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "the second run recognised the first run's cluster");
+    }
+
+    /// Every image lands in the member map, including the overwhelming
+    /// majority that belong to no cluster at all. None of those may reach the
+    /// discovery table: a finding about one file is not a finding.
+    #[test]
+    fn images_that_resemble_nothing_produce_no_findings() {
+        let conn = migrated_conn();
+        // One real pair, plus many images resembling nothing. The lone fills
+        // start at 100 so none of them lands on the pair's 0x0F by accident --
+        // two 8-byte runs of the same byte are distance 0, and a stray match
+        // would quietly turn this into a three-member cluster.
+        for id in 1..=60_i64 {
+            let fill = if id <= 2 { 0x0F_u8 } else { (id + 100) as u8 };
+            let dhash = vec![fill; 8];
+            let phash = vec![fill; 8];
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, indexed_at)
+                 VALUES (?1, 1, ?2, ?3, 1000, 0)",
+                (id, format!("/root/l{id}.jpg"), format!("l{id}.jpg")),
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO ontology_perceptual_hashes (file_id, phash, dhash, computed_at)
+                 VALUES (?1, ?2, ?3, 0)",
+                (id, phash, dhash),
+            )
+            .unwrap();
+        }
+
+        emit_near_duplicate_discoveries(&conn, &mut context()).unwrap();
+
+        let payloads: Vec<String> = conn
+            .prepare("SELECT payload FROM ontology_discoveries")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(
+            payloads.len(),
+            1,
+            "58 images resembling nothing produced findings of their own"
+        );
+        for payload in &payloads {
+            let parsed: serde_json::Value = serde_json::from_str(payload).unwrap();
+            assert!(
+                parsed["files"].as_array().unwrap().len() >= 2,
+                "a finding about one file is not a finding"
+            );
+        }
+    }
+
+    /// Clustering must not fuse images that merely got compared.
+    ///
+    /// The prefilter proposes any two rows sharing one band, which is the point
+    /// of it -- it is deliberately generous and the distance check is what
+    /// decides. So these four share a pHash (guaranteeing they are proposed to
+    /// each other) and differ completely in dHash, putting every pair far past
+    /// the threshold. Nothing may be recorded.
+    ///
+    /// An earlier version of this test used hashes that were never proposed in
+    /// the first place, so it passed with the distance check deleted.
+    #[test]
+    fn images_that_are_compared_but_unalike_are_not_grouped() {
+        let conn = migrated_conn();
+        for (id, dhash_fill) in [(1_i64, 0x00_u8), (2, 0xFF), (3, 0x0F), (4, 0xF0)] {
+            conn.execute(
+                "INSERT INTO files (id, folder_id, path, name, size, indexed_at)
+                 VALUES (?1, 1, ?2, ?3, 1000, 0)",
+                (id, format!("/root/i{id}.jpg"), format!("i{id}.jpg")),
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO ontology_perceptual_hashes (file_id, phash, dhash, computed_at)
+                 VALUES (?1, ?2, ?3, 0)",
+                (id, vec![0x5A_u8; 8], vec![dhash_fill; 8]),
+            )
+            .unwrap();
+        }
+
+        // The prefilter must actually propose these, or the test proves nothing.
+        let hashes = load_hashes(&conn).unwrap();
+        assert!(
+            !candidate_pairs(&hashes).is_empty(),
+            "the prefilter must propose these, otherwise the distance check is never reached"
+        );
+
+        emit_near_duplicate_discoveries(&conn, &mut context()).unwrap();
+
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ontology_discoveries", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "far-apart images must not be grouped");
     }
 
     #[test]

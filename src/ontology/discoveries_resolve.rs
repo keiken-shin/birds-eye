@@ -121,25 +121,30 @@ fn is_non_graduating(kind: &str) -> bool {
     NON_GRADUATING_KINDS.contains(&kind)
 }
 
-/// (subject_entity, predicate, object_entity, optional role_to_assert) for a discovery.
-fn graduation_plan(
-    conn: &Connection,
-    d: &Discovery,
-) -> Result<(i64, &'static str, i64, Option<&'static str>), OntologyError> {
+/// One entry per relation a discovery graduates into:
+/// (subject_entity, predicate, object_entity, optional role_to_assert).
+///
+/// A list rather than a single triple because a near-duplicate cluster is one
+/// finding about N files. It used to relate `files[0]` to `files[1]` and drop
+/// the rest on the floor -- fine while the emitter only ever wrote pairs, and
+/// silent data loss the moment it wrote real clusters.
+type GraduationPlan = Vec<(i64, &'static str, i64, Option<&'static str>)>;
+
+fn graduation_plan(conn: &Connection, d: &Discovery) -> Result<GraduationPlan, OntologyError> {
     match d.kind.as_str() {
         "derivedFrom-pattern" => {
             let p: DerivedFromPayload = serde_json::from_str(&d.payload)
                 .map_err(|e| OntologyError::Populator(format!("bad derivedFrom payload: {e}")))?;
             let subject = entity_id_for_file(conn, p.derivative_file_id)?;
             let object = entity_id_for_file(conn, p.source_file_id)?;
-            Ok((subject, predicates::DERIVED_FROM, object, Some("derivative")))
+            Ok(vec![(subject, predicates::DERIVED_FROM, object, Some("derivative"))])
         }
         "backupOf-pair" => {
             let p: BackupOfPayload = serde_json::from_str(&d.payload)
                 .map_err(|e| OntologyError::Populator(format!("bad backupOf payload: {e}")))?;
             let subject = entity_id_for_file(conn, p.backup_file_id)?;
             let object = entity_id_for_file(conn, p.origin_file_id)?;
-            Ok((subject, predicates::BACKUP_OF, object, Some("backup")))
+            Ok(vec![(subject, predicates::BACKUP_OF, object, Some("backup"))])
         }
         "near-duplicate-cluster" => {
             let p: NearDuplicatePayload = serde_json::from_str(&d.payload).map_err(|e| {
@@ -150,9 +155,17 @@ fn graduation_plan(
                     "near-duplicate payload requires at least two files".to_owned(),
                 ));
             }
+            // A star from the first file rather than every pair: N-1 relations
+            // instead of N-squared-over-2, and since nearDuplicateOf is
+            // asserted both ways below, every member still reaches every other
+            // through one hop.
             let subject = entity_id_for_file(conn, p.files[0].file_id)?;
-            let object = entity_id_for_file(conn, p.files[1].file_id)?;
-            Ok((subject, predicates::NEAR_DUPLICATE_OF, object, None))
+            let mut plan = GraduationPlan::new();
+            for file in &p.files[1..] {
+                let object = entity_id_for_file(conn, file.file_id)?;
+                plan.push((subject, predicates::NEAR_DUPLICATE_OF, object, None));
+            }
+            Ok(plan)
         }
         other => Err(OntologyError::Populator(format!(
             "discovery kind {other} is not user-confirmable in Wave 1"
@@ -170,13 +183,14 @@ pub fn confirm_discovery(conn: &Connection, id: i64) -> Result<(), OntologyError
     if is_non_graduating(&d.kind) {
         return set_status(conn, id, DiscoveryStatus::Confirmed);
     }
-    let (subject, predicate, object, role) = graduation_plan(conn, &d)?;
-    if let Some(role) = role {
-        assert_user_role(conn, subject, role)?;
-    }
-    assert_user_relation(conn, subject, predicate, object)?;
-    if predicate == predicates::NEAR_DUPLICATE_OF {
-        assert_user_relation(conn, object, predicate, subject)?;
+    for (subject, predicate, object, role) in graduation_plan(conn, &d)? {
+        if let Some(role) = role {
+            assert_user_role(conn, subject, role)?;
+        }
+        assert_user_relation(conn, subject, predicate, object)?;
+        if predicate == predicates::NEAR_DUPLICATE_OF {
+            assert_user_relation(conn, object, predicate, subject)?;
+        }
     }
     set_status(conn, id, DiscoveryStatus::Confirmed)
 }
@@ -195,11 +209,14 @@ pub fn reject_discovery(
     if is_non_graduating(&d.kind) {
         return set_status(conn, id, DiscoveryStatus::Rejected);
     }
-    let (subject, predicate, object, _role) = graduation_plan(conn, &d)?;
-    // Guard: skip the insert if this pair is already negatively asserted (e.g.
-    // rejected via a different discovery) to prevent duplicate rows.
-    if !crate::ontology::negative::is_rejected_pair(conn, subject, predicate, object)? {
-        reject_pair(conn, subject, predicate, object, reason)?;
+    // Rejecting a cluster rejects every relation it would have created.
+    // Rejecting only the first pair would leave the rest to be proposed again.
+    for (subject, predicate, object, _role) in graduation_plan(conn, &d)? {
+        // Guard: skip the insert if this pair is already negatively asserted
+        // (e.g. rejected via a different discovery) to prevent duplicate rows.
+        if !crate::ontology::negative::is_rejected_pair(conn, subject, predicate, object)? {
+            reject_pair(conn, subject, predicate, object, reason)?;
+        }
     }
     set_status(conn, id, DiscoveryStatus::Rejected)
 }
@@ -462,6 +479,92 @@ mod tests {
             get_discovery(&conn, d.id).unwrap().unwrap().status,
             DiscoveryStatus::Rejected
         );
+    }
+
+    fn seed_cluster(conn: &Connection, prefix: &str) -> i64 {
+        for id in 1..=4_i64 {
+            seed_file(conn, id, &format!("/photos/{prefix}{id}.jpg"));
+        }
+        let payload = format!(
+            r#"{{"files":[{{"file_id":1,"path":"/photos/{prefix}1.jpg","size":100}},
+                          {{"file_id":2,"path":"/photos/{prefix}2.jpg","size":98}},
+                          {{"file_id":3,"path":"/photos/{prefix}3.jpg","size":97}},
+                          {{"file_id":4,"path":"/photos/{prefix}4.jpg","size":96}}],
+               "hamming_distance":6}}"#
+        );
+        insert_discovery(
+            conn,
+            &NewDiscovery {
+                kind: "near-duplicate-cluster",
+                payload_json: &payload,
+                confidence: 0.8,
+                potential_bytes_unlocked: 291,
+            },
+        )
+        .unwrap()
+        .id
+    }
+
+    fn entity_ids(conn: &Connection) -> Vec<i64> {
+        (1..=4_i64)
+            .map(|f| find_entity_for_file(conn, f).unwrap().unwrap().id)
+            .collect()
+    }
+
+    /// Confirming a cluster must reach every member, not just the first pair.
+    ///
+    /// The plan used to relate `files[0]` to `files[1]` and drop the rest.
+    /// That was harmless while the emitter only ever wrote pairs; the moment it
+    /// wrote real clusters it became silent data loss. A two-file test cannot
+    /// see that, which is why this one uses four.
+    #[test]
+    fn confirming_a_cluster_reaches_every_member_not_just_the_first_pair() {
+        let conn = migrated_conn();
+        let id = seed_cluster(&conn, "burst");
+
+        confirm_discovery(&conn, id).unwrap();
+
+        let ids = entity_ids(&conn);
+        let mut reached: Vec<i64> = outbound(&conn, ids[0], predicates::NEAR_DUPLICATE_OF)
+            .unwrap()
+            .iter()
+            .map(|r| r.object_id)
+            .collect();
+        reached.sort_unstable();
+        let mut expected = ids[1..].to_vec();
+        expected.sort_unstable();
+        assert_eq!(reached, expected, "a member of the cluster was left out");
+        // Each member points back, so any two members are one hop apart.
+        for other in &ids[1..] {
+            let back = outbound(&conn, *other, predicates::NEAR_DUPLICATE_OF).unwrap();
+            assert_eq!(back.len(), 1);
+            assert_eq!(back[0].object_id, ids[0]);
+        }
+    }
+
+    /// Rejecting a cluster must block every pair it would have created.
+    /// Blocking only the first leaves the rest to be proposed again next scan,
+    /// so the user is asked about the same photos forever.
+    #[test]
+    fn rejecting_a_cluster_blocks_every_member_not_just_the_first_pair() {
+        let conn = migrated_conn();
+        let id = seed_cluster(&conn, "shot");
+
+        reject_discovery(&conn, id, Some("a burst, kept on purpose")).unwrap();
+
+        let ids = entity_ids(&conn);
+        for other in &ids[1..] {
+            assert!(
+                crate::ontology::negative::is_rejected_pair(
+                    &conn,
+                    ids[0],
+                    predicates::NEAR_DUPLICATE_OF,
+                    *other
+                )
+                .unwrap(),
+                "member {other} was left unblocked and will be proposed again"
+            );
+        }
     }
 
     #[test]

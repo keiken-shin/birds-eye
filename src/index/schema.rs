@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: u32 = 28;
+pub const CURRENT_SCHEMA_VERSION: u32 = 29;
 
 // The connection pragmas that used to sit here now live in
 // `open_index_connection`. They were never schema: `foreign_keys` and
@@ -1128,6 +1128,29 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at)
 VALUES (28, strftime('%s', 'now'));
 "#;
 
+/// Migration 029: make "have I already recorded this discovery?" a lookup.
+///
+/// Every populator that emits a discovery first asks whether an identical one
+/// exists, matching on `kind` and the exact `payload`. The only index was
+/// `idx_discoveries_kind_status(kind, status)`, so the query narrowed on kind
+/// and then compared the payload of every row already carrying that kind.
+/// EXPLAIN QUERY PLAN on a real index: `SEARCH ontology_discoveries USING INDEX
+/// idx_discoveries_kind_status (kind=?)`.
+///
+/// That makes emission quadratic in its own output: the ten-thousandth
+/// discovery scans nine thousand nine hundred and ninety-nine rows before it
+/// can be written. Measured on 50,000 near-duplicate discoveries, that is
+/// roughly 1.25 billion row visits, and it is most of why analysing a
+/// 100,000-image corpus took 312 seconds -- and why a degenerate one never
+/// finished at all.
+pub const MIGRATION_029: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_discoveries_kind_payload
+  ON ontology_discoveries(kind, payload);
+
+INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+VALUES (29, strftime('%s', 'now'));
+"#;
+
 pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -1157,6 +1180,7 @@ pub const ALL_MIGRATIONS: &[(u32, &str)] = &[
     (26, MIGRATION_026),
     (27, MIGRATION_027),
     (28, MIGRATION_028),
+    (29, MIGRATION_029),
 ];
 
 #[cfg(test)]
@@ -1248,8 +1272,8 @@ mod tests {
 
     #[test]
     fn exposes_current_migration() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 28);
-        assert_eq!(ALL_MIGRATIONS.len(), 28);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 29);
+        assert_eq!(ALL_MIGRATIONS.len(), 29);
     }
 
     #[test]
