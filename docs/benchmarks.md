@@ -15,10 +15,37 @@ Quote the end-to-end one unless you are specifically talking about the walk.
 
 | corpus | files | bytes | unreadable | scan ms | rescan ms | scan files/sec end-to-end | rescan files/sec end-to-end | scan files/sec walk only | rescan files/sec walk only | analysis ms |
 |---|---|---|---|---|---|---|---|---|---|---|
-| files-100k | 100000 | 625048164 | 0 | 42905 | 16470 | 2331 | 6072 | 398771 | 398669 | 9377 |
-| images-100k | 100000 | 80898754 | 0 | 31075 | 17561 | 3218 | 5694 | 5053 | 199649 | 312007 |
-| binaries-10k | 10000 | 10485760000 | 0 | 3326 | 1190 | 3007 | 8403 | 39917 | 39867 | 921 |
-| files-1m | 1000000 | 6250620904 | 0 | 511743 | 216673 | 1954 | 4615 | 3984838 | 3988677 | 97883 |
+| files-100k | 100000 | 625048164 | 0 | 18845 | 17669 | 5306 | 5660 | 398980 | 398554 | 9472 |
+| images-100k | 100000 | 80898754 | 0 | 27064 | 38859 | 3695 | 2573 | 199625 | 199583 | 78478 |
+| binaries-10k | 10000 | 10485760000 | 0 | 6130 | 2250 | 1631 | 4444 | 39752 | 39870 | 1595 |
+| files-1m | 1000000 | 6250620904 | 0 | 579191 | 293270 | 1727 | 3410 | 3982667 | 3988507 | 102177 |
+
+## Comparing this table to an earlier recording
+
+The **analysis** column is the one that reflects a change in the code. The scan
+and rescan columns mostly reflect the machine, so do not read a change in them
+as a change in the product.
+
+The scan and rescan columns move with how warm the Windows file cache is, and
+these corpora had been scanned many times over by the time this table was
+recorded. `files-100k` scanned in 42.9 s the first time it was ever measured
+and 18.8 s here, on identical code and identical data. Neither number is
+wrong. They measure different cache states, and there is no supported way to
+force a cold one from a script.
+
+Where the index file lives matters too. This script keeps it under `$env:TEMP`,
+which is on C: on this machine, while the corpora are on D:. An ad-hoc run that
+put the index on D: beside the corpus analysed the same 100,000 images in
+51,473 ms rather than the 78,478 ms in the table. Both are post-fix and both
+are real. The cause of the spread was not established, so do not attribute it
+to the drive without measuring it.
+
+Compare scan times only against a run you know the cache state and index
+location of, and say what they were.
+
+Leave room for the write-ahead log, not just the index. Sampled every 30
+seconds through the 1,000,000-file run, the WAL peaked at **279 MB** beside a
+finished index of about 800 MB.
 
 ## Locked files
 
@@ -38,6 +65,24 @@ read.
 
 This case found issue #83: the hash-failure count was derived from the capped
 row list, so 1,000 failures were reported as 500.
+
+## A pile of identical images
+
+20,000 byte-identical copies of one JPEG.
+That is the shape a thumbnail cache, a burst-shot set, or an exported sprite sheet takes on a real disk.
+
+```
+scan             250 ms
+analysis       6,216 ms
+findings             1, naming all 20,000 files
+```
+
+This is the case that ran 28 hours without finishing.
+Two things had to be true for the answer to be right rather than merely fast.
+
+One finding, not a row per pair: the pair-per-combination version wrote 772,142 rows and was still climbing when it was killed.
+And a finding that names *every* member: an intermediate version clustered correctly but still truncated a long run at 4,096, so it produced one finding naming 4,096 of the 20,000 and reading as though the other 15,904 were unaffected.
+Both are issue #81.
 
 ## Not measured
 
@@ -59,14 +104,17 @@ Two of them were not measurements at first, they were bug reports.
   went from a measured 10.0 hours to 5.9 seconds.
 - The 100,000-image analysis originally ran **28 hours** without finishing.
   Half of that was a corpus whose images were all the same picture to a
-  perceptual hash; the other half is issue #81, which is still open.
+  perceptual hash. The other half was issue #81: three defects in the
+  near-duplicate pass, now fixed. On the same corpus the analysis column went
+  from 312,007 ms to 78,478 ms, and the pass now reports 50,000 findings
+  covering all 100,000 files, in place of 772,142 rows nobody could have read.
 
 ## Reading the table
 
-Cost is per file, not per byte. 10.5 GB in 10,000 files scans in 3.3 seconds;
-6.25 GB in 1,000,000 files takes 512 seconds. Anyone reasoning about scan time
+Cost is per file, not per byte. 10.5 GB in 10,000 files scans in 6.1 seconds;
+6.25 GB in 1,000,000 files takes 579 seconds. Anyone reasoning about scan time
 should count files, not gigabytes.
 
-The walk-only rate for images is low (5,053/sec) because those files are tiny
-and numerous in deep directories; the walk-only rate is not a useful headline
-figure in any case. Use end-to-end.
+The walk-only column is not a useful headline figure. It counts the directory
+walk and nothing after it, so it says 3,982,667 files/sec for the 1,000,000-file
+corpus that took 579 seconds end to end. Use end-to-end.
